@@ -57,6 +57,11 @@ if(MEMORIA_BUILD_PLUGIN)
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
     target_link_libraries(memoria PRIVATE memoria_core)
+    # The SDK helper clears the global flags, /EHsc among them, so the core
+    # gets the plugin's exception model back explicitly.
+    target_compile_options(memoria_core PRIVATE /EHa)
+    # C5298: a stray control character in the SDK's own d3d8 dxfile.h.
+    target_compile_options(memoria PRIVATE /wd5298)
 endif()
 
 if(MEMORIA_BUILD_TESTS)
