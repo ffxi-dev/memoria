@@ -8,6 +8,9 @@ on:
 
 jobs:
   plugin:
+    # The shared workflow's release job attaches the DLL to a release.
+    permissions:
+      contents: write
     uses: sruon/Ashita4-plugin-ci/.github/workflows/build-plugin.yml@v1.1
     with:
       targets: memoria
