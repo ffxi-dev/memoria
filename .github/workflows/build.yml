@@ -1,0 +1,18 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  plugin:
+    uses: sruon/Ashita4-plugin-ci/.github/workflows/build-plugin.yml@v1.1
+    with:
+      targets: memoria
+      output-dir-variable: MEMORIA_OUTPUT_DIR
+      cmake-args: -DMEMORIA_BUILD_TESTS=OFF
+      private-owner: ffxi-dev
+    secrets:
+      ssh-key: ${{ secrets.XICAP_DEPLOY_KEY }}

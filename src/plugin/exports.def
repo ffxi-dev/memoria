@@ -1,0 +1,4 @@
+LIBRARY "Memoria"
+EXPORTS
+    expCreatePlugin             @1
+    expGetInterfaceVersion      @2
