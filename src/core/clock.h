@@ -6,8 +6,7 @@
 namespace memoria
 {
 
-// Packet timestamps: the wall clock read once, then a monotonic clock, so a
-// change to the PC's clock never moves them backwards or makes them jump.
+// The wall clock read once, then a monotonic clock: a change to the PC's clock never moves packet timestamps.
 class Clock
 {
 public:
@@ -16,8 +15,7 @@ public:
     Clock();
     Clock(Source wallMs, Source steadyMs);
 
-    // Milliseconds since the Unix epoch, in UTC.
-    [[nodiscard]] auto nowMs() const -> uint64_t;
+    [[nodiscard]] auto nowMs() const -> uint64_t; // since the Unix epoch, UTC
 
 private:
     Source   steadyMs_;

@@ -1,20 +1,22 @@
 #include "core/uploader.h"
 
-#include "core/sha256.h"
+#include <picosha2.h>
 
 #include <algorithm>
 #include <charconv>
 #include <format>
 #include <fstream>
+#include <ranges>
 #include <sstream>
+#include <utility>
 
 namespace memoria
 {
 namespace
 {
 
-constexpr uint64_t HEADER_SIZE = 384;     // xicap format 3; Mogsafe refuses a first append without it
-constexpr uint64_t CHUNK_SIZE  = 1 << 20; // one request stays short on a slow uplink
+constexpr uint64_t HEADER_SIZE = 384; // Mogsafe refuses a first append without the whole xicap header
+constexpr uint64_t CHUNK_SIZE  = 1 << 20;
 constexpr auto     STATE_FILE  = "uploads.txt";
 constexpr auto     MAX_WAIT    = std::chrono::minutes(5);
 
@@ -22,11 +24,7 @@ auto parseU64(std::string_view s) -> std::optional<uint64_t>
 {
     uint64_t v{};
     const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || end != s.data() + s.size())
-    {
-        return std::nullopt;
-    }
-    return v;
+    return ec == std::errc{} && end == s.data() + s.size() ? std::optional(v) : std::nullopt;
 }
 
 auto header(const HttpResponse& res, const std::string& name) -> std::string
@@ -44,6 +42,23 @@ auto readRange(const std::filesystem::path& path, uint64_t offset, uint64_t n) -
         return std::nullopt;
     }
     return buf;
+}
+
+// Only the first size bytes: the file may still be growing.
+auto sha256(const std::filesystem::path& path, uint64_t size) -> std::optional<std::string>
+{
+    picosha2::hash256_one_by_one hasher;
+    for (uint64_t offset = 0; offset < size; offset += CHUNK_SIZE)
+    {
+        const auto chunk = readRange(path, offset, std::min(size - offset, CHUNK_SIZE));
+        if (!chunk)
+        {
+            return std::nullopt;
+        }
+        hasher.process(chunk->begin(), chunk->end());
+    }
+    hasher.finish();
+    return picosha2::get_hash_hex_string(hasher);
 }
 
 } // namespace
@@ -69,39 +84,40 @@ Uploader::~Uploader()
 
 auto Uploader::start() -> void
 {
-    thread_ = std::thread([this]
-                          {
-                              auto wait = options_.every;
-                              while (true)
-                              {
-                                  bool failed = true;
-                                  try
-                                  {
-                                      failed = (!options_.mayRun || options_.mayRun()) && pass().has_value();
-                                  }
-                                  catch (const std::exception&) // out of memory, or the folder went away
-                                  {
-                                  }
-                                  // Mogsafe down: wait twice as long after each failed pass, up to five minutes.
-                                  wait = failed ? std::min<std::chrono::milliseconds>(wait * 2, MAX_WAIT) : options_.every;
-                                  std::unique_lock lock(wakeMutex_);
-                                  if (wake_.wait_for(lock, wait, [this]
-                                                     {
-                                                         return stopping_.load();
-                                                     }))
-                                  {
-                                      return;
-                                  }
-                              }
-                          });
+    thread_ = std::thread(&Uploader::run, this);
+}
+
+auto Uploader::run() -> void
+{
+    auto wait = options_.every;
+    while (true)
+    {
+        bool failed = true;
+        try
+        {
+            failed = (!options_.mayRun || options_.mayRun()) && pass().has_value();
+        }
+        catch (const std::exception&) // out of memory, or the folder went away
+        {
+        }
+        wait = failed ? std::min<std::chrono::milliseconds>(wait * 2, MAX_WAIT) : options_.every;
+
+        std::unique_lock lock(wakeMutex_);
+        if (wake_.wait_for(lock, wait, [this]
+                           {
+                               return stopping_.load();
+                           }))
+        {
+            return;
+        }
+    }
 }
 
 auto Uploader::pass() -> std::optional<std::string>
 {
-    if (!loaded_)
+    if (!std::exchange(loaded_, true))
     {
         load();
-        loaded_ = true;
     }
     std::optional<std::string> first;
     std::error_code            ec;
@@ -115,28 +131,24 @@ auto Uploader::pass() -> std::optional<std::string>
         {
             continue;
         }
-        File f;
+        const auto name = entry.path().filename().string();
+        File       f;
         {
             std::lock_guard lock(mutex_);
-            f = files_[entry.path().filename().string()];
+            f = files_[name];
         }
         const auto error = step(entry.path(), f);
         if (error)
         {
             f.error = *error;
+            first   = first.value_or(name + ": " + *error);
         }
         else if (f.refused != f.size)
         {
             f.error.clear(); // a refusal stays until the file changes
         }
-        {
-            std::lock_guard lock(mutex_);
-            files_[entry.path().filename().string()] = f;
-        }
-        if (error && !first)
-        {
-            first = entry.path().filename().string() + ": " + *error;
-        }
+        std::lock_guard lock(mutex_);
+        files_[name] = f;
     }
     save();
     return first;
@@ -162,7 +174,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
     }
     if (size < HEADER_SIZE)
     {
-        return std::nullopt; // the writer has not written the header yet
+        return std::nullopt;
     }
     if (f.url.empty())
     {
@@ -178,11 +190,9 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
         f.url     = header(*res, "location");
         f.refused = 0;
         f.sent    = 0;
-        if (f.url.starts_with("/"))
+        if (f.url.starts_with('/'))
         {
-            // A path only: resolve it against the server.
-            const auto host = options_.server.find('/', options_.server.find("://") + 3);
-            f.url           = options_.server.substr(0, host) + f.url;
+            f.url = options_.server.substr(0, options_.server.find('/', options_.server.find("://") + 3)) + f.url;
         }
     }
 
@@ -193,8 +203,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
     }
     if (res->status == 404)
     {
-        // Archived after a close whose answer was lost, or gone: a close with
-        // the same hash says which.
+        // Archived after a close whose answer was lost, or gone: a close with the same hash tells which.
         close(path, f, size);
         if (!f.closed)
         {
@@ -241,7 +250,7 @@ auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset,
         }
         if (res->status == 410)
         {
-            f.url.clear(); // cut off or closed on the server: send the whole file as a new capture
+            f.url.clear(); // cut off or closed on the server: the whole file goes again as a new capture
             return std::nullopt;
         }
         if (res->status != 204)
@@ -254,17 +263,15 @@ auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset,
     return std::nullopt;
 }
 
-// Sends the file's hash. Mogsafe refuses while the capture has no footer; the
-// uploader then waits for the file to change.
 auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>
 {
-    const auto sum = fileSha256(path, size);
-    if (!sum)
+    const auto hash = sha256(path, size);
+    if (!hash)
     {
         return "cannot read the capture";
     }
-    const std::string body = std::format(R"({{"sha256":"{}"}})", *sum);
-    const auto        res  = request("POST", f.url + "/close", { { "Content-Type", "application/json" } }, { reinterpret_cast<const uint8_t*>(body.data()), body.size() });
+    const auto body = std::format(R"({{"sha256":"{}"}})", *hash);
+    const auto res  = request("POST", f.url + "/close", { { "Content-Type", "application/json" } }, std::span(reinterpret_cast<const uint8_t*>(body.data()), body.size()));
     if (!res)
     {
         return res.error();
@@ -275,15 +282,15 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
             f.closed = true;
             f.error.clear();
             return std::nullopt;
-        case 409: // not finished yet, or bytes missing
+        case 409: // no footer yet, or bytes missing: wait for the file to change
             f.refused = size;
             return std::nullopt;
-        case 422: // the archive refuses this capture: keep the file, stop sending it
+        case 422: // refused for good: keep the file, stop sending it
             f.refused = size;
             f.error   = res->body;
             return std::nullopt;
         default:
-            return std::format("close: {}", res->status); // transient: try again on the next pass
+            return std::format("close: {}", res->status);
     }
 }
 
@@ -294,35 +301,32 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     return http_->request(method, url, headers, body);
 }
 
-// uploads.txt: one line per file, "<name>\t<url>\t<closed>\t<refused>".
+// One line per file: name, url, closed, refused, separated by tabs.
 auto Uploader::load() -> void
 {
-    std::ifstream in(options_.dir / STATE_FILE);
-    std::string   line;
+    std::ifstream   in(options_.dir / STATE_FILE);
+    std::string     line;
+    std::lock_guard lock(mutex_);
     while (std::getline(in, line))
     {
         std::istringstream fields(line);
         std::string        name, url, closed, refused;
         if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, closed, '\t') && std::getline(fields, refused))
         {
-            std::lock_guard lock(mutex_);
-            auto&           f = files_[name];
-            f.url             = url;
-            f.closed          = closed == "1";
-            f.refused         = parseU64(refused).value_or(0);
+            files_[name] = { .url = url, .closed = closed == "1", .refused = parseU64(refused).value_or(0) };
         }
     }
 }
 
 auto Uploader::save() -> void
 {
-    const auto tmp = options_.dir / (std::string(STATE_FILE) + ".tmp");
+    const auto tmp = options_.dir / std::format("{}.tmp", STATE_FILE);
     {
         std::ofstream   out(tmp, std::ios::trunc);
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            out << name << '\t' << f.url << '\t' << (f.closed ? 1 : 0) << '\t' << f.refused << '\n';
+            out << std::format("{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused);
         }
         if (!out)
         {
@@ -335,13 +339,13 @@ auto Uploader::save() -> void
 
 auto Uploader::status() const -> std::vector<UploadStatus>
 {
-    std::lock_guard           lock(mutex_);
-    std::vector<UploadStatus> out;
-    for (const auto& [name, f] : files_)
-    {
-        out.push_back({ .name = name, .sent = f.sent, .size = f.size, .closed = f.closed, .error = f.error });
-    }
-    return out;
+    std::lock_guard lock(mutex_);
+    return files_ | std::views::transform([](const auto& entry)
+                                          {
+                                              const auto& [name, f] = entry;
+                                              return UploadStatus{ .name = name, .sent = f.sent, .size = f.size, .closed = f.closed, .error = f.error };
+                                          }) |
+           std::ranges::to<std::vector>();
 }
 
 } // namespace memoria

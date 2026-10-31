@@ -1,41 +1,28 @@
 #include "core/recorder.h"
 
+#include <picosha2.h>
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <chrono>
 #include <cstring>
 #include <format>
 #include <fstream>
 #include <random>
 #include <span>
-#include <string_view>
 
 namespace memoria
 {
 namespace
 {
 
-// A state file per character remembers its last capture, so a capture started
-// after a crash names the one the crash cut off. Per character because several
-// clients can share one install, and a character plays in one at a time.
+// Per character, since clients can share an install. It says whether the character's last capture was left open by a crash, so the next one can name it.
 auto stateFile(const std::filesystem::path& dir, const xicap::CharacterIdentity& character) -> std::filesystem::path
 {
     return dir / std::format("state-{}.txt", character.characterId);
 }
 
-// After a write error, the next packet opens a new capture, at most this often.
 constexpr auto REOPEN_EVERY = std::chrono::minutes(1);
-
-auto hex(const xicap::CaptureId& id) -> std::string
-{
-    std::string out;
-    for (const auto b : id)
-    {
-        out += std::format("{:02x}", b);
-    }
-    return out;
-}
 
 auto parseHex(std::string_view text) -> std::optional<xicap::CaptureId>
 {
@@ -59,40 +46,29 @@ auto randomCaptureId() -> xicap::CaptureId
 {
     std::random_device random;
     xicap::CaptureId   id{};
-    while (std::ranges::all_of(id, [](uint8_t b)
-                               {
-                                   return b == 0;
-                               }))
-    {
-        for (auto& b : id)
-        {
-            b = static_cast<uint8_t>(random());
-        }
-    }
+    std::ranges::generate(id, [&]
+                          {
+                              return static_cast<uint8_t>(random());
+                          });
     return id;
 }
 
 auto sameCharacter(const xicap::CharacterIdentity& a, const xicap::CharacterIdentity& b) -> bool
 {
-    return a.contentId == b.contentId && a.characterId == b.characterId && a.worldId == b.worldId &&
-           a.characterName == b.characterName;
+    return a.contentId == b.contentId && a.characterId == b.characterId && a.worldId == b.worldId && a.characterName == b.characterName;
 }
 
-// A file name a person can read: when, who, and which capture.
 auto fileName(uint64_t timestamp, const xicap::CharacterIdentity& character, const xicap::CaptureId& id) -> std::string
 {
-    const auto  when = std::chrono::sys_time<std::chrono::milliseconds>{ std::chrono::milliseconds{ timestamp } };
+    const std::chrono::sys_time<std::chrono::milliseconds> when{ std::chrono::milliseconds{ timestamp } };
+
     std::string name(character.characterName.data(), strnlen(character.characterName.data(), character.characterName.size()));
-    std::ranges::replace_if(name, [](char c)
+    std::ranges::replace_if(name, [](unsigned char c)
                             {
-                                return !std::isalnum(static_cast<unsigned char>(c));
+                                return !std::isalnum(c);
                             },
                             '_');
-    if (name.empty())
-    {
-        name = "unknown";
-    }
-    return std::format("{:%Y%m%d-%H%M%S}-{}-{}.xicap", std::chrono::floor<std::chrono::seconds>(when), name, hex(id).substr(0, 8));
+    return std::format("{:%Y%m%d-%H%M%S}-{}-{}.xicap", std::chrono::floor<std::chrono::seconds>(when), name.empty() ? "unknown" : name, picosha2::bytes_to_hex_string(id).substr(0, 8));
 }
 
 } // namespace
@@ -100,13 +76,10 @@ auto fileName(uint64_t timestamp, const xicap::CharacterIdentity& character, con
 Recorder::Recorder(RecorderOptions options)
 : options_(std::move(options))
 , queue_(options_.queueBytes)
+, lastFlush_(std::chrono::steady_clock::now())
 {
     std::filesystem::create_directories(options_.dir);
-    lastFlush_ = std::chrono::steady_clock::now();
-    thread_    = std::thread([this]
-                             {
-                              run();
-                             });
+    thread_ = std::thread(&Recorder::run, this);
 }
 
 Recorder::~Recorder()
@@ -120,33 +93,30 @@ auto Recorder::packet(Event event) -> void
     queue_.push(std::move(event));
 }
 
-auto Recorder::login(uint64_t timestamp, const Login& who) -> void
+auto Recorder::login(uint64_t timestamp, Login who) -> void
 {
-    Event event{ .kind = Event::Kind::Login, .timestamp = timestamp };
-    event.data.resize(sizeof(Login));
-    std::memcpy(event.data.data(), &who, sizeof(Login));
-    queue_.push(std::move(event));
+    queue_.push({ .kind = Event::Kind::Login, .timestamp = timestamp, .login = std::move(who) });
 }
 
 auto Recorder::logout(uint64_t timestamp) -> void
 {
-    queue_.push(Event{ .kind = Event::Kind::Logout, .timestamp = timestamp });
+    queue_.push({ .kind = Event::Kind::Logout, .timestamp = timestamp });
 }
 
-auto Recorder::note(uint64_t timestamp, std::string_view text) -> void
+auto Recorder::note(uint64_t timestamp, std::string text) -> void
 {
-    queue_.push(Event{ .kind = Event::Kind::Note, .timestamp = timestamp, .data = { text.begin(), text.end() } });
+    queue_.push({ .kind = Event::Kind::Note, .timestamp = timestamp, .text = std::move(text) });
 }
 
 auto Recorder::sessionStart(uint64_t timestamp, const std::filesystem::path& path) -> void
 {
-    const auto text = path.u8string();
-    queue_.push(Event{ .kind = Event::Kind::SessionStart, .timestamp = timestamp, .data = { text.begin(), text.end() } });
+    const auto utf8 = path.u8string();
+    queue_.push({ .kind = Event::Kind::SessionStart, .timestamp = timestamp, .text = { utf8.begin(), utf8.end() } });
 }
 
 auto Recorder::sessionStop(uint64_t timestamp) -> void
 {
-    queue_.push(Event{ .kind = Event::Kind::SessionStop, .timestamp = timestamp });
+    queue_.push({ .kind = Event::Kind::SessionStop, .timestamp = timestamp });
 }
 
 auto Recorder::status() const -> RecorderStatus
@@ -180,11 +150,10 @@ auto Recorder::run() -> void
         bool stopping = false;
         {
             std::unique_lock lock(wakeMutex_);
-            wake_.wait_for(lock, options_.drainEvery, [this]
-                           {
-                               return stopping_;
-                           });
-            stopping = stopping_;
+            stopping = wake_.wait_for(lock, options_.drainEvery, [this]
+                                      {
+                                          return stopping_;
+                                      });
         }
 
         queue_.drain(events);
@@ -198,9 +167,7 @@ auto Recorder::run() -> void
                 std::lock_guard lock(statusMutex_);
                 status_.dropped += dropped;
             }
-            // The capture says where it has a gap.
-            const auto text = std::format("dropped {} packets: the writer fell behind", dropped);
-            handle(Event{ .kind = Event::Kind::Note, .data = { text.begin(), text.end() } });
+            handle({ .kind = Event::Kind::Note, .text = std::format("dropped {} packets: the writer fell behind", dropped) });
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -231,47 +198,38 @@ auto Recorder::handle(const Event& event) -> void
         switch (event.kind)
         {
             case Event::Kind::Login:
-            {
-                Login who{};
-                std::memcpy(&who, event.data.data(), std::min(event.data.size(), sizeof(Login)));
-                if (writer_ && login_ && sameCharacter(login_->character, who.character))
+                if (writer_ && login_ && sameCharacter(login_->character, event.login->character))
                 {
                     mark(xicap::MarkerKind::Login);
                 }
                 else
                 {
-                    open(event.timestamp, who);
+                    open(event.timestamp, *event.login);
                 }
                 break;
-            }
             case Event::Kind::Logout:
                 mark(xicap::MarkerKind::Logout);
                 break;
             case Event::Kind::Note:
-                mark(xicap::MarkerKind::Note, { reinterpret_cast<const char*>(event.data.data()), event.data.size() });
+                mark(xicap::MarkerKind::Note, event.text);
                 break;
             case Event::Kind::SessionStart:
-            {
-                const std::u8string text(event.data.begin(), event.data.end());
-                openSession(std::filesystem::path(text));
+                openSession(std::u8string(event.text.begin(), event.text.end()));
                 break;
-            }
             case Event::Kind::SessionStop:
                 closeSession();
                 break;
             case Event::Kind::Packet:
                 if (!writer_ && login_ && std::chrono::steady_clock::now() >= reopenAt_)
                 {
-                    // The last capture broke on a write error: carry on in a new one.
-                    auto again       = *login_;
+                    auto again       = *login_; // the last capture broke on a write error
                     again.midSession = true;
                     open(event.timestamp, again);
                 }
-                if (!writer_)
+                if (writer_)
                 {
-                    break; // no login seen yet: nothing to name the capture after
+                    write(event);
                 }
-                write(event);
                 break;
         }
     }
@@ -281,13 +239,27 @@ auto Recorder::handle(const Event& event) -> void
     }
 }
 
+auto Recorder::config(const Login& who, xicap::StartContext start, const xicap::CaptureId& previous) const -> xicap::WriterConfig
+{
+    xicap::WriterConfig config{};
+    config.captureAgent      = options_.captureAgent;
+    config.clientVersion     = who.clientVersion;
+    config.character         = who.character;
+    config.clockSource       = xicap::ClockSource::Live;
+    config.origin            = xicap::Origin::Live;
+    config.network           = who.network;
+    config.startContext      = start;
+    config.previousCaptureId = previous;
+    config.signingSeed       = options_.seed;
+    config.captureId         = randomCaptureId();
+    return config;
+}
+
 auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 {
     close();
     if (previous_ == xicap::CaptureId{})
     {
-        // This character's capture left open by the last run was cut off by a
-        // crash: this one continues it.
         std::ifstream state(stateFile(options_.dir, who.character));
         std::string   id;
         std::string   open;
@@ -296,23 +268,12 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
             previous_ = parseHex(id).value_or(xicap::CaptureId{});
         }
     }
-    xicap::WriterConfig config{};
-    config.captureAgent      = options_.captureAgent;
-    config.clientVersion     = who.clientVersion[0] != 0 ? std::string(who.clientVersion.data(), strnlen(who.clientVersion.data(), who.clientVersion.size())) : options_.clientVersion;
-    config.character         = who.character;
-    config.clockSource       = xicap::ClockSource::Live;
-    config.origin            = xicap::Origin::Live;
-    config.network           = who.network;
-    config.startContext      = who.midSession ? xicap::StartContext::MidSession : xicap::StartContext::Login;
-    config.previousCaptureId = previous_;
-    config.signingSeed       = options_.seed;
-    config.captureId         = randomCaptureId(); // known up front, so it can name the file
-
-    const auto path = options_.dir / fileName(timestamp, who.character, config.captureId);
+    auto       cfg  = config(who, who.midSession ? xicap::StartContext::MidSession : xicap::StartContext::Login, previous_);
+    const auto path = options_.dir / fileName(timestamp, who.character, cfg.captureId);
     login_          = who;
     reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
-    writer_         = std::make_unique<xicap::Writer>(path, std::move(config));
-    previous_       = writer_->captureId(); // the next capture of this run continues this one
+    writer_         = std::make_unique<xicap::Writer>(path, std::move(cfg));
+    previous_       = writer_->captureId();
     saveState(true);
     if (!who.midSession)
     {
@@ -339,7 +300,7 @@ auto Recorder::write(const Event& event) -> void
         {
             session_->write(packet);
         }
-        catch (const std::exception& error) // the session goes; the main capture carries on
+        catch (const std::exception& error) // the main capture carries on
         {
             fail(error);
             session_.reset();
@@ -362,29 +323,17 @@ auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
     }
 }
 
-// The session file names the main capture as its previous one, so the two
-// can be matched up.
 auto Recorder::openSession(const std::filesystem::path& path) -> void
 {
     closeSession();
-    if (!writer_ || !login_)
+    if (!writer_)
     {
         fail(std::runtime_error("no capture is open, so no session either"));
         return;
     }
-    xicap::WriterConfig config{};
-    config.captureAgent      = options_.captureAgent;
-    config.clientVersion     = login_->clientVersion[0] != 0 ? std::string(login_->clientVersion.data(), strnlen(login_->clientVersion.data(), login_->clientVersion.size())) : options_.clientVersion;
-    config.character         = login_->character;
-    config.clockSource       = xicap::ClockSource::Live;
-    config.origin            = xicap::Origin::Live;
-    config.network           = login_->network;
-    config.startContext      = xicap::StartContext::MidSession;
-    config.previousCaptureId = writer_->captureId();
-    config.signingSeed       = options_.seed;
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
-    session_ = std::make_unique<xicap::Writer>(path, std::move(config));
+    session_ = std::make_unique<xicap::Writer>(path, config(*login_, xicap::StartContext::MidSession, writer_->captureId()));
     std::lock_guard lock(statusMutex_);
     status_.session = path;
 }
@@ -436,8 +385,7 @@ auto Recorder::fail(const std::exception& error) -> void
     status_.error = error.what();
 }
 
-// A writer that failed once stays failed: drop it, leaving the capture marked
-// open as a crash would, and let the next packet start a new one.
+// A writer that failed once stays failed. Dropping it leaves the capture marked open, as a crash would, and the next packet starts a new one.
 auto Recorder::broken(const std::exception& error) -> void
 {
     fail(error);
@@ -450,12 +398,10 @@ auto Recorder::broken(const std::exception& error) -> void
 
 auto Recorder::saveState(bool open) -> void
 {
-    if (!login_)
+    if (login_)
     {
-        return;
+        std::ofstream(stateFile(options_.dir, login_->character), std::ios::trunc) << picosha2::bytes_to_hex_string(previous_) << ' ' << (open ? "open" : "closed") << '\n';
     }
-    std::ofstream state(stateFile(options_.dir, login_->character), std::ios::trunc);
-    state << hex(previous_) << ' ' << (open ? "open" : "closed") << '\n';
 }
 
 } // namespace memoria

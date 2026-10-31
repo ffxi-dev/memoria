@@ -12,7 +12,7 @@ EventQueue::EventQueue(size_t maxBytes)
 
 auto EventQueue::push(Event event) -> bool
 {
-    const size_t    size = sizeof(Event) + event.data.size();
+    const size_t    size = sizeof(Event) + event.data.size() + event.text.size();
     std::lock_guard lock(mutex_);
     if (event.kind == Event::Kind::Packet && bytes_ + size > maxBytes_)
     {

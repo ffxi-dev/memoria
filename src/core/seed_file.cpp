@@ -1,8 +1,9 @@
 #include "core/seed_file.h"
 
+#include <algorithm>
+#include <format>
 #include <fstream>
 #include <random>
-#include <system_error>
 
 namespace memoria
 {
@@ -14,52 +15,42 @@ auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap:
     if (std::filesystem::exists(path, ec))
     {
         std::ifstream in(path, std::ios::binary);
-        if (!in || std::filesystem::file_size(path, ec) != seed.size() || ec)
+        if (std::filesystem::file_size(path, ec) != seed.size() || !in.read(reinterpret_cast<char*>(seed.data()), seed.size()))
         {
-            return std::unexpected("cannot read the signing key " + path.string() + "; recording is off until it is fixed");
-        }
-        in.read(reinterpret_cast<char*>(seed.data()), static_cast<std::streamsize>(seed.size()));
-        if (!in)
-        {
-            return std::unexpected("cannot read the signing key " + path.string());
+            return std::unexpected(std::format("cannot read the signing key {}; recording is off until it is fixed", path.string()));
         }
         return seed;
     }
     if (ec)
     {
-        return std::unexpected("cannot check for the signing key " + path.string() + ": " + ec.message());
+        return std::unexpected(std::format("cannot check for the signing key {}: {}", path.string(), ec.message()));
     }
 
-    std::random_device random; // the OS's cryptographic source on Windows and Linux
-    for (size_t i = 0; i < seed.size(); i += 4)
-    {
-        const uint32_t word = random();
-        for (size_t b = 0; b < 4; ++b)
-        {
-            seed[i + b] = static_cast<uint8_t>(word >> (8 * b));
-        }
-    }
+    std::random_device random;
+    std::ranges::generate(seed, [&]
+                          {
+                              return static_cast<uint8_t>(random());
+                          });
 
     std::filesystem::create_directories(path.parent_path(), ec);
     const auto temp = std::filesystem::path(path).concat(".new");
+    if (!std::ofstream(temp, std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(seed.data()), seed.size()))
     {
-        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
-        out.write(reinterpret_cast<const char*>(seed.data()), static_cast<std::streamsize>(seed.size()));
-        if (!out)
-        {
-            return std::unexpected("cannot write the signing key " + temp.string());
-        }
+        return std::unexpected(std::format("cannot write the signing key {}", temp.string()));
     }
-    // A hard link fails when the key exists: of two clients starting together,
-    // one creates the key and the other reads it.
+    // A hard link fails when the key exists: of two clients starting together, one creates it and the other reads it.
     std::filesystem::create_hard_link(temp, path, ec);
     std::error_code ignored;
     std::filesystem::remove(temp, ignored);
-    if (ec && !std::filesystem::exists(path, ignored))
+    if (ec && std::filesystem::exists(path, ignored))
     {
-        return std::unexpected("cannot save the signing key " + path.string() + ": " + ec.message());
+        return loadOrCreateSeed(path);
     }
-    return ec ? loadOrCreateSeed(path) : std::expected<xicap::SecretSeed, std::string>(seed);
+    if (ec)
+    {
+        return std::unexpected(std::format("cannot save the signing key {}: {}", path.string(), ec.message()));
+    }
+    return seed;
 }
 
 } // namespace memoria

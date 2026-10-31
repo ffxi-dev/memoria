@@ -2,10 +2,10 @@
 #include "core/event_queue.h"
 #include "core/recorder.h"
 #include "core/seed_file.h"
-#include "core/sha256.h"
 #include "core/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <picosha2.h>
 #include <xicap/reader.h>
 
 #include <algorithm>
@@ -28,7 +28,7 @@ namespace
 
 auto tempDir() -> fs::path
 {
-    // ctest runs each test in its own process, so the name needs more than a counter.
+    // ctest runs each test in its own process: a counter alone would repeat names.
     static const auto       run = std::random_device{}();
     static std::atomic<int> counter{ 0 };
     auto                    dir = fs::temp_directory_path() / (std::format("memoria-test-{}-{}", run, counter++));
@@ -114,10 +114,9 @@ auto options(const fs::path& dir) -> RecorderOptions
     RecorderOptions o;
     o.dir = dir;
     o.seed.fill(7);
-    o.captureAgent  = "Memoria test";
-    o.clientVersion = "test-client";
-    o.flushEvery    = std::chrono::milliseconds(20);
-    o.drainEvery    = std::chrono::milliseconds(5);
+    o.captureAgent = "Memoria test";
+    o.flushEvery   = std::chrono::milliseconds(20);
+    o.drainEvery   = std::chrono::milliseconds(5);
     return o;
 }
 
@@ -128,7 +127,8 @@ auto who(const char* name, uint32_t id) -> Login
     l.character.characterId = id;
     l.character.worldId     = 42;
     std::memcpy(l.character.characterName.data(), name, std::strlen(name));
-    l.network = xicap::Network::Retail;
+    l.network       = xicap::Network::Retail;
+    l.clientVersion = "30261006_0";
     return l;
 }
 
@@ -253,9 +253,7 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
         rec.stop();
         cut = readCapture(captures(dir)[0]).id;
     }
-    // A crash leaves the character's state file saying the capture is still
-    // open. Another client in the same install, playing another character, has
-    // its own.
+    // A crash leaves the character's state file saying the capture is open. Another character, in another client, has its own.
     {
         std::ofstream state(dir / "state-1.txt", std::ios::trunc);
         for (const auto b : cut)
@@ -368,7 +366,7 @@ TEST_CASE("dropped packets leave a note in the capture")
     }
     bool noted = false;
     {
-        xicap::Reader     r(captures(dir)[0]); // closed before the folder goes: Windows will not delete an open file
+        xicap::Reader     r(captures(dir)[0]); // closed before the folder goes: Windows keeps an open file
         xicap::ReadPacket p{};
         while (r.next(p))
         {
@@ -385,9 +383,7 @@ TEST_CASE("dropped packets leave a note in the capture")
 namespace
 {
 
-// Mogsafe's upload protocol in memory: tus with deferred length, then a close
-// that wants the file's hash and, like the real one, a complete capture (here:
-// ending with the trailer magic XCPF).
+// Mogsafe's upload protocol in memory. Like the real one, a close wants the file's hash and a complete capture: here, one ending in the trailer magic XCPF.
 class FakeMogsafe final : public Http
 {
 public:
@@ -450,9 +446,7 @@ public:
             u.data.insert(u.data.end(), body.begin(), body.end());
             return HttpResponse{ .status = 204 };
         }
-        Sha256 sha;
-        sha.update(u.data);
-        const auto want = std::format(R"({{"sha256":"{}"}})", sha.hex());
+        const auto want = std::format(R"({{"sha256":"{}"}})", picosha2::hash256_hex_string(u.data));
         if (std::string(body.begin(), body.end()) != want)
         {
             return HttpResponse{ .status = 409 };
@@ -507,17 +501,6 @@ auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_ptr<Uploa
 }
 
 } // namespace
-
-TEST_CASE("sha256 matches the FIPS 180-4 examples")
-{
-    Sha256 abc;
-    abc.update({ reinterpret_cast<const uint8_t*>("abc"), 3 });
-    CHECK(abc.hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    Sha256            longer;
-    const std::string two = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
-    longer.update({ reinterpret_cast<const uint8_t*>(two.data()), two.size() });
-    CHECK(longer.hex() == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
-}
 
 TEST_CASE("an upload follows a growing file and closes once it is complete")
 {

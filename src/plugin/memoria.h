@@ -13,8 +13,6 @@
 namespace memoria
 {
 
-// The Ashita plugin: hands every game packet and every login and logout to the
-// recorder. Its hooks run after every other plugin's and only copy.
 class Plugin final : public IPlugin
 {
 public:
@@ -31,19 +29,26 @@ public:
 
     auto HandleCommand(int32_t mode, const char* command, bool injected) -> bool override;
     auto HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
+    auto HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
     auto Direct3DInitialize(IDirect3DDevice8* device) -> bool override;
     auto Direct3DBeginScene(bool isRenderingBackBuffer) -> void override;
-    auto HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
 
-private:
-    auto record(bool clientToServer, uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
-    auto network() -> xicap::Network;
-
-public:
     auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
 
 private:
+    struct ChunkKey
+    {
+        uintptr_t               pointer;
+        uint32_t                size;
+        std::array<uint8_t, 16> head;
+
+        auto operator==(const ChunkKey&) const -> bool = default;
+    };
+
+    auto record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
+    auto network() -> xicap::Network;
     auto say(const std::string& text) -> void;
+    auto status() -> void;
     auto startUploads(const std::filesystem::path& install) -> void;
 
     IAshitaCore*              core_{ nullptr };
@@ -51,22 +56,14 @@ private:
     Clock                     clock_;
     std::unique_ptr<Recorder> recorder_;
     std::unique_ptr<Uploader> uploader_;
-    std::string               uploadsOff_; // why uploads are off, when they are
     HANDLE                    uploadMutex_{ nullptr };
-    std::string               searchError_; // why search is not recorded, when it is not
-    std::string               lobbyError_;  // why the client version cannot be read
     std::string               startError_;
+    std::string               uploadsOff_;
+    std::string               searchError_;
+    std::string               lobbyError_;
     bool                      loggedIn_{ false };
-    uint32_t                  loggedInAs_{ 0 }; // the character of the last login
-    // Per direction: the chunk the last packet came in, to tell when a new
-    // chunk starts.
-    struct ChunkKey
-    {
-        uintptr_t               pointer;
-        uint32_t                size;
-        std::array<uint8_t, 16> head;
-    };
-    std::optional<ChunkKey> lastChunk_[2];
+    uint32_t                  loggedInAs_{ 0 };
+    std::optional<ChunkKey>   lastChunk_[2]; // per direction
 };
 
 } // namespace memoria

@@ -4,24 +4,14 @@
 
 #include <array>
 #include <cstring>
+#include <optional>
+#include <tuple>
 #include <vector>
 
 namespace memoria::client
 {
 namespace
 {
-
-auto moduleRange(const char* name) -> std::pair<uintptr_t, uintptr_t>
-{
-    const auto base = reinterpret_cast<uintptr_t>(::GetModuleHandleA(name));
-    if (base == 0)
-    {
-        return { 0, 0 };
-    }
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    const auto* nt  = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-    return { base, nt->OptionalHeader.SizeOfImage };
-}
 
 auto read32(uintptr_t address) -> uint32_t
 {
@@ -43,12 +33,34 @@ auto write32(uintptr_t address, uint32_t value) -> bool
     return true;
 }
 
+struct Patch
+{
+    uintptr_t operand; // a call's rel32
+    uint32_t  backup;
+};
+
+// Points the call at operand to target, if it calls expected.
+auto redirect(uintptr_t operand, uintptr_t expected, uintptr_t target) -> std::optional<Patch>
+{
+    const Patch patch{ operand, read32(operand) };
+    if (operand + 4 + patch.backup != expected || !write32(operand, static_cast<uint32_t>(target - (operand + 4))))
+    {
+        return std::nullopt;
+    }
+    return patch;
+}
+
 } // namespace
 
 auto find(const char* pattern) -> uintptr_t
 {
-    const auto [base, size] = moduleRange("FFXiMain.dll");
-    return base == 0 ? 0 : Ashita::Memory::FindPattern(base, size, pattern, 0, 0);
+    const auto base = reinterpret_cast<uintptr_t>(::GetModuleHandleA("FFXiMain.dll"));
+    if (base == 0)
+    {
+        return 0;
+    }
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    return Ashita::Memory::FindPattern(base, nt->OptionalHeader.SizeOfImage, pattern, 0, 0);
 }
 
 namespace search
@@ -56,28 +68,21 @@ namespace search
 namespace
 {
 
-// All three are cdecl: each ends in a plain ret, and the callers clean up.
+// All cdecl: each ends in a plain ret.
 using Encrypt  = int(__cdecl*)(void* context, uint8_t* packet, int size);
 using Decrypt  = bool(__cdecl*)(void* context, uint8_t* packet);
 using NextPage = int(__cdecl*)(void* connection);
 
 constexpr uint32_t MAX_SIZE = 0x1000;
 
-// The next page request is encrypted once per connection and resent as is:
-// this is its plaintext.
+// The next page request is encrypted once per connection and resent as is: this is its plaintext.
 constexpr std::array<uint8_t, 16> NEXT_PAGE = { 0x10, 0x00, 0x00, 0x00, 0x49, 0x58, 0x46, 0x46, 0x10, 0x00, 0x80, 0x10, 0x00, 0x00, 0x00, 0x00 };
-
-struct Patch
-{
-    uintptr_t operand;
-    uint32_t  backup;
-};
 
 Sink               sink_{};
 Encrypt            encrypt_{};
 Decrypt            decrypt_{};
 NextPage           nextPage_{};
-uintptr_t          connection_{}; // the signature that reads the search connection
+uintptr_t          connection_{};
 std::vector<Patch> patches_;
 
 auto record(bool clientToServer, const uint8_t* data, uint32_t size) -> void
@@ -94,7 +99,7 @@ auto __cdecl encryptHook(void* context, uint8_t* packet, int size) -> int
     return encrypt_(context, packet, size);
 }
 
-// The second dword of a reply is non-zero until it is decrypted.
+// A reply's second dword is non-zero until it is decrypted.
 auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
 {
     const auto encrypted = read32(reinterpret_cast<uintptr_t>(packet) + 4) != 0;
@@ -106,50 +111,25 @@ auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
     return ok;
 }
 
-// Returns 0 when the request was queued.
 auto __cdecl nextPageHook(void* connection) -> int
 {
-    const int queued = nextPage_(connection);
-    if (queued == 0)
+    const int result = nextPage_(connection);
+    if (result == 0) // queued
     {
         record(true, NEXT_PAGE.data(), NEXT_PAGE.size());
     }
-    return queued;
+    return result;
 }
 
-// Points the call whose rel32 operand is at operand to target, if it calls expected.
-auto redirect(uintptr_t operand, uintptr_t expected, uintptr_t target) -> bool
-{
-    const auto backup = read32(operand);
-    if (operand + 4 + backup != expected)
-    {
-        return false;
-    }
-    if (!write32(operand, static_cast<uint32_t>(target - (operand + 4))))
-    {
-        return false;
-    }
-    patches_.push_back({ operand, backup });
-    return true;
-}
-
-// Where the search connection keeps its encrypt function, or 0 before it exists.
+// Where the search connection keeps its encrypt function, or 0 before there is a connection.
 auto encryptPointer() -> uintptr_t
 {
     try
     {
-        const auto base = read32(read32(connection_ + 1));
-        if (base == 0)
-        {
-            return 0;
-        }
-        const auto search = read32(base + read32(connection_ + 12));
-        if (search == 0)
-        {
-            return 0;
-        }
-        const auto connection = read32(search);
-        return connection == 0 ? 0 : connection + 0x18;
+        const auto base   = read32(read32(connection_ + 1));
+        const auto search = base ? read32(base + read32(connection_ + 12)) : 0;
+        const auto conn   = search ? read32(search) : 0;
+        return conn ? conn + 0x18 : 0;
     }
     catch (...) // /EHa: a bad read is an access violation
     {
@@ -163,8 +143,8 @@ auto install(Sink sink) -> std::string
 {
     const auto encrypt      = find("B8B0100000E8????????538B9C24B8100000555633F685DB");
     const auto decrypt      = find("B8B0100000E8????????538B9C24BC100000568B430485C0");
-    const auto decryptCall  = find("5356C644241B00E8????????8BB424"); // the only caller of decrypt
-    const auto nextPage     = find("C7866004000007000000");           // inside the next page request
+    const auto decryptCall  = find("5356C644241B00E8????????8BB424");
+    const auto nextPage     = find("C7866004000007000000"); // 0x36 into the next page request
     const auto nextPageCall = find("66396F1E76138B1652E8????????83C40485C0750466896F1E");
     connection_             = find("A1????????85C07501C38B80????????50E8");
     if (!encrypt || !decrypt || !decryptCall || !nextPage || !nextPageCall || !connection_)
@@ -175,22 +155,23 @@ auto install(Sink sink) -> std::string
     decrypt_  = reinterpret_cast<Decrypt>(decrypt);
     nextPage_ = reinterpret_cast<NextPage>(nextPage - 0x36);
     sink_     = sink;
-    if (!redirect(decryptCall + 8, decrypt, reinterpret_cast<uintptr_t>(&decryptHook)) ||
-        !redirect(nextPageCall + 10, reinterpret_cast<uintptr_t>(nextPage_), reinterpret_cast<uintptr_t>(&nextPageHook)))
+    for (const auto [operand, expected, target] : { std::tuple{ decryptCall + 8, decrypt, reinterpret_cast<uintptr_t>(&decryptHook) },
+                                                    std::tuple{ nextPageCall + 10, reinterpret_cast<uintptr_t>(nextPage_), reinterpret_cast<uintptr_t>(&nextPageHook) } })
     {
-        remove();
-        return "a search call site calls something else";
+        const auto patch = redirect(operand, expected, target);
+        if (!patch)
+        {
+            remove();
+            return "a search call site calls something else";
+        }
+        patches_.push_back(*patch);
     }
     return {};
 }
 
 auto tick() -> void
 {
-    if (!sink_)
-    {
-        return;
-    }
-    if (const auto pointer = encryptPointer(); pointer && read32(pointer) == reinterpret_cast<uintptr_t>(encrypt_))
+    if (const auto pointer = sink_ ? encryptPointer() : 0; pointer && read32(pointer) == reinterpret_cast<uintptr_t>(encrypt_))
     {
         *reinterpret_cast<uint32_t*>(pointer) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&encryptHook));
     }
@@ -217,22 +198,19 @@ namespace lobby
 namespace
 {
 
-// build(packet, type, context), cdecl: the callers clean up.
 using Build = int(__cdecl*)(uint8_t* packet, uint32_t type, const uint8_t* context);
 
-constexpr uintptr_t VERSION_OFFSET = 0x1A08; // in the lobby context, 15 bytes
-constexpr size_t    VERSION_SIZE   = 15;
+constexpr uintptr_t VERSION_OFFSET = 0x1A08;
 
-Build                          build_{};
-uintptr_t                      operand_{};
-uint32_t                       backup_{};
-std::array<char, VERSION_SIZE> version_{};
+Build                build_{};
+std::optional<Patch> patch_;
+std::array<char, 15> version_{};
 
 auto __cdecl buildHook(uint8_t* packet, uint32_t type, const uint8_t* context) -> int
 {
     try
     {
-        std::memcpy(version_.data(), context + VERSION_OFFSET, VERSION_SIZE);
+        std::memcpy(version_.data(), context + VERSION_OFFSET, version_.size());
     }
     catch (...) // /EHa
     {
@@ -250,15 +228,10 @@ auto install() -> std::string
     {
         return "the lobby signature is missing";
     }
-    operand_ = site + 15;
-    backup_  = read32(operand_);
-    build_   = reinterpret_cast<Build>(operand_ + 4 + backup_);
-    if (!write32(operand_, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&buildHook) - (operand_ + 4))))
-    {
-        operand_ = 0;
-        return "cannot patch the lobby call";
-    }
-    return {};
+    const auto operand = site + 15;
+    build_             = reinterpret_cast<Build>(operand + 4 + read32(operand));
+    patch_             = redirect(operand, reinterpret_cast<uintptr_t>(build_), reinterpret_cast<uintptr_t>(&buildHook));
+    return patch_ ? "" : "cannot patch the lobby call";
 }
 
 auto version() -> std::string
@@ -268,10 +241,10 @@ auto version() -> std::string
 
 auto remove() -> void
 {
-    if (operand_ != 0)
+    if (patch_)
     {
-        write32(operand_, backup_);
-        operand_ = 0;
+        write32(patch_->operand, patch_->backup);
+        patch_.reset();
     }
 }
 

@@ -5,17 +5,20 @@
 #include "plugin/winhttp.h"
 
 #include <Commands.h>
-#include <Memory.h>
 #include <xicap/constants.h>
 
-#include <cctype>
-#include <cstdint>
+#include <algorithm>
+#include <bit>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <map>
+#include <optional>
+#include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace memoria
@@ -23,11 +26,14 @@ namespace memoria
 namespace
 {
 
-constexpr uint16_t ZONE_IN = 0x00A; // GP_SERV_COMMAND_LOGIN
-constexpr uint16_t LOGOUT  = 0x00B; // GP_SERV_COMMAND_LOGOUT
+constexpr uint16_t ZONE_IN = 0x00A;
+constexpr uint16_t LOGOUT  = 0x00B;
 
-// GP_SERV_COMMAND_LOGOUT's LogoutState: zone changes and a cancelled logout
-// keep the character in game; every other state leaves it.
+// Square Enix's retail zone servers, 124.150.152.0/21.
+constexpr uint32_t RETAIL_FIRST = 0x7C969800;
+constexpr uint32_t RETAIL_LAST  = 0x7C969FFF;
+
+// GP_SERV_COMMAND_LOGOUT's LogoutState. Zone changes, the Mog House, and a cancelled logout keep the character in game.
 auto leavesGame(uint8_t logoutState) -> bool
 {
     constexpr uint8_t ZONECHANGE = 2;
@@ -36,49 +42,7 @@ auto leavesGame(uint8_t logoutState) -> bool
     return logoutState != 0 && logoutState != ZONECHANGE && logoutState != MYROOM && logoutState != CANCEL;
 }
 
-// Square Enix's retail zone servers, 124.150.152.0/21.
-constexpr uint32_t RETAIL_FIRST = 0x7C969800;
-constexpr uint32_t RETAIL_LAST  = 0x7C969FFF;
-
-// The client build, as the client prints it (credits: atom0s).
-auto clientBuild() -> std::string
-{
-    try
-    {
-        const auto sig = client::find("68????????E8????????83C4046AFF");
-        if (sig == 0)
-        {
-            return {};
-        }
-        const auto* text = *reinterpret_cast<const char* const*>(sig + 1);
-        // The client prints "[[ [  [  Version 19:08:56 Oct  5 2026  ]  ] ]]":
-        // keep the words, "Version 19:08:56 Oct 5 2026", which fit the header.
-        std::string build;
-        for (const char c : std::string_view(text, strnlen(text, 48)))
-        {
-            if (c == '[' || c == ']' || std::isspace(static_cast<unsigned char>(c)))
-            {
-                if (!build.empty() && build.back() != ' ')
-                {
-                    build += ' ';
-                }
-                continue;
-            }
-            build += c;
-        }
-        while (!build.empty() && build.back() == ' ')
-        {
-            build.pop_back();
-        }
-        return build;
-    }
-    catch (...) // /EHa: a bad read is an access violation
-    {
-        return {};
-    }
-}
-
-// The zone server's IPv4 address, host order (credits: atom0s, via captain).
+// The zone server's IPv4 address in host order (credits: atom0s, via captain).
 auto zoneServer() -> uint32_t
 {
     static const uintptr_t sig = client::find("8B0D????????8D04808B8481????????C3");
@@ -90,16 +54,14 @@ auto zoneServer() -> uint32_t
     {
         const auto ptr = *reinterpret_cast<const uint32_t*>(sig + 2);
         const auto ret = *reinterpret_cast<const uint32_t*>(ptr);
-        const auto le  = *reinterpret_cast<const uint32_t*>(ret);
-        return _byteswap_ulong(le);
+        return std::byteswap(*reinterpret_cast<const uint32_t*>(ret));
     }
-    catch (...)
+    catch (...) // /EHa: a bad read is an access violation
     {
         return 0;
     }
 }
 
-// The character a zone-in names: UniqueNo at byte 4, the name at byte 132.
 auto characterOf(const uint8_t* data, uint32_t size) -> xicap::CharacterIdentity
 {
     xicap::CharacterIdentity c{};
@@ -107,23 +69,37 @@ auto characterOf(const uint8_t* data, uint32_t size) -> xicap::CharacterIdentity
     {
         std::memcpy(&c.characterId, data + xicap::FFXIPacket::LOGIN_UNIQUE_NO_OFFSET, sizeof(c.characterId));
         const auto* name = reinterpret_cast<const char*>(data + xicap::FFXIPacket::LOGIN_NAME_OFFSET);
-        std::memcpy(c.characterName.data(), name, strnlen(name, c.characterName.size() - 1)); // nothing after the NUL
+        std::memcpy(c.characterName.data(), name, strnlen(name, c.characterName.size() - 1));
     }
     return c;
 }
 
-// The plugin the client hooks report to; Ashita makes one.
-Plugin* instance_ = nullptr;
-
-auto hex(const xicap::PublicKey& key) -> std::string
+// "key = value" lines; # and ; start comments.
+auto readIni(const std::filesystem::path& path) -> std::optional<std::map<std::string, std::string>>
 {
-    std::string out;
-    for (const auto b : key)
+    std::ifstream in(path);
+    if (!in)
     {
-        out += std::format("{:02x}", b);
+        return std::nullopt;
     }
-    return out;
+    const auto trim = [](std::string_view s)
+    {
+        const auto first = s.find_first_not_of(" \t\r");
+        return first == std::string_view::npos ? std::string{} : std::string(s.substr(first, s.find_last_not_of(" \t\r") - first + 1));
+    };
+    std::map<std::string, std::string> values;
+    for (std::string line; std::getline(in, line);)
+    {
+        const auto eq = line.find('=');
+        if (eq != std::string::npos && !line.starts_with('#') && !line.starts_with(';'))
+        {
+            values[trim(std::string_view(line).substr(0, eq))] = trim(std::string_view(line).substr(eq + 1));
+        }
+    }
+    return values;
 }
+
+Plugin* instance_ = nullptr; // for the search hooks, which take a plain function
 
 } // namespace
 
@@ -149,20 +125,19 @@ auto Plugin::GetLink() const -> const char*
 
 auto Plugin::GetVersion() const -> double
 {
-    return MEMORIA_VERSION; // from CMakeLists.txt
+    return MEMORIA_VERSION;
 }
 
+// Last, so the blocked and modified flags see what every other plugin did.
 auto Plugin::GetPriority() const -> int32_t
 {
-    // Higher runs later: after every other plugin, so the blocked and modified
-    // flags reflect them all.
-    return INT32_MAX; // not numeric_limits: windows.h defines max
+    return INT32_MAX;
 }
 
 auto Plugin::GetFlags() const -> uint32_t
 {
-    return static_cast<uint32_t>(Ashita::PluginFlags::UsePackets) | static_cast<uint32_t>(Ashita::PluginFlags::UseCommands) |
-           static_cast<uint32_t>(Ashita::PluginFlags::UseDirect3D); // a frame callback for the search hooks
+    using enum Ashita::PluginFlags;
+    return std::to_underlying(UsePackets) | std::to_underlying(UseCommands) | std::to_underlying(UseDirect3D);
 }
 
 auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t id) -> bool
@@ -180,61 +155,53 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         return true; // stay loaded so /memoria status can say why
     }
 
-    RecorderOptions options;
-    options.dir           = install / "captures" / "memoria";
-    options.seed          = *seed;
-    options.captureAgent  = "Memoria " MEMORIA_VERSION_TEXT;
-    options.clientVersion = clientBuild();
     try
     {
-        recorder_ = std::make_unique<Recorder>(std::move(options));
+        recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = install / "captures" / "memoria", .seed = *seed, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
         startUploads(install);
-        lobbyError_  = client::lobby::install();
-        instance_    = this;
-        searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
-                                               {
-                                                   instance_->recordSearch(clientToServer, data, size);
-                                               });
     }
-    catch (const std::exception& error) // the captures folder cannot be made, say
+    catch (const std::exception& error)
     {
         startError_ = error.what();
         say("not recording: " + startError_);
         return true;
     }
+    instance_    = this;
+    lobbyError_  = client::lobby::install();
+    searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
+                                           {
+                                               instance_->recordSearch(clientToServer, data, size);
+                                           });
 
     // Loaded while already in a zone: record from here, marked mid-session.
     auto* party = core_->GetMemoryManager()->GetParty();
     if (core_->GetMemoryManager()->GetPlayer()->GetLoginStatus() == 2 && party->GetMemberServerId(0) != 0)
     {
-        Login late{};
+        Login late{ .network = network(), .midSession = true };
         late.character.characterId = party->GetMemberServerId(0);
         const char* name           = party->GetMemberName(0);
         std::memcpy(late.character.characterName.data(), name, strnlen(name, late.character.characterName.size() - 1));
-        late.network    = network();
-        late.midSession = true;
-        recorder_->login(clock_.nowMs(), late);
         loggedIn_   = true;
         loggedInAs_ = late.character.characterId;
+        recorder_->login(clock_.nowMs(), std::move(late));
     }
-    log_->Logf(static_cast<uint32_t>(Ashita::LogLevel::Info), "Memoria", "Memoria %.1f recording to %s", GetVersion(), (install / "captures" / "memoria").string().c_str());
+    log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, (install / "captures" / "memoria").string().c_str());
     return true;
 }
 
 auto Plugin::Release() -> void
 {
-    client::search::remove(); // before the recorder it feeds goes
+    client::search::remove();
     client::lobby::remove();
     if (recorder_)
     {
         recorder_->stop();
         recorder_.reset();
     }
-    uploader_.reset(); // waits for the request in flight, up to WinHTTP's timeouts
+    uploader_.reset();
     if (uploadMutex_)
     {
-        ::CloseHandle(uploadMutex_);
-        uploadMutex_ = nullptr;
+        ::CloseHandle(std::exchange(uploadMutex_, nullptr));
     }
 }
 
@@ -244,43 +211,38 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
     {
         return false;
     }
-    // A zone-in after character select is a login; its marker goes before it.
-    // So is a zone-in naming another character: a disconnect sends the client
-    // back to the title screen without a logout.
+    // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
     if (id == ZONE_IN)
     {
         const auto who = characterOf(data, size);
         if (!loggedIn_ || who.characterId != loggedInAs_)
         {
-            Login      login{ .character = who, .network = network(), .midSession = false };
-            const auto version = client::lobby::version();
-            std::memcpy(login.clientVersion.data(), version.data(), (std::min)(version.size(), login.clientVersion.size() - 1));
-            recorder_->login(clock_.nowMs(), login);
             loggedIn_   = true;
             loggedInAs_ = who.characterId;
+            recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
         }
     }
-    record(false, id, size, data, modified, sizeChunk, dataChunk, injected, blocked);
+    record(false, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     if (id == LOGOUT && size > 4 && leavesGame(data[4]))
     {
-        recorder_->logout(clock_.nowMs());
         loggedIn_ = false;
+        recorder_->logout(clock_.nowMs());
     }
     return false;
 }
 
 auto Plugin::HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
 {
+    UNREFERENCED_PARAMETER(id);
     if (recorder_)
     {
-        record(true, id, size, data, modified, sizeChunk, dataChunk, injected, blocked);
+        record(true, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     }
     return false;
 }
 
-auto Plugin::record(bool clientToServer, uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
+auto Plugin::record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
 {
-    UNREFERENCED_PARAMETER(id);
     uint16_t provenance = 0;
     if (injected)
     {
@@ -294,22 +256,19 @@ auto Plugin::record(bool clientToServer, uint16_t id, uint32_t size, const uint8
     {
         provenance |= xicap::PacketFlag::Modified;
     }
-    // Ashita hands each packet as a copy, but the chunk it came in as is: a
-    // packet whose chunk differs from the last one's (pointer, size, or first
-    // bytes, which carry the chunk's sequence number) is the first of its chunk.
+    // Ashita hands each packet as a copy, so a new chunk shows as a new chunk pointer, size, or head (its sequence number).
     if (dataChunk && sizeChunk > 0)
     {
-        auto&    last = lastChunk_[clientToServer ? 1 : 0];
         ChunkKey key{ reinterpret_cast<uintptr_t>(dataChunk), sizeChunk, {} };
-        std::memcpy(key.head.data(), dataChunk, (std::min)(sizeChunk, static_cast<uint32_t>(key.head.size())));
-        if (!last || last->pointer != key.pointer || last->size != key.size || last->head != key.head)
+        std::memcpy(key.head.data(), dataChunk, std::min<size_t>(sizeChunk, key.head.size()));
+        auto& last = lastChunk_[clientToServer ? 1 : 0];
+        if (last != key)
         {
             provenance |= xicap::PacketFlag::FirstInChunk;
         }
         last = key;
     }
-    recorder_->packet(Event{
-        .kind           = Event::Kind::Packet,
+    recorder_->packet({
         .timestamp      = clock_.nowMs(),
         .clientToServer = clientToServer,
         .provenance     = provenance,
@@ -317,22 +276,19 @@ auto Plugin::record(bool clientToServer, uint16_t id, uint32_t size, const uint8
     });
 }
 
-// Search channel: the plaintext request or reply, from its 4-byte size; the
-// opcode is byte 0x0B, the request type LSB's search server switches on.
+// The opcode is byte 0x0B, the request type LSB's search server switches on.
 auto Plugin::recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void
 {
-    recorder_->packet(Event{
-        .kind           = Event::Kind::Packet,
+    recorder_->packet({
         .timestamp      = clock_.nowMs(),
         .clientToServer = clientToServer,
-        .channel        = static_cast<uint8_t>(xicap::Channel::Search),
+        .channel        = std::to_underlying(xicap::Channel::Search),
         .opcode         = data[0x0B],
         .data           = { data, data + size },
     });
 }
 
-// Ashita refuses a plugin that asks for Direct3D callbacks and does not
-// accept the device here.
+// Ashita refuses a plugin that asks for Direct3D callbacks and turns the device down.
 auto Plugin::Direct3DInitialize(IDirect3DDevice8* device) -> bool
 {
     UNREFERENCED_PARAMETER(device);
@@ -355,64 +311,83 @@ auto Plugin::network() -> xicap::Network
     return ip >= RETAIL_FIRST && ip <= RETAIL_LAST ? xicap::Network::Retail : xicap::Network::Private;
 }
 
-// config/memoria/upload.ini holds Mogsafe's address and the Access service
-// token, as "key = value" lines: server, client_id, client_secret. Without it,
-// Memoria records and keeps everything locally.
+// config/memoria/upload.ini: server, client_id, client_secret (a Cloudflare Access service token).
 auto Plugin::startUploads(const std::filesystem::path& install) -> void
 {
-    std::ifstream                      in(install / "config" / "memoria" / "upload.ini");
-    std::map<std::string, std::string> config;
-    std::string                        line;
-    if (!in)
+    auto config = readIni(install / "config" / "memoria" / "upload.ini");
+    if (!config)
     {
         uploadsOff_ = "no config/memoria/upload.ini";
         return;
     }
-    while (std::getline(in, line))
-    {
-        const auto eq = line.find('=');
-        if (eq == std::string::npos || line.starts_with('#') || line.starts_with(';'))
-        {
-            continue;
-        }
-        const auto trim = [](std::string s)
-        {
-            s.erase(0, s.find_first_not_of(" \t\r"));
-            s.erase(s.find_last_not_of(" \t\r") + 1);
-            return s;
-        };
-        config[trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
-    }
-    if (!config["server"].starts_with("https://") || config["client_id"].empty() || config["client_secret"].empty())
+    auto& values = *config;
+    if (!values["server"].starts_with("https://") || values["client_id"].empty() || values["client_secret"].empty())
     {
         uploadsOff_ = "upload.ini needs an https server, client_id, and client_secret";
         return;
     }
-    UploadOptions options;
-    options.dir         = install / "captures" / "memoria";
-    options.server      = config["server"];
-    options.credentials = { { "CF-Access-Client-Id", config["client_id"] }, { "CF-Access-Client-Secret", config["client_secret"] } };
+    UploadOptions options{
+        .dir         = install / "captures" / "memoria",
+        .server      = values["server"],
+        .credentials = { { "CF-Access-Client-Id", values["client_id"] }, { "CF-Access-Client-Secret", values["client_secret"] } },
+    };
     while (options.server.ends_with('/'))
     {
         options.server.pop_back();
     }
-    // One uploader per captures folder, across every client sharing the install:
-    // the one whose upload thread holds this mutex. When that client exits,
-    // Windows lets the next one take it.
-    const auto mutexName = std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring()));
-    uploadMutex_         = ::CreateMutexA(nullptr, FALSE, mutexName.c_str());
-    options.mayRun       = [mutex = uploadMutex_]
+    // Clients sharing an install share its captures folder; the one whose upload thread holds this mutex uploads, and Windows hands it on when that client exits.
+    uploadMutex_   = ::CreateMutexA(nullptr, FALSE, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())).c_str());
+    options.mayRun = [mutex = uploadMutex_]
     {
         const auto r = ::WaitForSingleObject(mutex, 0);
         return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
     };
-    uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>(std::format("Memoria/{:.1f}", GetVersion())));
+    uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>("Memoria/" MEMORIA_VERSION_TEXT));
     uploader_->start();
 }
 
 auto Plugin::say(const std::string& text) -> void
 {
     core_->GetChatManager()->Writef(1, false, "\x1E\x51[Memoria]\x1E\x01 %s", text.c_str());
+}
+
+auto Plugin::status() -> void
+{
+    const auto s = recorder_->status();
+    say(s.capture.empty() ? "waiting for a login" : "recording to " + s.capture.filename().string());
+    if (!s.session.empty())
+    {
+        say("session to " + s.session.string());
+    }
+    say(std::format("{} packets, {} dropped", s.packets, s.dropped));
+    if (!s.error.empty())
+    {
+        say("last write error: " + s.error);
+    }
+    if (const auto version = client::lobby::version(); !version.empty())
+    {
+        say("client version " + version);
+    }
+    else
+    {
+        say("client version unknown until character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")"));
+    }
+    if (!searchError_.empty())
+    {
+        say("search not recorded: " + searchError_);
+    }
+    if (!uploader_)
+    {
+        say("uploads off: " + uploadsOff_);
+        return;
+    }
+    for (const auto& u : uploader_->status() | std::views::filter([](const UploadStatus& u)
+                                                                  {
+                                                                      return !u.closed || !u.error.empty();
+                                                                  }))
+    {
+        say(std::format("{}: {} of {} bytes uploaded{}", u.name, u.sent, u.size, u.error.empty() ? "" : " (" + u.error + ")"));
+    }
 }
 
 auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> bool
@@ -425,81 +400,48 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     {
         return false;
     }
-    const std::string sub = args.size() > 1 ? args[1] : "status";
     if (!recorder_)
     {
         say("not recording: " + startError_);
         return true;
     }
-    const auto status = recorder_->status();
+    const auto sub = args.size() > 1 ? args[1] : "status";
     if (sub == "status")
     {
-        say(status.capture.empty() ? "waiting for a login" : "recording to " + status.capture.filename().string());
-        if (!status.session.empty())
-        {
-            say("session to " + status.session.string());
-        }
-        say(std::format("{} packets, {} dropped", status.packets, status.dropped));
-        if (!status.error.empty())
-        {
-            say("last write error: " + status.error);
-        }
-        say(client::lobby::version().empty() ? "client version: unknown until character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")")
-                                             : "client version " + client::lobby::version());
-        if (!searchError_.empty())
-        {
-            say("search not recorded: " + searchError_);
-        }
-        if (!uploader_)
-        {
-            say("uploads off: " + uploadsOff_);
-        }
-        else
-        {
-            for (const auto& u : uploader_->status())
-            {
-                if (u.closed && u.error.empty())
-                {
-                    continue; // done; the file stays in the captures folder
-                }
-                say(std::format("{}: {} of {} bytes uploaded{}", u.name, u.sent, u.size, u.error.empty() ? "" : " (" + u.error + ")"));
-            }
-        }
+        status();
     }
     else if (sub == "key")
     {
-        say(status.capture.empty() ? "the key shows once a capture opens" : "public key " + hex(status.publicKey));
+        const auto s = recorder_->status();
+        say(s.capture.empty() ? "the key shows once a capture opens" : "public key " + std::ranges::fold_left(s.publicKey, std::string{}, [](std::string hex, uint8_t b)
+                                                                                                              {
+                                                                                                                  return hex + std::format("{:02x}", b);
+                                                                                                              }));
+    }
+    else if (sub == "note" && args.size() > 2)
+    {
+        recorder_->note(clock_.nowMs(), args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>());
+        say("noted");
     }
     else if (sub == "session" && args.size() > 2 && args[2] == "start")
     {
-        // The path is the rest of the line as typed: it may hold spaces.
-        std::string_view rest(command);
-        const auto       at = rest.find("start");
-        std::string      path(rest.substr(at + 5));
-        path.erase(0, path.find_first_not_of(" \""));
-        path.erase(path.find_last_not_of(" \"") + 1);
+        // The rest of the line as typed: a path can hold spaces.
+        std::string_view path(command);
+        path.remove_prefix(path.find("start") + 5);
+        path.remove_prefix(std::min(path.find_first_not_of(" \""), path.size()));
+        path = path.substr(0, path.find_last_not_of(" \"") + 1);
         if (path.empty())
         {
             say("/memoria session start <file.xicap>");
             return true;
         }
-        recorder_->sessionStart(clock_.nowMs(), std::filesystem::path(std::u8string(path.begin(), path.end())));
-        say("session to " + path);
+        recorder_->sessionStart(clock_.nowMs(), std::u8string(path.begin(), path.end()));
+        say(std::format("session to {}", path));
     }
     else if (sub == "session" && args.size() > 2 && args[2] == "stop")
     {
         recorder_->sessionStop(clock_.nowMs());
         say("session closed");
-    }
-    else if (sub == "note" && args.size() > 2)
-    {
-        std::string text;
-        for (size_t i = 2; i < args.size(); ++i)
-        {
-            text += (i > 2 ? " " : "") + args[i];
-        }
-        recorder_->note(clock_.nowMs(), text);
-        say("noted");
     }
     else
     {

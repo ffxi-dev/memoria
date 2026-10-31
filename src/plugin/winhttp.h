@@ -5,8 +5,7 @@
 namespace memoria
 {
 
-// Http over WinHTTP, which ships with Windows. Requests block the calling
-// thread (the uploader's own) for at most the timeouts set in the constructor.
+// Requests block the uploader's thread, for at most the timeouts set in the constructor.
 class WinHttp final : public Http
 {
 public:

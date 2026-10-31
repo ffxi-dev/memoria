@@ -5,7 +5,6 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -21,14 +20,12 @@ namespace memoria
 
 struct UploadOptions
 {
-    std::filesystem::path     dir;         // captures/memoria
-    std::string               server;      // e.g. https://mogsafe.sruon.dev
-    HttpHeaders               credentials; // sent with every request, never shown
+    std::filesystem::path     dir;
+    std::string               server;
+    HttpHeaders               credentials;
     std::chrono::milliseconds every{ 5000 };
-    std::chrono::milliseconds idle{ 30000 }; // try to close a file unchanged for this long
-    // Clients sharing an install share the captures folder; only the one this
-    // says yes to uploads. Empty: always yes.
-    std::function<bool()> mayRun;
+    std::chrono::milliseconds idle{ 30000 }; // a file unchanged this long gets a close
+    std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
 };
 
 struct UploadStatus
@@ -37,13 +34,10 @@ struct UploadStatus
     uint64_t    sent{};
     uint64_t    size{};
     bool        closed{};
-    std::string error; // the last error or refusal, if any
+    std::string error;
 };
 
-// Sends growing .xicap files to Mogsafe as they are written, resuming from the
-// server's offset after any outage or restart. A port of Mogsafe's
-// upload/upload.go: it knows nothing about the format, and the server decides
-// when a capture is finished.
+// A port of Mogsafe's upload/upload.go: sends what each .xicap gained since the server's offset, and closes it with its hash once the server accepts it as complete.
 class Uploader
 {
 public:
@@ -53,11 +47,8 @@ public:
     Uploader(const Uploader&)                    = delete;
     auto operator=(const Uploader&) -> Uploader& = delete;
 
-    // Passes on a thread of its own, waiting longer after each failed pass.
     auto start() -> void;
-
-    // Looks at every capture once; returns the first error.
-    auto pass() -> std::optional<std::string>;
+    auto pass() -> std::optional<std::string>; // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;
 
@@ -73,6 +64,7 @@ private:
         std::string                           error;
     };
 
+    auto run() -> void;
     auto step(const std::filesystem::path& path, File& f) -> std::optional<std::string>;
     auto send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
     auto close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>;
@@ -83,7 +75,7 @@ private:
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
 
-    mutable std::mutex          mutex_; // guards files_ for status()
+    mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
     bool                        loaded_{ false };
 

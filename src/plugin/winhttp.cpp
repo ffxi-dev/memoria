@@ -7,6 +7,7 @@
 #include <cctype>
 #include <format>
 #include <memory>
+#include <ranges>
 #include <string>
 
 namespace memoria
@@ -23,26 +24,30 @@ struct CloseHandle
 };
 using Handle = std::unique_ptr<void, CloseHandle>;
 
-// URLs and header values here are ASCII.
-auto wide(const std::string& s) -> std::wstring
+// URLs and headers here are ASCII.
+auto wide(std::string_view s) -> std::wstring
 {
     return { s.begin(), s.end() };
 }
 
-auto narrow(const std::wstring& s) -> std::string
+auto narrow(std::wstring_view s) -> std::string
 {
-    std::string out;
-    out.reserve(s.size());
-    std::ranges::transform(s, std::back_inserter(out), [](wchar_t c)
-                           {
-                               return static_cast<char>(c);
-                           });
-    return out;
+    return s | std::views::transform([](wchar_t c)
+                                     {
+                                         return static_cast<char>(c);
+                                     }) |
+           std::ranges::to<std::string>();
 }
 
 auto failed(const char* what) -> std::unexpected<std::string>
 {
     return std::unexpected(std::format("{}: WinHTTP error {}", what, GetLastError()));
+}
+
+auto trim(std::string_view s) -> std::string_view
+{
+    const auto first = s.find_first_not_of(' ');
+    return first == std::string_view::npos ? std::string_view{} : s.substr(first);
 }
 
 } // namespace
@@ -53,7 +58,7 @@ WinHttp::WinHttp(const std::string& agent)
     if (session_)
     {
         // Mogsafe hashes and checks a whole capture before it answers a close.
-        WinHttpSetTimeouts(session_, 10000, 10000, 120000, 120000);
+        WinHttpSetTimeouts(session_, 10'000, 10'000, 120'000, 120'000);
     }
 }
 
@@ -72,11 +77,7 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
         return std::unexpected("WinHTTP did not start");
     }
     const auto     wurl = wide(url);
-    URL_COMPONENTS parts{};
-    parts.dwStructSize      = sizeof(parts);
-    parts.dwHostNameLength  = static_cast<DWORD>(-1);
-    parts.dwUrlPathLength   = static_cast<DWORD>(-1);
-    parts.dwExtraInfoLength = static_cast<DWORD>(-1);
+    URL_COMPONENTS parts{ .dwStructSize = sizeof(URL_COMPONENTS), .dwHostNameLength = DWORD(-1), .dwUrlPathLength = DWORD(-1), .dwExtraInfoLength = DWORD(-1) };
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts))
     {
         return failed("bad URL");
@@ -97,11 +98,11 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
     std::wstring lines;
     for (const auto& [name, value] : headers)
     {
-        lines += wide(name) + L": " + wide(value) + L"\r\n";
+        lines += std::format(L"{}: {}\r\n", wide(name), wide(value));
     }
     auto*      data = body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<uint8_t*>(body.data());
     const auto size = static_cast<DWORD>(body.size());
-    if (!WinHttpSendRequest(req.get(), lines.c_str(), static_cast<DWORD>(-1), data, size, size, 0) || !WinHttpReceiveResponse(req.get(), nullptr))
+    if (!WinHttpSendRequest(req.get(), lines.c_str(), DWORD(-1), data, size, size, 0) || !WinHttpReceiveResponse(req.get(), nullptr))
     {
         return failed("send");
     }
@@ -118,27 +119,22 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
     if (WinHttpQueryHeaders(req.get(), WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX, raw.data(), &len, WINHTTP_NO_HEADER_INDEX))
     {
         const auto text = narrow(raw);
-        size_t     at   = text.find("\r\n"); // skip the status line
-        while (at != std::string::npos && at + 2 < text.size())
+        for (const auto line : std::string_view(text) | std::views::split(std::string_view("\r\n")) | std::views::drop(1)) // the status line
         {
-            const auto end   = text.find("\r\n", at + 2);
-            const auto line  = text.substr(at + 2, end - at - 2);
-            const auto colon = line.find(':');
-            if (colon != std::string::npos)
+            const std::string_view l(line);
+            if (const auto colon = l.find(':'); colon != std::string_view::npos)
             {
-                auto name = line.substr(0, colon);
+                auto name = std::string(l.substr(0, colon));
                 std::ranges::transform(name, name.begin(), [](unsigned char c)
                                        {
                                            return static_cast<char>(std::tolower(c));
                                        });
-                res.headers[name] = line.substr(line.find_first_not_of(' ', colon + 1) == std::string::npos ? line.size() : line.find_first_not_of(' ', colon + 1));
+                res.headers[name] = trim(l.substr(colon + 1));
             }
-            at = end;
         }
     }
 
-    DWORD available = 0;
-    while (WinHttpQueryDataAvailable(req.get(), &available) && available > 0)
+    for (DWORD available = 0; WinHttpQueryDataAvailable(req.get(), &available) && available > 0;)
     {
         std::string chunk(available, '\0');
         DWORD       read = 0;

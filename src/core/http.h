@@ -19,8 +19,7 @@ struct HttpResponse
 
 using HttpHeaders = std::vector<std::pair<std::string, std::string>>;
 
-// The one call the uploader needs. The plugin uses WinHTTP; tests use a fake
-// Mogsafe. A transport failure is an error; any HTTP status is a response.
+// WinHTTP in the plugin, a fake Mogsafe in the tests. Any HTTP status is a response; only a transport failure is an error.
 class Http
 {
 public:

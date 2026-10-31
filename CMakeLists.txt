@@ -2,8 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(memoria VERSION 0.4.4 LANGUAGES C CXX)
 
-# The core (queue, clock, keys, recording) builds anywhere and is tested on
-# Linux and Windows; the plugin needs Windows, 32-bit MSVC, and the Ashita SDK.
+# The core builds and is tested anywhere; the plugin needs 32-bit MSVC and the Ashita SDK.
 option(MEMORIA_BUILD_PLUGIN "Build the Ashita plugin (needs ASHITA4_SDK_PATH)" ${WIN32})
 option(MEMORIA_BUILD_TESTS "Build the core's tests" OFF)
 
@@ -21,15 +20,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(xicap)
 
+# Header only: SOURCE_SUBDIR keeps its test CMakeLists out of the build.
+FetchContent_Declare(
+    picosha2
+    GIT_REPOSITORY https://github.com/okdshin/PicoSHA2.git
+    GIT_TAG        v1.0.1
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  none
+)
+FetchContent_MakeAvailable(picosha2)
+
 add_library(memoria_core STATIC
     src/core/clock.cpp
     src/core/event_queue.cpp
     src/core/recorder.cpp
     src/core/seed_file.cpp
-    src/core/sha256.cpp
     src/core/uploader.cpp
 )
-target_include_directories(memoria_core PUBLIC src)
+target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
 target_link_libraries(memoria_core PUBLIC xicap)
 
 if(MEMORIA_BUILD_PLUGIN)
@@ -64,12 +72,10 @@ if(MEMORIA_BUILD_PLUGIN)
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
     target_link_libraries(memoria PRIVATE memoria_core winhttp)
-    # One version: the release tag and what the plugin reports.
     target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${PROJECT_VERSION}")
-    # The SDK helper clears the global flags, /EHsc among them, so the core
-    # gets the plugin's exception model back explicitly.
+    # The SDK helper clears the global flags, /EHsc among them: the core needs an exception model back.
     target_compile_options(memoria_core PRIVATE /EHa)
-    # C5298: a stray control character in the SDK's own d3d8 dxfile.h.
+    # C5298: a stray control character in the SDK's d3d8 dxfile.h.
     target_compile_options(memoria PRIVATE /wd5298)
 endif()
 
