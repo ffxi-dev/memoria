@@ -1,8 +1,8 @@
 #include "core/link.h"
 
-#include <monocypher.h>
+#include "core/ed25519.h"
+
 #include <nlohmann/json.hpp>
-#include <optional/monocypher-ed25519.h>
 #include <picosha2.h>
 
 #include <array>

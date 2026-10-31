@@ -1,4 +1,5 @@
 #include "core/clock.h"
+#include "core/ed25519.h"
 #include "core/event_queue.h"
 #include "core/link.h"
 #include "core/recorder.h"
@@ -6,9 +7,7 @@
 #include "core/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <monocypher.h>
 #include <nlohmann/json.hpp>
-#include <optional/monocypher-ed25519.h>
 #include <picosha2.h>
 #include <xicap/reader.h>
 

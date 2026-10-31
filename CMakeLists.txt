@@ -46,8 +46,6 @@ add_library(memoria_core STATIC
     src/core/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
-# Monocypher is compiled into xicap; Memoria signs link requests with the install key through it.
-target_include_directories(memoria_core PRIVATE ${xicap_SOURCE_DIR}/third_party/monocypher)
 target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json)
 
 if(MEMORIA_BUILD_PLUGIN)
@@ -99,7 +97,6 @@ if(MEMORIA_BUILD_TESTS)
     FetchContent_MakeAvailable(Catch2)
     add_executable(memoria_core_tests tests/core_tests.cpp)
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
-    target_include_directories(memoria_core_tests PRIVATE ${xicap_SOURCE_DIR}/third_party/monocypher)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(memoria_core_tests)
