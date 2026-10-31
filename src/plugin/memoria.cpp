@@ -103,7 +103,8 @@ auto characterOf(const uint8_t* data, uint32_t size) -> xicap::CharacterIdentity
     if (size >= xicap::FFXIPacket::LOGIN_NAME_OFFSET + xicap::FFXIPacket::LOGIN_NAME_SIZE)
     {
         std::memcpy(&c.characterId, data + xicap::FFXIPacket::LOGIN_UNIQUE_NO_OFFSET, sizeof(c.characterId));
-        std::memcpy(c.characterName.data(), data + xicap::FFXIPacket::LOGIN_NAME_OFFSET, c.characterName.size() - 1);
+        const auto* name = reinterpret_cast<const char*>(data + xicap::FFXIPacket::LOGIN_NAME_OFFSET);
+        std::memcpy(c.characterName.data(), name, strnlen(name, c.characterName.size() - 1)); // nothing after the NUL
     }
     return c;
 }
@@ -177,8 +178,17 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     options.seed          = *seed;
     options.captureAgent  = std::format("Memoria {:.1f}", GetVersion());
     options.clientVersion = clientBuild();
-    recorder_             = std::make_unique<Recorder>(std::move(options));
-    startUploads(install);
+    try
+    {
+        recorder_ = std::make_unique<Recorder>(std::move(options));
+        startUploads(install);
+    }
+    catch (const std::exception& error) // the captures folder cannot be made, say
+    {
+        startError_ = error.what();
+        say("not recording: " + startError_);
+        return true;
+    }
 
     // Loaded while already in a zone: record from here, marked mid-session.
     auto* party = core_->GetMemoryManager()->GetParty();
@@ -191,7 +201,8 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         late.network    = network();
         late.midSession = true;
         recorder_->login(clock_.nowMs(), late);
-        loggedIn_ = true;
+        loggedIn_   = true;
+        loggedInAs_ = late.character.characterId;
     }
     log_->Logf(static_cast<uint32_t>(Ashita::LogLevel::Info), "Memoria", "Memoria %.1f recording to %s", GetVersion(), (install / "captures" / "memoria").string().c_str());
     return true;
@@ -204,7 +215,12 @@ auto Plugin::Release() -> void
         recorder_->stop();
         recorder_.reset();
     }
-    uploader_.reset(); // waits for a request in flight, up to WinHTTP's timeouts
+    uploader_.reset(); // waits for the request in flight, up to WinHTTP's timeouts
+    if (uploadMutex_)
+    {
+        ::CloseHandle(uploadMutex_);
+        uploadMutex_ = nullptr;
+    }
 }
 
 auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
@@ -214,10 +230,17 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         return false;
     }
     // A zone-in after character select is a login; its marker goes before it.
-    if (id == ZONE_IN && !loggedIn_)
+    // So is a zone-in naming another character: a disconnect sends the client
+    // back to the title screen without a logout.
+    if (id == ZONE_IN)
     {
-        recorder_->login(clock_.nowMs(), Login{ .character = characterOf(data, size), .network = network(), .midSession = false });
-        loggedIn_ = true;
+        const auto who = characterOf(data, size);
+        if (!loggedIn_ || who.characterId != loggedInAs_)
+        {
+            recorder_->login(clock_.nowMs(), Login{ .character = who, .network = network(), .midSession = false });
+            loggedIn_   = true;
+            loggedInAs_ = who.characterId;
+        }
     }
     record(false, id, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     if (id == LOGOUT && size > 4 && leavesGame(data[4]))
@@ -327,6 +350,16 @@ auto Plugin::startUploads(const std::filesystem::path& install) -> void
     {
         options.server.pop_back();
     }
+    // One uploader per captures folder, across every client sharing the install:
+    // the one whose upload thread holds this mutex. When that client exits,
+    // Windows lets the next one take it.
+    const auto mutexName = std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring()));
+    uploadMutex_         = ::CreateMutexA(nullptr, FALSE, mutexName.c_str());
+    options.mayRun       = [mutex = uploadMutex_]
+    {
+        const auto r = ::WaitForSingleObject(mutex, 0);
+        return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
+    };
     uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>(std::format("Memoria/{:.1f}", GetVersion())));
     uploader_->start();
 }

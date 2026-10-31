@@ -13,8 +13,8 @@ namespace memoria
 namespace
 {
 
-constexpr uint64_t HEADER_SIZE = 384; // xicap format 3; Mogsafe refuses a first append without it
-constexpr uint64_t CHUNK_SIZE  = 8 << 20;
+constexpr uint64_t HEADER_SIZE = 384;     // xicap format 3; Mogsafe refuses a first append without it
+constexpr uint64_t CHUNK_SIZE  = 1 << 20; // one request stays short on a slow uplink
 constexpr auto     STATE_FILE  = "uploads.txt";
 constexpr auto     MAX_WAIT    = std::chrono::minutes(5);
 
@@ -74,12 +74,20 @@ auto Uploader::start() -> void
                               auto wait = options_.every;
                               while (true)
                               {
+                                  bool failed = true;
+                                  try
+                                  {
+                                      failed = (!options_.mayRun || options_.mayRun()) && pass().has_value();
+                                  }
+                                  catch (const std::exception&) // out of memory, or the folder went away
+                                  {
+                                  }
                                   // Mogsafe down: wait twice as long after each failed pass, up to five minutes.
-                                  wait = pass() ? std::min<std::chrono::milliseconds>(wait * 2, MAX_WAIT) : options_.every;
+                                  wait = failed ? std::min<std::chrono::milliseconds>(wait * 2, MAX_WAIT) : options_.every;
                                   std::unique_lock lock(wakeMutex_);
                                   if (wake_.wait_for(lock, wait, [this]
                                                      {
-                                                         return stopping_;
+                                                         return stopping_.load();
                                                      }))
                                   {
                                       return;
@@ -99,7 +107,11 @@ auto Uploader::pass() -> std::optional<std::string>
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (!entry.is_regular_file() || entry.path().extension() != ".xicap")
+        if (stopping_)
+        {
+            break;
+        }
+        if (!entry.is_regular_file(ec) || entry.path().extension() != ".xicap")
         {
             continue;
         }
@@ -214,7 +226,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
 
 auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>
 {
-    while (offset < size)
+    while (offset < size && !stopping_)
     {
         const auto n    = std::min(size - offset, CHUNK_SIZE);
         const auto data = readRange(path, offset, n);

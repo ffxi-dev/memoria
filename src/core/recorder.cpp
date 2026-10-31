@@ -16,9 +16,16 @@ namespace memoria
 namespace
 {
 
-// The state file remembers the last capture, so a capture started after a
-// crash names the one the crash cut off.
-constexpr std::string_view STATE_FILE = "state.txt";
+// A state file per character remembers its last capture, so a capture started
+// after a crash names the one the crash cut off. Per character because several
+// clients can share one install, and a character plays in one at a time.
+auto stateFile(const std::filesystem::path& dir, const xicap::CharacterIdentity& character) -> std::filesystem::path
+{
+    return dir / std::format("state-{}.txt", character.characterId);
+}
+
+// After a write error, the next packet opens a new capture, at most this often.
+constexpr auto REOPEN_EVERY = std::chrono::minutes(1);
 
 auto hex(const xicap::CaptureId& id) -> std::string
 {
@@ -95,19 +102,6 @@ Recorder::Recorder(RecorderOptions options)
 , queue_(options_.queueBytes)
 {
     std::filesystem::create_directories(options_.dir);
-
-    // A capture left open by the last run was cut off by a crash: the first
-    // capture of this run continues it.
-    std::ifstream state(options_.dir / STATE_FILE);
-    std::string   id;
-    std::string   open;
-    if (state >> id >> open && open == "open")
-    {
-        if (const auto parsed = parseHex(id))
-        {
-            previous_ = *parsed;
-        }
-    }
     lastFlush_ = std::chrono::steady_clock::now();
     thread_    = std::thread([this]
                              {
@@ -207,7 +201,7 @@ auto Recorder::run() -> void
             }
             catch (const std::exception& error)
             {
-                fail(error);
+                broken(error);
             }
             lastFlush_ = now;
         }
@@ -229,7 +223,7 @@ auto Recorder::handle(const Event& event) -> void
             {
                 Login who{};
                 std::memcpy(&who, event.data.data(), std::min(event.data.size(), sizeof(Login)));
-                if (writer_ && character_ && sameCharacter(*character_, who.character))
+                if (writer_ && login_ && sameCharacter(login_->character, who.character))
                 {
                     writer_->mark(xicap::MarkerKind::Login);
                 }
@@ -252,6 +246,13 @@ auto Recorder::handle(const Event& event) -> void
                 }
                 break;
             case Event::Kind::Packet:
+                if (!writer_ && login_ && std::chrono::steady_clock::now() >= reopenAt_)
+                {
+                    // The last capture broke on a write error: carry on in a new one.
+                    auto again       = *login_;
+                    again.midSession = true;
+                    open(event.timestamp, again);
+                }
                 if (!writer_)
                 {
                     break; // no login seen yet: nothing to name the capture after
@@ -273,13 +274,25 @@ auto Recorder::handle(const Event& event) -> void
     }
     catch (const std::exception& error)
     {
-        fail(error);
+        broken(error);
     }
 }
 
 auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 {
     close();
+    if (previous_ == xicap::CaptureId{})
+    {
+        // This character's capture left open by the last run was cut off by a
+        // crash: this one continues it.
+        std::ifstream state(stateFile(options_.dir, who.character));
+        std::string   id;
+        std::string   open;
+        if (state >> id >> open && open == "open")
+        {
+            previous_ = parseHex(id).value_or(xicap::CaptureId{});
+        }
+    }
     xicap::WriterConfig config{};
     config.captureAgent      = options_.captureAgent;
     config.clientVersion     = options_.clientVersion;
@@ -293,8 +306,9 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
     config.captureId         = randomCaptureId(); // known up front, so it can name the file
 
     const auto path = options_.dir / fileName(timestamp, who.character, config.captureId);
+    login_          = who;
+    reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
     writer_         = std::make_unique<xicap::Writer>(path, std::move(config));
-    character_      = who.character;
     previous_       = writer_->captureId(); // the next capture of this run continues this one
     saveState(true);
     if (!who.midSession)
@@ -320,9 +334,9 @@ auto Recorder::close() -> void
     {
         fail(error);
     }
-    writer_.reset();
-    character_.reset();
     saveState(false);
+    writer_.reset();
+    login_.reset();
     std::lock_guard lock(statusMutex_);
     status_.capture.clear();
 }
@@ -333,9 +347,23 @@ auto Recorder::fail(const std::exception& error) -> void
     status_.error = error.what();
 }
 
+// A writer that failed once stays failed: drop it, leaving the capture marked
+// open as a crash would, and let the next packet start a new one.
+auto Recorder::broken(const std::exception& error) -> void
+{
+    fail(error);
+    writer_.reset();
+    std::lock_guard lock(statusMutex_);
+    status_.capture.clear();
+}
+
 auto Recorder::saveState(bool open) -> void
 {
-    std::ofstream state(options_.dir / STATE_FILE, std::ios::trunc);
+    if (!login_)
+    {
+        return;
+    }
+    std::ofstream state(stateFile(options_.dir, login_->character), std::ios::trunc);
     state << hex(previous_) << ' ' << (open ? "open" : "closed") << '\n';
 }
 

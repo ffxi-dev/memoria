@@ -44,8 +44,10 @@ private:
     std::unique_ptr<Recorder> recorder_;
     std::unique_ptr<Uploader> uploader_;
     std::string               uploadsOff_; // why uploads are off, when they are
+    HANDLE                    uploadMutex_{ nullptr };
     std::string               startError_;
     bool                      loggedIn_{ false };
+    uint32_t                  loggedInAs_{ 0 }; // the character of the last login
     // Per direction: the last packet's offset in its chunk, to tell when a new
     // chunk starts.
     std::optional<uintptr_t> lastOffset_[2];

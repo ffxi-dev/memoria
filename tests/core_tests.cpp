@@ -253,9 +253,11 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
         rec.stop();
         cut = readCapture(captures(dir)[0]).id;
     }
-    // A crash leaves the state file saying the capture is still open.
+    // A crash leaves the character's state file saying the capture is still
+    // open. Another client in the same install, playing another character, has
+    // its own.
     {
-        std::ofstream state(dir / "state.txt", std::ios::trunc);
+        std::ofstream state(dir / "state-1.txt", std::ios::trunc);
         for (const auto b : cut)
         {
             state << std::format("{:02x}", b);
@@ -270,10 +272,17 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
         rec.packet(gamePacket(T0 + 60'001));
         rec.stop();
     }
+    {
+        Recorder rec(options(dir));
+        rec.login(T0 + 120'000, who("Mule", 2));
+        rec.packet(gamePacket(T0 + 120'001));
+        rec.stop();
+    }
     const auto files = captures(dir);
-    REQUIRE(files.size() == 2);
+    REQUIRE(files.size() == 3);
     const auto after = readCapture(files[1]);
     CHECK(after.previous == cut);
+    CHECK(readCapture(files[2]).previous == xicap::CaptureId{}); // Mule never crashed
     CHECK(after.start == xicap::StartContext::MidSession);
     CHECK(after.markers.empty()); // no login seen: none marked
     fs::remove_all(dir);

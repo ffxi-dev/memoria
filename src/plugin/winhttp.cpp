@@ -52,7 +52,8 @@ WinHttp::WinHttp(const std::string& agent)
 {
     if (session_)
     {
-        WinHttpSetTimeouts(session_, 10000, 10000, 30000, 30000);
+        // Mogsafe hashes and checks a whole capture before it answers a close.
+        WinHttpSetTimeouts(session_, 10000, 10000, 120000, 120000);
     }
 }
 

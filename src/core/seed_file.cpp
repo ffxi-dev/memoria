@@ -50,12 +50,16 @@ auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap:
             return std::unexpected("cannot write the signing key " + temp.string());
         }
     }
-    std::filesystem::rename(temp, path, ec);
-    if (ec)
+    // A hard link fails when the key exists: of two clients starting together,
+    // one creates the key and the other reads it.
+    std::filesystem::create_hard_link(temp, path, ec);
+    std::error_code ignored;
+    std::filesystem::remove(temp, ignored);
+    if (ec && !std::filesystem::exists(path, ignored))
     {
         return std::unexpected("cannot save the signing key " + path.string() + ": " + ec.message());
     }
-    return seed;
+    return ec ? loadOrCreateSeed(path) : std::expected<xicap::SecretSeed, std::string>(seed);
 }
 
 } // namespace memoria

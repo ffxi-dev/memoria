@@ -2,10 +2,12 @@
 
 #include "core/http.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -24,6 +26,9 @@ struct UploadOptions
     HttpHeaders               credentials; // sent with every request, never shown
     std::chrono::milliseconds every{ 5000 };
     std::chrono::milliseconds idle{ 30000 }; // try to close a file unchanged for this long
+    // Clients sharing an install share the captures folder; only the one this
+    // says yes to uploads. Empty: always yes.
+    std::function<bool()> mayRun;
 };
 
 struct UploadStatus
@@ -85,7 +90,7 @@ private:
     std::thread             thread_;
     std::mutex              wakeMutex_;
     std::condition_variable wake_;
-    bool                    stopping_{ false };
+    std::atomic<bool>       stopping_{ false };
 };
 
 } // namespace memoria

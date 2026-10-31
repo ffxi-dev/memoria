@@ -76,6 +76,7 @@ private:
     auto open(uint64_t timestamp, const Login& who) -> void;
     auto close() -> void;
     auto fail(const std::exception& error) -> void;
+    auto broken(const std::exception& error) -> void;
     auto saveState(bool open) -> void;
 
     RecorderOptions options_;
@@ -87,10 +88,11 @@ private:
     bool                    stopping_{ false };
 
     // Writer thread only.
-    std::unique_ptr<xicap::Writer>          writer_;
-    std::optional<xicap::CharacterIdentity> character_;
-    xicap::CaptureId                        previous_{};
-    std::chrono::steady_clock::time_point   lastFlush_{};
+    std::unique_ptr<xicap::Writer>        writer_;
+    std::optional<Login>                  login_; // who the open capture, or the broken one, belongs to
+    std::chrono::steady_clock::time_point reopenAt_{};
+    xicap::CaptureId                      previous_{};
+    std::chrono::steady_clock::time_point lastFlush_{};
 
     mutable std::mutex statusMutex_;
     RecorderStatus     status_;
