@@ -17,6 +17,8 @@ struct Event
         Login,
         Logout,
         Note,
+        SessionStart, // data: the session file's path, UTF-8
+        SessionStop,
     };
 
     Kind                 kind = Kind::Packet;

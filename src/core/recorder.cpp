@@ -142,6 +142,17 @@ auto Recorder::note(uint64_t timestamp, std::string_view text) -> void
     queue_.push(Event{ .kind = Event::Kind::Note, .timestamp = timestamp, .data = { text.begin(), text.end() } });
 }
 
+auto Recorder::sessionStart(uint64_t timestamp, const std::filesystem::path& path) -> void
+{
+    const auto text = path.u8string();
+    queue_.push(Event{ .kind = Event::Kind::SessionStart, .timestamp = timestamp, .data = { text.begin(), text.end() } });
+}
+
+auto Recorder::sessionStop(uint64_t timestamp) -> void
+{
+    queue_.push(Event{ .kind = Event::Kind::SessionStop, .timestamp = timestamp });
+}
+
 auto Recorder::status() const -> RecorderStatus
 {
     std::lock_guard lock(statusMutex_);
@@ -229,7 +240,7 @@ auto Recorder::handle(const Event& event) -> void
                 std::memcpy(&who, event.data.data(), std::min(event.data.size(), sizeof(Login)));
                 if (writer_ && login_ && sameCharacter(login_->character, who.character))
                 {
-                    writer_->mark(xicap::MarkerKind::Login);
+                    mark(xicap::MarkerKind::Login);
                 }
                 else
                 {
@@ -238,16 +249,19 @@ auto Recorder::handle(const Event& event) -> void
                 break;
             }
             case Event::Kind::Logout:
-                if (writer_)
-                {
-                    writer_->mark(xicap::MarkerKind::Logout);
-                }
+                mark(xicap::MarkerKind::Logout);
                 break;
             case Event::Kind::Note:
-                if (writer_)
-                {
-                    writer_->mark(xicap::MarkerKind::Note, { reinterpret_cast<const char*>(event.data.data()), event.data.size() });
-                }
+                mark(xicap::MarkerKind::Note, { reinterpret_cast<const char*>(event.data.data()), event.data.size() });
+                break;
+            case Event::Kind::SessionStart:
+            {
+                const std::u8string text(event.data.begin(), event.data.end());
+                openSession(std::filesystem::path(text));
+                break;
+            }
+            case Event::Kind::SessionStop:
+                closeSession();
                 break;
             case Event::Kind::Packet:
                 if (!writer_ && login_ && std::chrono::steady_clock::now() >= reopenAt_)
@@ -319,7 +333,7 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
     earlyBytes_ = 0;
     if (!who.midSession)
     {
-        writer_->mark(xicap::MarkerKind::Login);
+        mark(xicap::MarkerKind::Login);
     }
     std::lock_guard lock(statusMutex_);
     status_.capture   = path;
@@ -328,20 +342,92 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 
 auto Recorder::write(const Event& event) -> void
 {
-    writer_->write({
+    const xicap::OutPacket packet{
         .timestamp  = event.timestamp,
         .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
         .data       = std::as_bytes(std::span{ event.data }),
         .channel    = event.channel,
         .opcode     = event.opcode,
         .provenance = event.provenance,
-    });
+    };
+    if (session_)
+    {
+        try
+        {
+            session_->write(packet);
+        }
+        catch (const std::exception& error) // the session goes; the main capture carries on
+        {
+            fail(error);
+            session_.reset();
+        }
+    }
+    writer_->write(packet);
     std::lock_guard lock(statusMutex_);
     status_.packets++;
 }
 
+auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
+{
+    if (session_)
+    {
+        session_->mark(kind, text);
+    }
+    if (writer_)
+    {
+        writer_->mark(kind, text);
+    }
+}
+
+// The session file names the main capture as its previous one, so the two
+// can be matched up.
+auto Recorder::openSession(const std::filesystem::path& path) -> void
+{
+    closeSession();
+    if (!writer_ || !login_)
+    {
+        fail(std::runtime_error("no capture is open, so no session either"));
+        return;
+    }
+    xicap::WriterConfig config{};
+    config.captureAgent      = options_.captureAgent;
+    config.clientVersion     = login_->clientVersion[0] != 0 ? std::string(login_->clientVersion.data(), strnlen(login_->clientVersion.data(), login_->clientVersion.size())) : options_.clientVersion;
+    config.character         = login_->character;
+    config.clockSource       = xicap::ClockSource::Live;
+    config.origin            = xicap::Origin::Live;
+    config.network           = login_->network;
+    config.startContext      = xicap::StartContext::MidSession;
+    config.previousCaptureId = writer_->captureId();
+    config.signingSeed       = options_.seed;
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    session_ = std::make_unique<xicap::Writer>(path, std::move(config));
+    std::lock_guard lock(statusMutex_);
+    status_.session = path;
+}
+
+auto Recorder::closeSession() -> void
+{
+    if (!session_)
+    {
+        return;
+    }
+    try
+    {
+        session_->close();
+    }
+    catch (const std::exception& error)
+    {
+        fail(error);
+    }
+    session_.reset();
+    std::lock_guard lock(statusMutex_);
+    status_.session.clear();
+}
+
 auto Recorder::close() -> void
 {
+    closeSession();
     if (!writer_)
     {
         return;
@@ -372,9 +458,11 @@ auto Recorder::fail(const std::exception& error) -> void
 auto Recorder::broken(const std::exception& error) -> void
 {
     fail(error);
+    session_.reset();
     writer_.reset();
     std::lock_guard lock(statusMutex_);
     status_.capture.clear();
+    status_.session.clear();
 }
 
 auto Recorder::saveState(bool open) -> void

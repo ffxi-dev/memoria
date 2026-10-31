@@ -470,6 +470,10 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     if (sub == "status")
     {
         say(status.capture.empty() ? "waiting for a login" : "recording to " + status.capture.filename().string());
+        if (!status.session.empty())
+        {
+            say("session to " + status.session.string());
+        }
         say(std::format("{} packets, {} dropped", status.packets, status.dropped));
         if (!status.error.empty())
         {
@@ -502,6 +506,27 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     {
         say(status.capture.empty() ? "the key shows once a capture opens" : "public key " + hex(status.publicKey));
     }
+    else if (sub == "session" && args.size() > 2 && args[2] == "start")
+    {
+        // The path is the rest of the line as typed: it may hold spaces.
+        std::string_view rest(command);
+        const auto       at = rest.find("start");
+        std::string      path(rest.substr(at + 5));
+        path.erase(0, path.find_first_not_of(" \""));
+        path.erase(path.find_last_not_of(" \"") + 1);
+        if (path.empty())
+        {
+            say("/memoria session start <file.xicap>");
+            return true;
+        }
+        recorder_->sessionStart(clock_.nowMs(), std::filesystem::path(std::u8string(path.begin(), path.end())));
+        say("session to " + path);
+    }
+    else if (sub == "session" && args.size() > 2 && args[2] == "stop")
+    {
+        recorder_->sessionStop(clock_.nowMs());
+        say("session closed");
+    }
     else if (sub == "note" && args.size() > 2)
     {
         std::string text;
@@ -514,7 +539,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     }
     else
     {
-        say("/memoria status | key | note <text>");
+        say("/memoria status | key | note <text> | session start <file.xicap> | session stop");
     }
     return true;
 }

@@ -42,6 +42,7 @@ struct Login
 struct RecorderStatus
 {
     std::filesystem::path capture; // empty when nothing is open
+    std::filesystem::path session; // empty when no session is open
     uint64_t              packets{};
     uint64_t              dropped{};
     std::string           error;       // the last write error, if any
@@ -68,6 +69,13 @@ public:
     auto logout(uint64_t timestamp) -> void;
     auto note(uint64_t timestamp, std::string_view text) -> void;
 
+    // A session: a second capture of the same packets, from now until
+    // sessionStop, written to path. Captain's /cap start and /cap stop put
+    // one in each session folder. Only while a capture is open; a new
+    // character's capture ends it.
+    auto sessionStart(uint64_t timestamp, const std::filesystem::path& path) -> void;
+    auto sessionStop(uint64_t timestamp) -> void;
+
     [[nodiscard]] auto status() const -> RecorderStatus;
 
     // Writes what is queued, closes the capture, and stops the thread.
@@ -78,6 +86,9 @@ private:
     auto handle(const Event& event) -> void;
     auto open(uint64_t timestamp, const Login& who) -> void;
     auto write(const Event& event) -> void;
+    auto mark(xicap::MarkerKind kind, std::string_view text = {}) -> void;
+    auto openSession(const std::filesystem::path& path) -> void;
+    auto closeSession() -> void;
     auto close() -> void;
     auto fail(const std::exception& error) -> void;
     auto broken(const std::exception& error) -> void;
@@ -93,6 +104,7 @@ private:
 
     // Writer thread only.
     std::unique_ptr<xicap::Writer>        writer_;
+    std::unique_ptr<xicap::Writer>        session_;
     std::optional<Login>                  login_; // who the open capture, or the broken one, belongs to
     std::chrono::steady_clock::time_point reopenAt_{};
     // PlayOnline traffic before the first login, for the first capture.

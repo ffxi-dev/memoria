@@ -313,6 +313,46 @@ TEST_CASE("PlayOnline traffic before the first login opens the first capture, be
     CHECK(!r.next(p));
 }
 
+TEST_CASE("a session is a second, complete capture of the same packets")
+{
+    const auto dir     = tempDir();
+    const auto session = dir / "captain" / "session one" / "memoria.xicap";
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        rec.sessionStart(T0 + 2, session);
+        rec.note(T0 + 2, "cap start");
+        rec.packet(gamePacket(T0 + 3));
+        rec.packet(gamePacket(T0 + 4));
+        rec.note(T0 + 5, "cap stop");
+        rec.sessionStop(T0 + 5);
+        rec.packet(gamePacket(T0 + 6));
+        rec.stop();
+    }
+    const auto main = readCapture(captures(dir)[0]);
+    const auto part = readCapture(session);
+    CHECK(part.complete);
+    CHECK(part.name == "Nouurs");
+    CHECK(part.previous == main.id);
+    CHECK(part.start == xicap::StartContext::MidSession);
+
+    xicap::Reader     r(session);
+    xicap::ReadPacket p{};
+    size_t            packets = 0;
+    std::string       notes;
+    while (r.next(p))
+    {
+        ++packets;
+        for (const auto& m : p.markers)
+        {
+            notes += m.text + ";";
+        }
+    }
+    CHECK(packets == 2);
+    CHECK(notes == "cap start;");
+}
+
 TEST_CASE("packets before any login are not recorded, and the flush timer writes while open")
 {
     const auto dir = tempDir();
