@@ -30,7 +30,14 @@ struct RecorderStatus
 {
     std::filesystem::path capture;
     std::filesystem::path session;
-    uint64_t              packets{};
+    uint64_t              packets{}; // in the open capture, as are the counts below
+    uint64_t              packetsIn{};
+    uint64_t              packetsOut{};
+    uint64_t              bytesIn{};
+    uint64_t              bytesOut{};
+    uint64_t              search{};
+    uint64_t              firstMs{};
+    uint64_t              lastMs{};
     uint64_t              dropped{};
     std::string           error;
     xicap::PublicKey      publicKey{};

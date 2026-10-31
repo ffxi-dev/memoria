@@ -9,6 +9,7 @@
 #include <xicap/constants.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <chrono>
 #include <condition_variable>
@@ -103,6 +104,47 @@ auto readIni(const std::filesystem::path& path) -> std::optional<std::map<std::s
 }
 
 Plugin* instance_ = nullptr; // for the search hooks, which take a plain function
+
+// Ashita's chat colours, as its chat.lua names them: 0x1E, then a colour number; 0x1E 0x01 goes back to normal.
+enum class Color : uint8_t
+{
+    Green  = 2,
+    Cyan   = 6,
+    Grey   = 67,
+    Red    = 68,
+    Yellow = 104,
+};
+
+auto paint(Color c, std::string_view text) -> std::string
+{
+    return std::format("\x1E{}{}\x1E\x01", static_cast<char>(c), text);
+}
+
+auto size(uint64_t bytes) -> std::string
+{
+    constexpr std::array units{ "KB", "MB", "GB" };
+    if (bytes < 1024)
+    {
+        return std::format("{} B", bytes);
+    }
+    auto   value = bytes / 1024.0;
+    size_t unit  = 0;
+    for (; value >= 1024 && unit + 1 < units.size(); ++unit)
+    {
+        value /= 1024;
+    }
+    return std::format("{:.1f} {}", value, units[unit]);
+}
+
+auto count(uint64_t n) -> std::string
+{
+    auto text = std::to_string(n);
+    for (auto at = static_cast<std::ptrdiff_t>(text.size()) - 3; at > 0; at -= 3)
+    {
+        text.insert(static_cast<size_t>(at), ",");
+    }
+    return text;
+}
 
 } // namespace
 
@@ -231,9 +273,8 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         const auto who = characterOf(data, size);
         if (!loggedIn_ || who.characterId != loggedInAs_)
         {
-            loggedIn_     = true;
-            loggedInAs_   = who.characterId;
-            stopReminded_ = false;
+            loggedIn_   = true;
+            loggedInAs_ = who.characterId;
             remind();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
         }
@@ -330,13 +371,13 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
     if (arrived)
     {
         link_ = std::move(arrived);
-        say(std::format("linked to {}: your captures upload from now on", link_->account));
+        say(paint(Color::Green, std::format("Linked to {}.", link_->account)) + " Your captures upload from now on.");
         uploader_.reset();
         startUploads();
     }
     if (uploader_ && uploader_->unauthorized())
     {
-        unlink("Mogsafe no longer accepts this install");
+        unlink("Vault no longer accepts this install");
     }
 }
 
@@ -383,7 +424,7 @@ auto Plugin::startUploads() -> void
 
 auto Plugin::say(const std::string& text) -> void
 {
-    core_->GetChatManager()->Writef(1, false, "\x1E\x51[Memoria]\x1E\x01 %s", text.c_str());
+    core_->GetChatManager()->Writef(1, false, "\x1E\x51[\x1E\x06Memoria\x1E\x51]\x1E\x01 %s", text.c_str());
 }
 
 auto Plugin::post(std::string text) -> void
@@ -392,12 +433,19 @@ auto Plugin::post(std::string text) -> void
     inbox_.push_back(std::move(text));
 }
 
+// Once a day while unlinked: the date of the last reminder is kept across restarts.
 auto Plugin::remind() -> void
 {
-    if (!link_)
+    const auto  path  = install_ / "config" / "memoria" / "reminded";
+    const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
+    std::string last;
+    std::getline(std::ifstream(path), last);
+    if (link_ || last == today)
     {
-        say("your captures stay on this PC until you run /memoria link");
+        return;
     }
+    std::ofstream(path, std::ios::trunc) << today;
+    say(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
 }
 
 // Asks for a code, then polls until the player approves it on the link page.
@@ -410,10 +458,11 @@ auto Plugin::link() -> void
                                const auto code = startLink(http, server_, seed_, static_cast<uint64_t>(now));
                                if (!code)
                                {
-                                   post("cannot start linking: " + code.error());
+                                   post(paint(Color::Red, "Cannot start linking: " + code.error()));
                                    return;
                                }
-                               post(std::format("enter {} on {}", code->code, code->url));
+                               post("Sign in on the page that opened in your browser and enter " + paint(Color::Yellow, code->code));
+                               post(paint(Color::Grey, "No browser? Open " + code->url));
                                // Only Mogsafe's own link page: never a URL the server could swap for another.
                                if (code->url.starts_with(server_ + "/link"))
                                {
@@ -441,7 +490,7 @@ auto Plugin::link() -> void
                                    const auto result = pollLink(http, server_, code->poll);
                                    if (!result)
                                    {
-                                       post("not linked: " + result.error() + "; run /memoria link again");
+                                       post(paint(Color::Red, "Not linked: " + result.error() + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
                                        return;
                                    }
                                    if (*result)
@@ -452,7 +501,7 @@ auto Plugin::link() -> void
                                        return;
                                    }
                                }
-                               post("the code expired: run /memoria link again");
+                               post(paint(Color::Red, "The code expired.") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
                            });
 }
 
@@ -463,49 +512,63 @@ auto Plugin::unlink(const std::string& why) -> void
     std::error_code ec;
     std::filesystem::remove(install_ / "config" / "memoria" / "token", ec);
     uploadsOff_ = "not linked: /memoria link";
-    say(why + ": your captures stay on this PC until you run /memoria link");
+    say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
 }
 
 auto Plugin::status() -> void
 {
     const auto s = recorder_->status();
-    say(s.capture.empty() ? "waiting for a login" : "recording to " + s.capture.filename().string());
-    if (!s.session.empty())
+    if (s.capture.empty())
     {
-        say("session to " + s.session.string());
-    }
-    say(std::format("{} packets, {} dropped", s.packets, s.dropped));
-    if (!s.error.empty())
-    {
-        say("last write error: " + s.error);
-    }
-    if (const auto version = client::lobby::version(); !version.empty())
-    {
-        say("client version " + version);
+        say(paint(Color::Grey, "Waiting for a login."));
     }
     else
     {
-        say("client version unknown until character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")"));
+        std::error_code ec;
+        const auto      onDisk  = std::filesystem::file_size(s.capture, ec);
+        const auto      raw     = s.bytesIn + s.bytesOut;
+        const auto      seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
+        say(paint(Color::Green, "Recording") + " " + s.capture.filename().string());
+        say(std::format("Packets: {} ({} in, {} out), {:.1f}/s", count(s.packets), count(s.packetsIn), count(s.packetsOut), static_cast<double>(s.packets) / static_cast<double>(seconds)));
+        say(std::format("Size: {} raw, {} on disk{}", size(raw), size(onDisk), onDisk > 0 ? std::format(" ({:.1f}x)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
+        say(std::format("Search: {}, dropped: {}", count(s.search), count(s.dropped)));
     }
+    if (!s.session.empty())
+    {
+        say("Session: " + s.session.string());
+    }
+    if (!s.error.empty())
+    {
+        say(paint(Color::Red, "Last write error: " + s.error));
+    }
+    const auto version = client::lobby::version();
+    say("Client: " + (version.empty() ? paint(Color::Grey, "known after character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")")) : version));
     if (!searchError_.empty())
     {
-        say("search not recorded: " + searchError_);
-    }
-    if (link_)
-    {
-        say("linked to " + link_->account);
+        say(paint(Color::Red, "Search not recorded: " + searchError_));
     }
     if (!uploader_)
     {
-        say("uploads off: " + uploadsOff_);
+        say("Uploads: " + paint(Color::Yellow, uploadsOff_));
         return;
     }
-    for (const auto& u : uploader_->status() | std::views::filter([](const UploadStatus& u)
-                                                                  {
-                                                                      return !u.closed || !u.error.empty();
-                                                                  }))
+    const auto files   = uploader_->status();
+    uint64_t   total   = 0;
+    uint64_t   sent    = 0;
+    size_t     pending = 0;
+    for (const auto& u : files)
     {
-        say(std::format("{}: {} of {} bytes uploaded{}", u.name, u.sent, u.size, u.error.empty() ? "" : " (" + u.error + ")"));
+        total += u.size;
+        sent += u.closed ? u.size : u.sent;
+        pending += u.closed ? 0 : 1;
+    }
+    say(std::format("Uploads: linked to {}, {} of {} sent, {} of {} captures still open", link_->account, size(sent), size(total), pending, files.size()));
+    for (const auto& u : files | std::views::filter([](const UploadStatus& u)
+                                                    {
+                                                        return !u.error.empty();
+                                                    }))
+    {
+        say(paint(Color::Red, std::format("{}: {}", u.name, u.error)));
     }
 }
 
@@ -561,19 +624,15 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     {
         recorder_->sessionStop(clock_.nowMs());
         say("session closed");
-        if (!std::exchange(stopReminded_, true))
-        {
-            remind();
-        }
     }
     else if (sub == "link")
     {
-        say("asking Mogsafe for a code...");
+        say(paint(Color::Grey, "Asking Vault for a link code..."));
         link();
     }
     else if (sub == "unlink" && link_)
     {
-        unlink("unlinked");
+        unlink("Unlinked");
     }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
     {
@@ -584,7 +643,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
             std::ofstream{ paused };
             uploader_.reset();
             uploadsOff_ = "paused: /memoria upload on";
-            say("uploads paused");
+            say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
         }
         else
         {
@@ -593,7 +652,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
             {
                 startUploads();
             }
-            say(uploader_ ? "uploads on" : "uploads off: " + uploadsOff_);
+            say(uploader_ ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: " + uploadsOff_));
         }
     }
     else

@@ -292,8 +292,16 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
         mark(xicap::MarkerKind::Login);
     }
     std::lock_guard lock(statusMutex_);
-    status_.capture   = path;
-    status_.publicKey = writer_->publicKey();
+    status_.capture    = path;
+    status_.publicKey  = writer_->publicKey();
+    status_.packets    = 0;
+    status_.packetsIn  = 0;
+    status_.packetsOut = 0;
+    status_.bytesIn    = 0;
+    status_.bytesOut   = 0;
+    status_.search     = 0;
+    status_.firstMs    = timestamp;
+    status_.lastMs     = timestamp;
 }
 
 auto Recorder::write(const Event& event) -> void
@@ -321,6 +329,10 @@ auto Recorder::write(const Event& event) -> void
     writer_->write(packet);
     std::lock_guard lock(statusMutex_);
     status_.packets++;
+    (event.clientToServer ? status_.packetsOut : status_.packetsIn)++;
+    (event.clientToServer ? status_.bytesOut : status_.bytesIn) += event.data.size();
+    status_.search += event.channel == static_cast<uint8_t>(xicap::Channel::Search) ? 1 : 0;
+    status_.lastMs = event.timestamp;
 }
 
 auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void

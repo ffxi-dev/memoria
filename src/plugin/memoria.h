@@ -67,7 +67,6 @@ private:
     std::mutex                inboxMutex_;
     std::vector<std::string>  inbox_;
     std::optional<Linked>     arrived_; // from the link thread
-    bool                      stopReminded_{ false };
     ILogManager*              log_{ nullptr };
     Clock                     clock_;
     std::unique_ptr<Recorder> recorder_;

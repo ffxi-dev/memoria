@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.5.1 LANGUAGES C CXX)
+project(memoria VERSION 0.5.2 LANGUAGES C CXX)
 
 # The core builds and is tested anywhere; the plugin needs 32-bit MSVC and the Ashita SDK.
 option(MEMORIA_BUILD_PLUGIN "Build the Ashita plugin (needs ASHITA4_SDK_PATH)" ${WIN32})
