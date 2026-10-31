@@ -27,6 +27,10 @@ auto stateFile(const std::filesystem::path& dir, const xicap::CharacterIdentity&
 // After a write error, the next packet opens a new capture, at most this often.
 constexpr auto REOPEN_EVERY = std::chrono::minutes(1);
 
+// The PlayOnline login comes before any character's: that much of it waits
+// for the first capture.
+constexpr size_t EARLY_BYTES = 4 * 1024 * 1024;
+
 auto hex(const xicap::CaptureId& id) -> std::string
 {
     std::string out;
@@ -255,20 +259,16 @@ auto Recorder::handle(const Event& event) -> void
                 }
                 if (!writer_)
                 {
-                    break; // no login seen yet: nothing to name the capture after
+                    // No login seen yet: nothing to name the capture after.
+                    // PlayOnline traffic waits for the first one.
+                    if (!login_ && event.channel != static_cast<uint8_t>(xicap::Channel::Game) && earlyBytes_ + event.data.size() <= EARLY_BYTES)
+                    {
+                        earlyBytes_ += event.data.size();
+                        early_.push_back(event);
+                    }
+                    break;
                 }
-                writer_->write({
-                    .timestamp  = event.timestamp,
-                    .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
-                    .data       = std::as_bytes(std::span{ event.data }),
-                    .channel    = event.channel,
-                    .opcode     = event.opcode,
-                    .provenance = event.provenance,
-                });
-                {
-                    std::lock_guard lock(statusMutex_);
-                    status_.packets++;
-                }
+                write(event);
                 break;
         }
     }
@@ -311,6 +311,12 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
     writer_         = std::make_unique<xicap::Writer>(path, std::move(config));
     previous_       = writer_->captureId(); // the next capture of this run continues this one
     saveState(true);
+    for (const auto& event : early_)
+    {
+        write(event); // before the login marker: it came first
+    }
+    early_.clear();
+    earlyBytes_ = 0;
     if (!who.midSession)
     {
         writer_->mark(xicap::MarkerKind::Login);
@@ -318,6 +324,20 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
     std::lock_guard lock(statusMutex_);
     status_.capture   = path;
     status_.publicKey = writer_->publicKey();
+}
+
+auto Recorder::write(const Event& event) -> void
+{
+    writer_->write({
+        .timestamp  = event.timestamp,
+        .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
+        .data       = std::as_bytes(std::span{ event.data }),
+        .channel    = event.channel,
+        .opcode     = event.opcode,
+        .provenance = event.provenance,
+    });
+    std::lock_guard lock(statusMutex_);
+    status_.packets++;
 }
 
 auto Recorder::close() -> void

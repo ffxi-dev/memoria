@@ -30,11 +30,18 @@ public:
 
     auto HandleCommand(int32_t mode, const char* command, bool injected) -> bool override;
     auto HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
+    auto Direct3DBeginScene(bool isRenderingBackBuffer) -> void override;
     auto HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
 
 private:
     auto record(bool clientToServer, uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto network() -> xicap::Network;
+    auto takePol() -> void;
+
+public:
+    auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
+
+private:
     auto say(const std::string& text) -> void;
     auto startUploads(const std::filesystem::path& install) -> void;
 
@@ -45,6 +52,8 @@ private:
     std::unique_ptr<Uploader> uploader_;
     std::string               uploadsOff_; // why uploads are off, when they are
     HANDLE                    uploadMutex_{ nullptr };
+    std::string               searchError_; // why search is not recorded, when it is not
+    std::wstring              polModule_;   // polplugins/Memoria.dll
     std::string               startError_;
     bool                      loggedIn_{ false };
     uint32_t                  loggedInAs_{ 0 }; // the character of the last login

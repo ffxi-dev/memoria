@@ -1,6 +1,8 @@
 #include "plugin/memoria.h"
 
 #include "core/seed_file.h"
+#include "plugin/client.h"
+#include "plugin/pol.h"
 #include "plugin/winhttp.h"
 
 #include <Commands.h>
@@ -38,30 +40,12 @@ auto leavesGame(uint8_t logoutState) -> bool
 constexpr uint32_t RETAIL_FIRST = 0x7C969800;
 constexpr uint32_t RETAIL_LAST  = 0x7C969FFF;
 
-auto moduleRange(const char* name) -> std::pair<uintptr_t, uintptr_t>
-{
-    const auto base = reinterpret_cast<uintptr_t>(::GetModuleHandleA(name));
-    if (base == 0)
-    {
-        return { 0, 0 };
-    }
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    const auto* nt  = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-    return { base, nt->OptionalHeader.SizeOfImage };
-}
-
-auto find(const char* pattern) -> uintptr_t
-{
-    const auto [base, size] = moduleRange("FFXiMain.dll");
-    return Ashita::Memory::FindPattern(base, size, pattern, 0, 0);
-}
-
 // The client build, as the client prints it (credits: atom0s).
 auto clientBuild() -> std::string
 {
     try
     {
-        const auto sig = find("68????????E8????????83C4046AFF");
+        const auto sig = client::find("68????????E8????????83C4046AFF");
         if (sig == 0)
         {
             return {};
@@ -78,7 +62,7 @@ auto clientBuild() -> std::string
 // The zone server's IPv4 address, host order (credits: atom0s, via captain).
 auto zoneServer() -> uint32_t
 {
-    static const uintptr_t sig = find("8B0D????????8D04808B8481????????C3");
+    static const uintptr_t sig = client::find("8B0D????????8D04808B8481????????C3");
     if (sig == 0)
     {
         return 0;
@@ -108,6 +92,9 @@ auto characterOf(const uint8_t* data, uint32_t size) -> xicap::CharacterIdentity
     }
     return c;
 }
+
+// The plugin the client hooks report to; Ashita makes one.
+Plugin* instance_ = nullptr;
 
 auto hex(const xicap::PublicKey& key) -> std::string
 {
@@ -155,7 +142,8 @@ auto Plugin::GetPriority() const -> int32_t
 
 auto Plugin::GetFlags() const -> uint32_t
 {
-    return static_cast<uint32_t>(Ashita::PluginFlags::UsePackets) | static_cast<uint32_t>(Ashita::PluginFlags::UseCommands);
+    return static_cast<uint32_t>(Ashita::PluginFlags::UsePackets) | static_cast<uint32_t>(Ashita::PluginFlags::UseCommands) |
+           static_cast<uint32_t>(Ashita::PluginFlags::UseDirect3D); // a frame callback for the search hooks
 }
 
 auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t id) -> bool
@@ -165,7 +153,8 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     log_  = logger;
 
     const std::filesystem::path install = core_->GetInstallPath();
-    const auto                  seed    = loadOrCreateSeed(install / "config" / "memoria" / "key");
+    polModule_                          = (install / "polplugins" / "Memoria.dll").wstring();
+    const auto seed                     = loadOrCreateSeed(install / "config" / "memoria" / "key");
     if (!seed)
     {
         startError_ = seed.error();
@@ -182,6 +171,11 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     {
         recorder_ = std::make_unique<Recorder>(std::move(options));
         startUploads(install);
+        instance_    = this;
+        searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
+                                               {
+                                                   instance_->recordSearch(clientToServer, data, size);
+                                               });
     }
     catch (const std::exception& error) // the captures folder cannot be made, say
     {
@@ -210,6 +204,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
 
 auto Plugin::Release() -> void
 {
+    client::search::remove(); // before the recorder it feeds goes
     if (recorder_)
     {
         recorder_->stop();
@@ -297,6 +292,57 @@ auto Plugin::record(bool clientToServer, uint16_t id, uint32_t size, const uint8
         .provenance     = provenance,
         .data           = { data, data + size },
     });
+}
+
+// Search channel: the plaintext request or reply, from its 4-byte size; the
+// opcode is byte 0x0B, the request type LSB's search server switches on.
+auto Plugin::recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void
+{
+    recorder_->packet(Event{
+        .kind           = Event::Kind::Packet,
+        .timestamp      = clock_.nowMs(),
+        .clientToServer = clientToServer,
+        .channel        = static_cast<uint8_t>(xicap::Channel::Search),
+        .opcode         = data[0x0B],
+        .data           = { data, data + size },
+    });
+}
+
+auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
+{
+    UNREFERENCED_PARAMETER(isRenderingBackBuffer);
+    client::search::tick();
+    takePol();
+}
+
+// The POL plugin is this DLL loaded from polplugins/: usually a separate copy,
+// with its own queue, found by its path; else this copy is the one.
+auto Plugin::takePol() -> void
+{
+    if (!recorder_)
+    {
+        return;
+    }
+    auto take = &memoriaPolTake;
+    if (const auto pol = ::GetModuleHandleW(polModule_.c_str()))
+    {
+        if (const auto found = ::GetProcAddress(pol, "memoriaPolTake"))
+        {
+            take = reinterpret_cast<decltype(take)>(found);
+        }
+    }
+    take([](void* context, const PolRecord* r)
+         {
+             static_cast<Plugin*>(context)->recorder_->packet(Event{
+                 .kind           = Event::Kind::Packet,
+                 .timestamp      = r->timestamp,
+                 .clientToServer = r->clientToServer != 0,
+                 .channel        = r->channel,
+                 .opcode         = r->opcode,
+                 .data           = { r->data, r->data + r->size },
+             });
+         },
+         this);
 }
 
 auto Plugin::network() -> xicap::Network
@@ -394,6 +440,10 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         {
             say("last write error: " + status.error);
         }
+        if (!searchError_.empty())
+        {
+            say("search not recorded: " + searchError_);
+        }
         if (!uploader_)
         {
             say("uploads off: " + uploadsOff_);
@@ -433,10 +483,39 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
 
 } // namespace memoria
 
+namespace
+{
+// What this copy of the DLL made: Ashita destroys both through one export.
+memoria::Plugin*    game_ = nullptr;
+memoria::PolPlugin* pol_  = nullptr;
+} // namespace
+
 extern "C" __declspec(dllexport) IPlugin* __stdcall expCreatePlugin(const char* args)
 {
     UNREFERENCED_PARAMETER(args);
-    return new memoria::Plugin();
+    game_ = new memoria::Plugin();
+    return game_;
+}
+
+extern "C" __declspec(dllexport) IPolPlugin* __stdcall expCreatePolPlugin(const char* args)
+{
+    UNREFERENCED_PARAMETER(args);
+    pol_ = new memoria::PolPlugin();
+    return pol_;
+}
+
+extern "C" __declspec(dllexport) void __stdcall expDestroyPlugin(void* instance)
+{
+    if (instance == static_cast<IPlugin*>(game_))
+    {
+        delete game_;
+        game_ = nullptr;
+    }
+    else if (instance == static_cast<IPolPlugin*>(pol_))
+    {
+        delete pol_;
+        pol_ = nullptr;
+    }
 }
 
 extern "C" __declspec(dllexport) double __stdcall expGetInterfaceVersion()

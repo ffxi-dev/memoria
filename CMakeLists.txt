@@ -39,8 +39,12 @@ if(MEMORIA_BUILD_PLUGIN)
 
     add_library(memoria MODULE
         src/plugin/exports.def
+        src/plugin/client.cpp
+        src/plugin/client.h
         src/plugin/memoria.cpp
         src/plugin/memoria.h
+        src/plugin/pol.cpp
+        src/plugin/pol.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
     )
