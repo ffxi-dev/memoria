@@ -9,6 +9,7 @@
 #include <Memory.h>
 #include <xicap/constants.h>
 
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -51,7 +52,26 @@ auto clientBuild() -> std::string
             return {};
         }
         const auto* text = *reinterpret_cast<const char* const*>(sig + 1);
-        return { text, strnlen(text, 48) };
+        // The client prints "[[ [  [  Version 19:08:56 Oct  5 2026  ]  ] ]]":
+        // keep the words, "Version 19:08:56 Oct 5 2026", which fit the header.
+        std::string build;
+        for (const char c : std::string_view(text, strnlen(text, 48)))
+        {
+            if (c == '[' || c == ']' || std::isspace(static_cast<unsigned char>(c)))
+            {
+                if (!build.empty() && build.back() != ' ')
+                {
+                    build += ' ';
+                }
+                continue;
+            }
+            build += c;
+        }
+        while (!build.empty() && build.back() == ' ')
+        {
+            build.pop_back();
+        }
+        return build;
     }
     catch (...) // /EHa: a bad read is an access violation
     {
@@ -165,7 +185,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     RecorderOptions options;
     options.dir           = install / "captures" / "memoria";
     options.seed          = *seed;
-    options.captureAgent  = std::format("Memoria {:.1f}", GetVersion());
+    options.captureAgent  = "Memoria " MEMORIA_VERSION_TEXT;
     options.clientVersion = clientBuild();
     try
     {
@@ -271,19 +291,19 @@ auto Plugin::record(bool clientToServer, uint16_t id, uint32_t size, const uint8
     {
         provenance |= xicap::PacketFlag::Modified;
     }
-    // Packets of one chunk come in order, so a packet that sits no further into
-    // its chunk than the last one starts a new chunk. Only when data points
-    // into the chunk; otherwise the flag is left off.
-    const auto chunk = reinterpret_cast<uintptr_t>(dataChunk);
-    const auto at    = reinterpret_cast<uintptr_t>(data);
-    if (dataChunk && at >= chunk && at < chunk + sizeChunk)
+    // Ashita hands each packet as a copy, but the chunk it came in as is: a
+    // packet whose chunk differs from the last one's (pointer, size, or first
+    // bytes, which carry the chunk's sequence number) is the first of its chunk.
+    if (dataChunk && sizeChunk > 0)
     {
-        auto& last = lastOffset_[clientToServer ? 1 : 0];
-        if (!last || at - chunk <= *last)
+        auto&    last = lastChunk_[clientToServer ? 1 : 0];
+        ChunkKey key{ reinterpret_cast<uintptr_t>(dataChunk), sizeChunk, {} };
+        std::memcpy(key.head.data(), dataChunk, (std::min)(sizeChunk, static_cast<uint32_t>(key.head.size())));
+        if (!last || last->pointer != key.pointer || last->size != key.size || last->head != key.head)
         {
             provenance |= xicap::PacketFlag::FirstInChunk;
         }
-        last = at - chunk;
+        last = key;
     }
     recorder_->packet(Event{
         .kind           = Event::Kind::Packet,

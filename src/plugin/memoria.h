@@ -6,6 +6,7 @@
 
 #include <Ashita.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 
@@ -60,9 +61,15 @@ private:
     std::string               startError_;
     bool                      loggedIn_{ false };
     uint32_t                  loggedInAs_{ 0 }; // the character of the last login
-    // Per direction: the last packet's offset in its chunk, to tell when a new
+    // Per direction: the chunk the last packet came in, to tell when a new
     // chunk starts.
-    std::optional<uintptr_t> lastOffset_[2];
+    struct ChunkKey
+    {
+        uintptr_t               pointer;
+        uint32_t                size;
+        std::array<uint8_t, 16> head;
+    };
+    std::optional<ChunkKey> lastChunk_[2];
 };
 
 } // namespace memoria
