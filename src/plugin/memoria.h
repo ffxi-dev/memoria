@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/clock.h"
+#include "core/link.h"
 #include "core/recorder.h"
 #include "core/uploader.h"
 
@@ -8,7 +9,10 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <thread>
+#include <vector>
 
 namespace memoria
 {
@@ -48,10 +52,22 @@ private:
     auto record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto network() -> xicap::Network;
     auto say(const std::string& text) -> void;
+    auto post(std::string text) -> void; // say, from any thread: printed on the next frame
     auto status() -> void;
-    auto startUploads(const std::filesystem::path& install) -> void;
+    auto startUploads() -> void;
+    auto link() -> void;
+    auto unlink(const std::string& why) -> void;
+    auto remind() -> void;
 
     IAshitaCore*              core_{ nullptr };
+    std::filesystem::path     install_;
+    xicap::SecretSeed         seed_{};
+    std::string               server_ = "https://mogsafe.sruon.dev";
+    std::optional<Linked>     link_;
+    std::mutex                inboxMutex_;
+    std::vector<std::string>  inbox_;
+    std::optional<Linked>     arrived_; // from the link thread
+    bool                      stopReminded_{ false };
     ILogManager*              log_{ nullptr };
     Clock                     clock_;
     std::unique_ptr<Recorder> recorder_;
@@ -64,6 +80,7 @@ private:
     bool                      loggedIn_{ false };
     uint32_t                  loggedInAs_{ 0 };
     std::optional<ChunkKey>   lastChunk_[2]; // per direction
+    std::jthread              linker_;       // last: destroyed first, before what its thread uses
 };
 
 } // namespace memoria

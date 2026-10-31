@@ -1,10 +1,14 @@
 #include "core/clock.h"
 #include "core/event_queue.h"
+#include "core/link.h"
 #include "core/recorder.h"
 #include "core/seed_file.h"
 #include "core/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <monocypher.h>
+#include <nlohmann/json.hpp>
+#include <optional/monocypher-ed25519.h>
 #include <picosha2.h>
 #include <xicap/reader.h>
 
@@ -564,4 +568,139 @@ TEST_CASE("an upload the server cut off starts over, and outages only delay")
     CHECK(server.creates == 2);
     CHECK(server.uploads.rbegin()->second.data == readAll(file));
     CHECK(up->status()[0].error.empty());
+}
+
+namespace
+{
+
+// Mogsafe's link endpoints in memory. start checks the signature as Mogsafe does; the test plays the player who approves.
+class FakeLink final : public Http
+{
+public:
+    enum class Code
+    {
+        Pending,
+        Approved,
+        Expired,
+        Refused,
+    };
+
+    Code        state = Code::Pending;
+    std::string signedKey;
+
+    auto request([[maybe_unused]] const std::string& method, const std::string& url, [[maybe_unused]] const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    {
+        const auto json = nlohmann::json::parse(std::string(body.begin(), body.end()));
+        if (url.ends_with("/v1/link/start"))
+        {
+            const auto key     = json.at("key").get<std::string>();
+            const auto message = std::format("memoria-link\n{}\n{}", key, json.at("time").get<uint64_t>());
+            const auto sig     = fromHex(json.at("sig").get<std::string>());
+            const auto pub     = fromHex(key);
+            if (sig.size() != 64 || pub.size() != 32 || crypto_ed25519_check(sig.data(), pub.data(), reinterpret_cast<const uint8_t*>(message.data()), message.size()) != 0)
+            {
+                return HttpResponse{ .status = 400 };
+            }
+            signedKey = key;
+            return HttpResponse{ .status = 201, .body = R"({"code":"ABCD-2345","poll":"p0ll","url":"https://mogsafe.test/link?code=ABCD-2345","interval":1,"expires":600})" };
+        }
+        if (json.at("poll") != "p0ll")
+        {
+            return HttpResponse{ .status = 410 };
+        }
+        switch (state)
+        {
+            case Code::Pending:
+                return HttpResponse{ .status = 202, .body = R"({"status":"pending"})" };
+            case Code::Approved:
+                return HttpResponse{ .status = 200, .body = R"({"token":"t0ken","account":"sruon"})" };
+            case Code::Expired:
+                return HttpResponse{ .status = 410, .body = R"({"status":"expired"})" };
+            case Code::Refused:
+                return HttpResponse{ .status = 403, .body = R"({"status":"refused","reason":"linking is not open to you yet"})" };
+        }
+        return HttpResponse{ .status = 500 };
+    }
+
+private:
+    static auto fromHex(const std::string& hex) -> std::vector<uint8_t>
+    {
+        std::vector<uint8_t> out;
+        for (size_t i = 0; i + 1 < hex.size(); i += 2)
+        {
+            out.push_back(static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+        }
+        return out;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a link starts with a signature by the install key and ends with a token")
+{
+    FakeLink          mogsafe;
+    xicap::SecretSeed seed{};
+    seed.fill(7);
+
+    const auto code = startLink(mogsafe, "https://mogsafe.test", seed, 1'790'000'000);
+    REQUIRE(code.has_value());
+    CHECK(code->code == "ABCD-2345");
+    CHECK(code->interval == std::chrono::seconds(1));
+
+    // The key Mogsafe saw is the one xicap signs captures with.
+    std::array<uint8_t, 64> secret{};
+    std::array<uint8_t, 32> pub{};
+    auto                    copy = seed;
+    crypto_ed25519_key_pair(secret.data(), pub.data(), copy.data());
+    CHECK(mogsafe.signedKey == picosha2::bytes_to_hex_string(pub));
+
+    const auto pending = pollLink(mogsafe, "https://mogsafe.test", code->poll);
+    REQUIRE(pending.has_value());
+    CHECK(!pending->has_value());
+
+    mogsafe.state     = FakeLink::Code::Approved;
+    const auto linked = pollLink(mogsafe, "https://mogsafe.test", code->poll);
+    REQUIRE(linked.has_value());
+    REQUIRE(linked->has_value());
+    CHECK((*linked)->token == "t0ken");
+    CHECK((*linked)->account == "sruon");
+}
+
+TEST_CASE("an expired or refused link says why")
+{
+    FakeLink mogsafe;
+    mogsafe.state = FakeLink::Code::Expired;
+    CHECK(pollLink(mogsafe, "https://mogsafe.test", "p0ll").error() == "the code expired");
+    mogsafe.state = FakeLink::Code::Refused;
+    CHECK(pollLink(mogsafe, "https://mogsafe.test", "p0ll").error() == "linking is not open to you yet");
+}
+
+TEST_CASE("the link is kept across restarts")
+{
+    const auto dir  = tempDir();
+    const auto path = dir / "config" / "memoria" / "token";
+    CHECK(!loadLink(path));
+    REQUIRE(saveLink(path, { .token = "t0ken", .account = "sruon" }));
+    const auto link = loadLink(path);
+    REQUIRE(link);
+    CHECK(link->token == "t0ken");
+    CHECK(link->account == "sruon");
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a refused token stops the uploader")
+{
+    struct Revoked final : Http
+    {
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            return HttpResponse{ .status = 401 };
+        }
+    };
+    const auto dir = tempDir();
+    std::ofstream(dir / "a.xicap", std::ios::binary) << std::string(500, 'x');
+    Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test" }, std::make_unique<Revoked>());
+    CHECK(up.pass().has_value());
+    CHECK(up.unauthorized());
+    fs::remove_all(dir);
 }

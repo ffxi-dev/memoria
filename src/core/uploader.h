@@ -51,6 +51,7 @@ public:
     auto pass() -> std::optional<std::string>; // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;
+    [[nodiscard]] auto unauthorized() const -> bool; // Mogsafe refused the credentials: stopped
 
 private:
     struct File
@@ -83,6 +84,7 @@ private:
     std::mutex              wakeMutex_;
     std::condition_variable wake_;
     std::atomic<bool>       stopping_{ false };
+    std::atomic<bool>       unauthorized_{ false };
 };
 
 } // namespace memoria

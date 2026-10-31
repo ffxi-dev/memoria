@@ -30,15 +30,25 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(picosha2)
 
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+)
+FetchContent_MakeAvailable(json)
+
 add_library(memoria_core STATIC
     src/core/clock.cpp
     src/core/event_queue.cpp
+    src/core/link.cpp
     src/core/recorder.cpp
     src/core/seed_file.cpp
     src/core/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
-target_link_libraries(memoria_core PUBLIC xicap)
+# Monocypher is compiled into xicap; Memoria signs link requests with the install key through it.
+target_include_directories(memoria_core PRIVATE ${xicap_SOURCE_DIR}/third_party/monocypher)
+target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json)
 
 if(MEMORIA_BUILD_PLUGIN)
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -88,7 +98,8 @@ if(MEMORIA_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     add_executable(memoria_core_tests tests/core_tests.cpp)
-    target_link_libraries(memoria_core_tests PRIVATE memoria_core Catch2::Catch2WithMain)
+    target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
+    target_include_directories(memoria_core_tests PRIVATE ${xicap_SOURCE_DIR}/third_party/monocypher)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(memoria_core_tests)

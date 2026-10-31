@@ -96,6 +96,10 @@ auto Uploader::run() -> void
         try
         {
             failed = (!options_.mayRun || options_.mayRun()) && pass().has_value();
+            if (unauthorized_)
+            {
+                return;
+            }
         }
         catch (const std::exception&) // out of memory, or the folder went away
         {
@@ -123,7 +127,7 @@ auto Uploader::pass() -> std::optional<std::string>
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (stopping_)
+        if (stopping_ || unauthorized_)
         {
             break;
         }
@@ -298,7 +302,13 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
 {
     headers.emplace_back("Tus-Resumable", "1.0.0");
     headers.insert(headers.end(), options_.credentials.begin(), options_.credentials.end());
-    return http_->request(method, url, headers, body);
+    auto res = http_->request(method, url, headers, body);
+    if (res && res->status == 401)
+    {
+        unauthorized_ = true;
+        return std::unexpected("Mogsafe refused this install's token");
+    }
+    return res;
 }
 
 // One line per file: name, url, closed, refused, separated by tabs.
@@ -335,6 +345,11 @@ auto Uploader::save() -> void
     }
     std::error_code ec;
     std::filesystem::rename(tmp, options_.dir / STATE_FILE, ec);
+}
+
+auto Uploader::unauthorized() const -> bool
+{
+    return unauthorized_;
 }
 
 auto Uploader::status() const -> std::vector<UploadStatus>

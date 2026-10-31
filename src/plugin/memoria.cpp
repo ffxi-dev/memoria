@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -146,19 +148,29 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     core_ = core;
     log_  = logger;
 
-    const std::filesystem::path install = core_->GetInstallPath();
-    const auto                  seed    = loadOrCreateSeed(install / "config" / "memoria" / "key");
+    install_        = core_->GetInstallPath();
+    const auto seed = loadOrCreateSeed(install_ / "config" / "memoria" / "key");
     if (!seed)
     {
         startError_ = seed.error();
         say("not recording: " + startError_);
         return true; // stay loaded so /memoria status can say why
     }
+    seed_ = *seed;
+    link_ = loadLink(install_ / "config" / "memoria" / "token");
+    if (auto config = readIni(install_ / "config" / "memoria" / "upload.ini"); config && (*config)["server"].starts_with("https://"))
+    {
+        server_ = (*config)["server"];
+        while (server_.ends_with('/'))
+        {
+            server_.pop_back();
+        }
+    }
 
     try
     {
-        recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = install / "captures" / "memoria", .seed = *seed, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
-        startUploads(install);
+        recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = install_ / "captures" / "memoria", .seed = seed_, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
+        startUploads();
     }
     catch (const std::exception& error)
     {
@@ -185,12 +197,13 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         loggedInAs_ = late.character.characterId;
         recorder_->login(clock_.nowMs(), std::move(late));
     }
-    log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, (install / "captures" / "memoria").string().c_str());
+    log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, (install_ / "captures" / "memoria").string().c_str());
     return true;
 }
 
 auto Plugin::Release() -> void
 {
+    linker_ = {}; // stops and joins
     client::search::remove();
     client::lobby::remove();
     if (recorder_)
@@ -217,8 +230,10 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         const auto who = characterOf(data, size);
         if (!loggedIn_ || who.characterId != loggedInAs_)
         {
-            loggedIn_   = true;
-            loggedInAs_ = who.characterId;
+            loggedIn_     = true;
+            loggedInAs_   = who.characterId;
+            stopReminded_ = false;
+            remind();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
         }
     }
@@ -299,6 +314,29 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
 {
     UNREFERENCED_PARAMETER(isRenderingBackBuffer);
     client::search::tick();
+
+    std::vector<std::string> inbox;
+    std::optional<Linked>    arrived;
+    {
+        std::lock_guard lock(inboxMutex_);
+        inbox.swap(inbox_);
+        arrived.swap(arrived_);
+    }
+    for (const auto& text : inbox)
+    {
+        say(text);
+    }
+    if (arrived)
+    {
+        link_ = std::move(arrived);
+        say(std::format("linked to {}: your captures upload from now on", link_->account));
+        uploader_.reset();
+        startUploads();
+    }
+    if (uploader_ && uploader_->unauthorized())
+    {
+        unlink("Mogsafe no longer accepts this install");
+    }
 }
 
 auto Plugin::network() -> xicap::Network
@@ -311,32 +349,28 @@ auto Plugin::network() -> xicap::Network
     return ip >= RETAIL_FIRST && ip <= RETAIL_LAST ? xicap::Network::Retail : xicap::Network::Private;
 }
 
-// config/memoria/upload.ini: server, client_id, client_secret (a Cloudflare Access service token).
-auto Plugin::startUploads(const std::filesystem::path& install) -> void
+auto Plugin::startUploads() -> void
 {
-    auto config = readIni(install / "config" / "memoria" / "upload.ini");
-    if (!config)
+    if (!link_)
     {
-        uploadsOff_ = "no config/memoria/upload.ini";
+        uploadsOff_ = "not linked: /memoria link";
         return;
     }
-    auto& values = *config;
-    if (!values["server"].starts_with("https://") || values["client_id"].empty() || values["client_secret"].empty())
+    if (std::filesystem::exists(install_ / "config" / "memoria" / "paused"))
     {
-        uploadsOff_ = "upload.ini needs an https server, client_id, and client_secret";
+        uploadsOff_ = "paused: /memoria upload on";
         return;
     }
     UploadOptions options{
-        .dir         = install / "captures" / "memoria",
-        .server      = values["server"],
-        .credentials = { { "CF-Access-Client-Id", values["client_id"] }, { "CF-Access-Client-Secret", values["client_secret"] } },
+        .dir         = install_ / "captures" / "memoria",
+        .server      = server_,
+        .credentials = { { "Authorization", "Bearer " + link_->token } },
     };
-    while (options.server.ends_with('/'))
-    {
-        options.server.pop_back();
-    }
     // Clients sharing an install share its captures folder; the one whose upload thread holds this mutex uploads, and Windows hands it on when that client exits.
-    uploadMutex_   = ::CreateMutexA(nullptr, FALSE, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())).c_str());
+    if (!uploadMutex_)
+    {
+        uploadMutex_ = ::CreateMutexA(nullptr, FALSE, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())).c_str());
+    }
     options.mayRun = [mutex = uploadMutex_]
     {
         const auto r = ::WaitForSingleObject(mutex, 0);
@@ -349,6 +383,76 @@ auto Plugin::startUploads(const std::filesystem::path& install) -> void
 auto Plugin::say(const std::string& text) -> void
 {
     core_->GetChatManager()->Writef(1, false, "\x1E\x51[Memoria]\x1E\x01 %s", text.c_str());
+}
+
+auto Plugin::post(std::string text) -> void
+{
+    std::lock_guard lock(inboxMutex_);
+    inbox_.push_back(std::move(text));
+}
+
+auto Plugin::remind() -> void
+{
+    if (!link_)
+    {
+        say("your captures stay on this PC until you run /memoria link");
+    }
+}
+
+// Asks for a code, then polls until the player approves it on the link page.
+auto Plugin::link() -> void
+{
+    linker_ = std::jthread([this](std::stop_token stop)
+                           {
+                               WinHttp    http("Memoria/" MEMORIA_VERSION_TEXT);
+                               const auto now  = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                               const auto code = startLink(http, server_, seed_, static_cast<uint64_t>(now));
+                               if (!code)
+                               {
+                                   post("cannot start linking: " + code.error());
+                                   return;
+                               }
+                               post(std::format("open {} and enter {}", code->url, code->code));
+                               std::mutex                  mutex;
+                               std::condition_variable_any wake;
+                               const auto                  until = std::chrono::steady_clock::now() + code->expires;
+                               while (std::chrono::steady_clock::now() < until)
+                               {
+                                   std::unique_lock lock(mutex);
+                                   if (wake.wait_for(lock, stop, code->interval, []
+                                                     {
+                                                         return false;
+                                                     }) ||
+                                       stop.stop_requested())
+                                   {
+                                       return;
+                                   }
+                                   const auto result = pollLink(http, server_, code->poll);
+                                   if (!result)
+                                   {
+                                       post("not linked: " + result.error() + "; run /memoria link again");
+                                       return;
+                                   }
+                                   if (*result)
+                                   {
+                                       saveLink(install_ / "config" / "memoria" / "token", **result);
+                                       std::lock_guard inbox(inboxMutex_);
+                                       arrived_ = **result;
+                                       return;
+                                   }
+                               }
+                               post("the code expired: run /memoria link again");
+                           });
+}
+
+auto Plugin::unlink(const std::string& why) -> void
+{
+    uploader_.reset();
+    link_.reset();
+    std::error_code ec;
+    std::filesystem::remove(install_ / "config" / "memoria" / "token", ec);
+    uploadsOff_ = "not linked: /memoria link";
+    say(why + ": your captures stay on this PC until you run /memoria link");
 }
 
 auto Plugin::status() -> void
@@ -375,6 +479,10 @@ auto Plugin::status() -> void
     if (!searchError_.empty())
     {
         say("search not recorded: " + searchError_);
+    }
+    if (link_)
+    {
+        say("linked to " + link_->account);
     }
     if (!uploader_)
     {
@@ -442,10 +550,44 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     {
         recorder_->sessionStop(clock_.nowMs());
         say("session closed");
+        if (!std::exchange(stopReminded_, true))
+        {
+            remind();
+        }
+    }
+    else if (sub == "link")
+    {
+        say("asking Mogsafe for a code...");
+        link();
+    }
+    else if (sub == "unlink" && link_)
+    {
+        unlink("unlinked");
+    }
+    else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
+    {
+        const auto      paused = install_ / "config" / "memoria" / "paused";
+        std::error_code ec;
+        if (args[2] == "off")
+        {
+            std::ofstream{ paused };
+            uploader_.reset();
+            uploadsOff_ = "paused: /memoria upload on";
+            say("uploads paused");
+        }
+        else
+        {
+            std::filesystem::remove(paused, ec);
+            if (!uploader_)
+            {
+                startUploads();
+            }
+            say(uploader_ ? "uploads on" : "uploads off: " + uploadsOff_);
+        }
     }
     else
     {
-        say("/memoria status | key | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | upload on|off | key | note <text> | session start <file.xicap> | session stop");
     }
     return true;
 }
