@@ -288,31 +288,6 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
     fs::remove_all(dir);
 }
 
-TEST_CASE("PlayOnline traffic before the first login opens the first capture, before its login marker")
-{
-    const auto dir = tempDir();
-    {
-        Recorder rec(options(dir));
-        auto     irc = gamePacket(T0 - 5'000);
-        irc.channel  = 2;
-        rec.packet(irc);
-        rec.packet(gamePacket(T0 - 4'000)); // a game packet before any login stays out
-        rec.login(T0, who("Nouurs", 1));
-        rec.packet(gamePacket(T0 + 1));
-        rec.stop();
-    }
-    xicap::Reader     r(captures(dir)[0]);
-    xicap::ReadPacket p{};
-    REQUIRE(r.next(p));
-    CHECK(p.channel == 2);
-    CHECK(p.markers.empty());
-    REQUIRE(r.next(p));
-    CHECK(p.channel == 0);
-    REQUIRE(p.markers.size() == 1);
-    CHECK(p.markers[0].kind == xicap::MarkerKind::Login);
-    CHECK(!r.next(p));
-}
-
 TEST_CASE("a session is a second, complete capture of the same packets")
 {
     const auto dir     = tempDir();

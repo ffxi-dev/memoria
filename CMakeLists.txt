@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.4.3 LANGUAGES C CXX)
+project(memoria VERSION 0.4.4 LANGUAGES C CXX)
 
 # The core (queue, clock, keys, recording) builds anywhere and is tested on
 # Linux and Windows; the plugin needs Windows, 32-bit MSVC, and the Ashita SDK.
@@ -43,8 +43,6 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/client.h
         src/plugin/memoria.cpp
         src/plugin/memoria.h
-        src/plugin/pol.cpp
-        src/plugin/pol.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
     )

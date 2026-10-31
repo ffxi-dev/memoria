@@ -107,9 +107,6 @@ private:
     std::unique_ptr<xicap::Writer>        session_;
     std::optional<Login>                  login_; // who the open capture, or the broken one, belongs to
     std::chrono::steady_clock::time_point reopenAt_{};
-    // PlayOnline traffic before the first login, for the first capture.
-    std::vector<Event>                    early_;
-    size_t                                earlyBytes_{ 0 };
     xicap::CaptureId                      previous_{};
     std::chrono::steady_clock::time_point lastFlush_{};
 

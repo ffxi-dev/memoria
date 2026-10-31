@@ -2,6 +2,4 @@ LIBRARY "Memoria"
 EXPORTS
     expCreatePlugin             @1
     expGetInterfaceVersion      @2
-    expCreatePolPlugin          @3
-    expDestroyPlugin            @4
-    memoriaPolTake              @5
+    expDestroyPlugin            @3

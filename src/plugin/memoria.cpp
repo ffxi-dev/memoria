@@ -2,7 +2,6 @@
 
 #include "core/seed_file.h"
 #include "plugin/client.h"
-#include "plugin/pol.h"
 #include "plugin/winhttp.h"
 
 #include <Commands.h>
@@ -173,8 +172,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     log_  = logger;
 
     const std::filesystem::path install = core_->GetInstallPath();
-    polModule_                          = (install / "polplugins" / "Memoria.dll").wstring();
-    const auto seed                     = loadOrCreateSeed(install / "config" / "memoria" / "key");
+    const auto                  seed    = loadOrCreateSeed(install / "config" / "memoria" / "key");
     if (!seed)
     {
         startError_ = seed.error();
@@ -345,39 +343,6 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
 {
     UNREFERENCED_PARAMETER(isRenderingBackBuffer);
     client::search::tick();
-    takePol();
-}
-
-// The POL plugin is this DLL loaded from polplugins/: usually a separate copy,
-// with its own queue, found by its path; else this copy is the one.
-auto Plugin::takePol() -> void
-{
-    if (!recorder_)
-    {
-        return;
-    }
-    auto take = &memoriaPolTake;
-    if (const auto pol = ::GetModuleHandleW(polModule_.c_str()))
-    {
-        if (const auto found = ::GetProcAddress(pol, "memoriaPolTake"))
-        {
-            take      = reinterpret_cast<decltype(take)>(found);
-            polFound_ = true;
-        }
-    }
-    take([](void* context, const PolRecord* r)
-         {
-             static_cast<Plugin*>(context)->polTaken_++;
-             static_cast<Plugin*>(context)->recorder_->packet(Event{
-                 .kind           = Event::Kind::Packet,
-                 .timestamp      = r->timestamp,
-                 .clientToServer = r->clientToServer != 0,
-                 .channel        = r->channel,
-                 .opcode         = r->opcode,
-                 .data           = { r->data, r->data + r->size },
-             });
-         },
-         this);
 }
 
 auto Plugin::network() -> xicap::Network
@@ -479,7 +444,6 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         {
             say("last write error: " + status.error);
         }
-        say(polFound_ ? std::format("PlayOnline: {} records", polTaken_) : "PlayOnline: the POL plugin is not loaded");
         say(client::lobby::version().empty() ? "client version: unknown until character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")")
                                              : "client version " + client::lobby::version());
         if (!searchError_.empty())
@@ -546,39 +510,15 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
 
 } // namespace memoria
 
-namespace
-{
-// What this copy of the DLL made: Ashita destroys both through one export.
-memoria::Plugin*    game_ = nullptr;
-memoria::PolPlugin* pol_  = nullptr;
-} // namespace
-
 extern "C" __declspec(dllexport) IPlugin* __stdcall expCreatePlugin(const char* args)
 {
     UNREFERENCED_PARAMETER(args);
-    game_ = new memoria::Plugin();
-    return game_;
-}
-
-extern "C" __declspec(dllexport) IPolPlugin* __stdcall expCreatePolPlugin(const char* args)
-{
-    UNREFERENCED_PARAMETER(args);
-    pol_ = new memoria::PolPlugin();
-    return pol_;
+    return new memoria::Plugin();
 }
 
 extern "C" __declspec(dllexport) void __stdcall expDestroyPlugin(void* instance)
 {
-    if (instance == static_cast<IPlugin*>(game_))
-    {
-        delete game_;
-        game_ = nullptr;
-    }
-    else if (instance == static_cast<IPolPlugin*>(pol_))
-    {
-        delete pol_;
-        pol_ = nullptr;
-    }
+    delete static_cast<memoria::Plugin*>(instance);
 }
 
 extern "C" __declspec(dllexport) double __stdcall expGetInterfaceVersion()

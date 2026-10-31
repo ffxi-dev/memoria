@@ -38,7 +38,6 @@ public:
 private:
     auto record(bool clientToServer, uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto network() -> xicap::Network;
-    auto takePol() -> void;
 
 public:
     auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
@@ -56,9 +55,6 @@ private:
     HANDLE                    uploadMutex_{ nullptr };
     std::string               searchError_; // why search is not recorded, when it is not
     std::string               lobbyError_;  // why the client version cannot be read
-    std::wstring              polModule_;   // polplugins/Memoria.dll
-    bool                      polFound_{ false };
-    uint64_t                  polTaken_{ 0 };
     std::string               startError_;
     bool                      loggedIn_{ false };
     uint32_t                  loggedInAs_{ 0 }; // the character of the last login
