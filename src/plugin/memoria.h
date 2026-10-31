@@ -76,6 +76,8 @@ private:
     std::string               uploadsOff_;
     std::string               searchError_;
     std::string               lobbyError_;
+    std::string               characterError_; // why the content id and world are missing
+    xicap::CharacterIdentity  character_{};
     bool                      loggedIn_{ false };
     uint32_t                  loggedInAs_{ 0 };
     std::optional<ChunkKey>   lastChunk_[2]; // per direction

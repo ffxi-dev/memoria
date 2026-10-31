@@ -236,8 +236,10 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         late.character.characterId = party->GetMemberServerId(0);
         const char* name           = party->GetMemberName(0);
         std::memcpy(late.character.characterName.data(), name, strnlen(name, late.character.characterName.size() - 1));
-        loggedIn_   = true;
-        loggedInAs_ = late.character.characterId;
+        characterError_ = client::lobby::character(late.character);
+        character_      = late.character;
+        loggedIn_       = true;
+        loggedInAs_     = late.character.characterId;
         recorder_->login(clock_.nowMs(), std::move(late));
     }
     log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, (install_ / "captures" / "memoria").string().c_str());
@@ -270,11 +272,13 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
     if (id == ZONE_IN)
     {
-        const auto who = characterOf(data, size);
+        auto who = characterOf(data, size);
         if (!loggedIn_ || who.characterId != loggedInAs_)
         {
-            loggedIn_   = true;
-            loggedInAs_ = who.characterId;
+            characterError_ = client::lobby::character(who);
+            character_      = who;
+            loggedIn_       = true;
+            loggedInAs_     = who.characterId;
             remind();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
         }
@@ -540,6 +544,11 @@ auto Plugin::status() -> void
     if (!s.error.empty())
     {
         say(paint(Color::Red, "Last write error: " + s.error));
+    }
+    if (loggedIn_)
+    {
+        const std::string name(character_.characterName.data());
+        say(characterError_.empty() ? std::format("Character: {} on {}, content id {}", name, character_.worldName.data(), character_.contentId) : "Character: " + name + paint(Color::Grey, " (world unknown: " + characterError_ + ")"));
     }
     const auto version = client::lobby::version();
     say("Client: " + (version.empty() ? paint(Color::Grey, "known after character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")")) : version));

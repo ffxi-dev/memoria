@@ -248,6 +248,49 @@ auto remove() -> void
     }
 }
 
+auto character(xicap::CharacterIdentity& c) -> std::string
+{
+    // The content id getter: mov ecx,[esp+4]; index * 0x8C; mov ecx,[client]; mov eax,[ecx+eax*4+list]; ret
+    static const auto getter = find("8B4C24048D04CD000000002BC18B0D????????8D04808B8481????????C3");
+    if (getter == 0)
+    {
+        return "the character signature is missing";
+    }
+    // The list holds lobby packet 0x20's entries (LSB's lpkt_chr_info_sub2); the context keeps the count before it and the index sent in packet 0x07 before that.
+    constexpr uint32_t ENTRY_SIZE = 0x8C;
+    try
+    {
+        const auto client = read32(read32(getter + 15));
+        const auto list   = client ? client + read32(getter + 25) : 0;
+        if (list == 0)
+        {
+            return "no character list";
+        }
+        const auto index = read32(list - 8);
+        if (index >= read32(list - 4) || index >= 16)
+        {
+            return "no character selected";
+        }
+        const auto* entry = reinterpret_cast<const uint8_t*>(list + index * ENTRY_SIZE);
+        uint16_t    low{};
+        std::memcpy(&low, entry + 4, sizeof(low));
+        if ((static_cast<uint32_t>(entry[11]) << 16 | low) != c.characterId)
+        {
+            return "the selected character is another one";
+        }
+        std::memcpy(&c.contentId, entry, sizeof(c.contentId));
+        std::memcpy(&c.worldId, entry + 6, sizeof(c.worldId));
+        const auto* world = reinterpret_cast<const char*>(entry + 28);
+        c.worldName       = {};
+        std::memcpy(c.worldName.data(), world, strnlen(world, c.worldName.size() - 1));
+        return {};
+    }
+    catch (...) // /EHa
+    {
+        return "cannot read the character list";
+    }
+}
+
 } // namespace lobby
 
 } // namespace memoria::client
