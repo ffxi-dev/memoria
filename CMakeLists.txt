@@ -81,10 +81,16 @@ if(MEMORIA_BUILD_PLUGIN)
     endif()
     target_link_libraries(memoria PRIVATE memoria_core winhttp shell32 ole32)
     target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${PROJECT_VERSION}")
-    # The SDK helper clears the global flags, /EHsc among them: the core needs an exception model back.
-    target_compile_options(memoria_core PRIVATE /EHa)
+    # The SDK helper clears the global C++ flags, so the core and xicap need their exception model and Release optimisation back.
+    foreach(target memoria_core xicap)
+        target_compile_options(${target} PRIVATE /EHa "$<$<CONFIG:Release>:/O2;/Ob2;/DNDEBUG>")
+    endforeach()
     # C5298: a stray control character in the SDK's d3d8 dxfile.h.
     target_compile_options(memoria PRIVATE /wd5298)
+    # Designated initializers leave fields out on purpose; they start at zero.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(memoria PRIVATE -Wno-missing-designated-field-initializers)
+    endif()
 endif()
 
 if(MEMORIA_BUILD_TESTS)

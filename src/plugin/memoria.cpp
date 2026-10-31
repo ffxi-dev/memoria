@@ -673,18 +673,18 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
 
 } // namespace memoria
 
-extern "C" __declspec(dllexport) IPlugin* __stdcall expCreatePlugin(const char* args)
+extern "C" IPlugin* __stdcall expCreatePlugin(const char* args)
 {
     UNREFERENCED_PARAMETER(args);
     return new memoria::Plugin();
 }
 
-extern "C" __declspec(dllexport) void __stdcall expDestroyPlugin(void* instance)
+extern "C" void __stdcall expDestroyPlugin(void* instance)
 {
     delete static_cast<memoria::Plugin*>(instance);
 }
 
-extern "C" __declspec(dllexport) double __stdcall expGetInterfaceVersion()
+extern "C" double __stdcall expGetInterfaceVersion()
 {
     return ASHITA_INTERFACE_VERSION;
 }

@@ -19,7 +19,7 @@ cmake -S . -B build -G Ninja -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
 cmake --build build --target memoria_core_tests && ctest --test-dir build --output-on-failure
 ```
 
-The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. CI runs both: `test.yml` through vault's shared `cmake.yml`, `build.yml` through `sruon/Ashita4-plugin-ci`. Run clang-format (v22) on every C++ file you change. Commit in small steps; the message says why.
+The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. CI runs both on the org's runner lsb: `test.yml` through vault's shared `cmake.yml`, which also runs the core's tests as 32-bit Windows programs under Wine, and `build.yml`, which builds the DLL with clang-cl in vault's `vault-msvc` image. Code must build with both MSVC and clang-cl. Run clang-format (v22) on every C++ file you change. Commit in small steps; the message says why.
 
 ## Rules
 

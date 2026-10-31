@@ -95,9 +95,11 @@ find_library(ASHITA_SDK_LIB_DINPUT8
         ${ASHITA_SDK_PATH_D3D8_LIB}
     NO_DEFAULT_PATH
     )
+# The SDK ships DxErr8.lib; the second name matters where file names are case-sensitive.
 find_library(ASHITA_SDK_LIB_DXERR8
     NAMES
         dxerr8
+        DxErr8
     PATHS
         ${ASHITA_SDK_PATH_D3D8_LIB}
     NO_DEFAULT_PATH
@@ -198,8 +200,9 @@ if (MSVC)
 
     # Attaches the SDK header and libraries to the given target.
     function (ashita_sdk_attach target)
+        # SYSTEM: warnings in the SDK's headers are not the plugin's to fix.
         target_include_directories(${target}
-            PRIVATE
+            SYSTEM PRIVATE
                 ${ASHITA_SDK_INCLUDE_DIRS}
             )
         target_link_directories(${target}

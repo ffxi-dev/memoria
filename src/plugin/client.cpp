@@ -155,8 +155,8 @@ auto install(Sink sink) -> std::string
     decrypt_  = reinterpret_cast<Decrypt>(decrypt);
     nextPage_ = reinterpret_cast<NextPage>(nextPage - 0x36);
     sink_     = sink;
-    for (const auto [operand, expected, target] : { std::tuple{ decryptCall + 8, decrypt, reinterpret_cast<uintptr_t>(&decryptHook) },
-                                                    std::tuple{ nextPageCall + 10, reinterpret_cast<uintptr_t>(nextPage_), reinterpret_cast<uintptr_t>(&nextPageHook) } })
+    for (const auto& [operand, expected, target] : { std::tuple{ decryptCall + 8, decrypt, reinterpret_cast<uintptr_t>(&decryptHook) },
+                                                     std::tuple{ nextPageCall + 10, reinterpret_cast<uintptr_t>(nextPage_), reinterpret_cast<uintptr_t>(&nextPageHook) } })
     {
         const auto patch = redirect(operand, expected, target);
         if (!patch)

@@ -1,21 +1,64 @@
 name: build
 
+# Builds Memoria.dll on lsb with clang-cl in vault's vault-msvc image (ffxi-dev/vault msvc/); release.yml calls this too.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
+  format:
+    runs-on: [self-hosted, lsb]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check formatting
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q clang-format==22.1.4
+          git ls-files -z '*.c' '*.cc' '*.cpp' '*.h' '*.hpp' | xargs -0 -r "$RUNNER_TEMP/venv/bin/clang-format" --dry-run --Werror
+
   plugin:
-    # The shared workflow's release job attaches the DLL to a release.
-    permissions:
-      contents: write
-    uses: sruon/Ashita4-plugin-ci/.github/workflows/build-plugin.yml@v1.1
-    with:
-      targets: memoria
-      output-dir-variable: MEMORIA_OUTPUT_DIR
-      cmake-args: -DMEMORIA_BUILD_TESTS=OFF
-      private-owner: ffxi-dev
-    secrets:
-      ssh-key: ${{ secrets.XICAP_DEPLOY_KEY }}
+    runs-on: [self-hosted, lsb]
+    env:
+      XICAP_DEPLOY_KEY: ${{ secrets.XICAP_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the Ashita SDK
+        run: |
+          sdk="$RUNNER_TEMP/ashita"
+          git clone -q --filter=blob:none --no-checkout --depth 1 --branch v4.3.1.1 https://github.com/AshitaXI/Ashita-v4beta.git "$sdk"
+          git -C "$sdk" sparse-checkout set plugins/sdk
+          git -C "$sdk" checkout -q
+      - name: Fetch xicap over SSH
+        # The key and git settings stay in the job's temp folder and env, so lsb's own ~/.ssh and ~/.gitconfig are untouched.
+        run: |
+          key="$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$XICAP_DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          {
+            echo "GIT_SSH_COMMAND=ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${key}_hosts"
+            echo "GIT_CONFIG_COUNT=1"
+            echo "GIT_CONFIG_KEY_0=url.git@github.com:ffxi-dev/.insteadOf"
+            echo "GIT_CONFIG_VALUE_0=https://github.com/ffxi-dev/"
+          } >> "$GITHUB_ENV"
+      - name: Build
+        # ssh needs the runner's user in /etc/passwd, so the container borrows the host's.
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME="$RUNNER_TEMP/home" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w "$GITHUB_WORKSPACE" \
+            -e ASHITA4_SDK_PATH="$RUNNER_TEMP/ashita/plugins/sdk" -e GIT_SSH_COMMAND -e GIT_CONFIG_COUNT -e GIT_CONFIG_KEY_0 -e GIT_CONFIG_VALUE_0 \
+            vault-msvc:1 sh -ec '
+              cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="$PWD/out"
+              cmake --build build --target memoria'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memoria
+          path: out/Memoria.dll
+          if-no-files-found: error

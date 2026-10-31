@@ -7,20 +7,12 @@ on:
 
 jobs:
   build:
-    permissions:
-      contents: write
-    uses: sruon/Ashita4-plugin-ci/.github/workflows/build-plugin.yml@v1.1
-    with:
-      targets: memoria
-      output-dir-variable: MEMORIA_OUTPUT_DIR
-      cmake-args: -DMEMORIA_BUILD_TESTS=OFF
-      private-owner: ffxi-dev
-    secrets:
-      ssh-key: ${{ secrets.XICAP_DEPLOY_KEY }}
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
 
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lsb]
     permissions:
       contents: write
     steps:
@@ -33,9 +25,11 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           grep -q "project(memoria VERSION ${version} " CMakeLists.txt || { echo "tag $GITHUB_REF_NAME does not match CMakeLists.txt" >&2; exit 1; }
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)
-          gh release create "$GITHUB_REF_NAME" out/Memoria.dll --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "SHA-256 $sha256"
+      - name: Checksum
+        id: sum
+        run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      # lsb has no gh CLI, so the release goes through the API with this action.
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/Memoria.dll
+          body: SHA-256 ${{ steps.sum.outputs.sha256 }}

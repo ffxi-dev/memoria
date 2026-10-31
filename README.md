@@ -17,6 +17,8 @@ cmake --build build --target memoria
 
 Then `/load memoria` in game.
 
+CI builds the same DLL on Linux with clang-cl, in the `vault-msvc` image from `ffxi-dev/vault`'s `msvc/` folder.
+
 The core's tests build anywhere:
 
 ```
