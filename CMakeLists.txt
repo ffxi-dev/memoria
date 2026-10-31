@@ -24,6 +24,7 @@ FetchContent_MakeAvailable(xicap)
 add_library(memoria_core STATIC
     src/core/clock.cpp
     src/core/event_queue.cpp
+    src/core/recorder.cpp
     src/core/seed_file.cpp
 )
 target_include_directories(memoria_core PUBLIC src)
