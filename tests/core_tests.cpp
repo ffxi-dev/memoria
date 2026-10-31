@@ -221,6 +221,32 @@ TEST_CASE("a relog on the same character continues the capture")
     fs::remove_all(dir);
 }
 
+TEST_CASE("a start that missed the content id continues on a login that has it")
+{
+    const auto dir = tempDir();
+    {
+        Login late               = who("Nouurs", 1);
+        late.character.contentId = 0;
+        late.character.worldId   = 0;
+        late.midSession          = true;
+        Recorder rec(options(dir));
+        rec.login(T0, late);
+        rec.packet(gamePacket(T0 + 1));
+        rec.login(T0 + 10'000, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 10'001));
+        Login other               = who("Nouurs", 1);
+        other.character.contentId = 7; // same character id and name on another account
+        rec.login(T0 + 20'000, other);
+        rec.packet(gamePacket(T0 + 20'001));
+        rec.stop();
+    }
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 2);
+    CHECK(readCapture(files[0]).markers == std::vector{ xicap::MarkerKind::Login });
+    CHECK(readCapture(files[0]).packets == 2);
+    fs::remove_all(dir);
+}
+
 TEST_CASE("another character starts a capture that continues the first")
 {
     const auto dir = tempDir();

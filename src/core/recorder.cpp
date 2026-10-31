@@ -53,9 +53,11 @@ auto randomCaptureId() -> xicap::CaptureId
     return id;
 }
 
+// A login that could not read the content id and world (0) matches on the character id and name alone.
 auto sameCharacter(const xicap::CharacterIdentity& a, const xicap::CharacterIdentity& b) -> bool
 {
-    return a.contentId == b.contentId && a.characterId == b.characterId && a.worldId == b.worldId && a.characterName == b.characterName;
+    const bool known = a.contentId != 0 && b.contentId != 0;
+    return a.characterId == b.characterId && a.characterName == b.characterName && (!known || (a.contentId == b.contentId && a.worldId == b.worldId));
 }
 
 auto fileName(uint64_t timestamp, const xicap::CharacterIdentity& character, const xicap::CaptureId& id) -> std::string
@@ -212,6 +214,7 @@ auto Recorder::handle(const Event& event) -> void
             case Event::Kind::Login:
                 if (writer_ && login_ && sameCharacter(login_->character, event.login->character))
                 {
+                    login_->character = event.login->character; // the header keeps what it had; later logins compare against what is now known
                     mark(xicap::MarkerKind::Login);
                 }
                 else
