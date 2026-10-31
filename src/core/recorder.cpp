@@ -181,6 +181,18 @@ auto Recorder::run() -> void
             {
                 broken(error);
             }
+            if (session_)
+            {
+                try
+                {
+                    session_->flush();
+                }
+                catch (const std::exception& error)
+                {
+                    fail(error);
+                    session_.reset();
+                }
+            }
             lastFlush_ = now;
         }
         if (stopping)
