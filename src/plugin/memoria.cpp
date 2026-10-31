@@ -5,6 +5,7 @@
 #include "plugin/winhttp.h"
 
 #include <Commands.h>
+#include <shellapi.h>
 #include <xicap/constants.h>
 
 #include <algorithm>
@@ -412,7 +413,17 @@ auto Plugin::link() -> void
                                    post("cannot start linking: " + code.error());
                                    return;
                                }
-                               post(std::format("open {} and enter {}", code->url, code->code));
+                               post(std::format("enter {} on {}", code->code, code->url));
+                               // Only Mogsafe's own link page: never a URL the server could swap for another.
+                               if (code->url.starts_with(server_ + "/link"))
+                               {
+                                   const auto com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+                                   ::ShellExecuteW(nullptr, L"open", std::wstring(code->url.begin(), code->url.end()).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                                   if (SUCCEEDED(com))
+                                   {
+                                       ::CoUninitialize();
+                                   }
+                               }
                                std::mutex                  mutex;
                                std::condition_variable_any wake;
                                const auto                  until = std::chrono::steady_clock::now() + code->expires;

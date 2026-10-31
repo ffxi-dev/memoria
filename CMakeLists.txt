@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.5.0 LANGUAGES C CXX)
+project(memoria VERSION 0.5.1 LANGUAGES C CXX)
 
 # The core builds and is tested anywhere; the plugin needs 32-bit MSVC and the Ashita SDK.
 option(MEMORIA_BUILD_PLUGIN "Build the Ashita plugin (needs ASHITA4_SDK_PATH)" ${WIN32})
@@ -79,7 +79,7 @@ if(MEMORIA_BUILD_PLUGIN)
     else()
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
-    target_link_libraries(memoria PRIVATE memoria_core winhttp)
+    target_link_libraries(memoria PRIVATE memoria_core winhttp shell32 ole32)
     target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${PROJECT_VERSION}")
     # The SDK helper clears the global flags, /EHsc among them: the core needs an exception model back.
     target_compile_options(memoria_core PRIVATE /EHa)
