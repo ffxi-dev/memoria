@@ -260,7 +260,7 @@ auto Plugin::record(bool clientToServer, uint32_t size, const uint8_t* data, con
     if (dataChunk && sizeChunk > 0)
     {
         ChunkKey key{ reinterpret_cast<uintptr_t>(dataChunk), sizeChunk, {} };
-        std::memcpy(key.head.data(), dataChunk, std::min<size_t>(sizeChunk, key.head.size()));
+        std::memcpy(key.head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key.head.size()));
         auto& last = lastChunk_[clientToServer ? 1 : 0];
         if (last != key)
         {
@@ -428,7 +428,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         // The rest of the line as typed: a path can hold spaces.
         std::string_view path(command);
         path.remove_prefix(path.find("start") + 5);
-        path.remove_prefix(std::min(path.find_first_not_of(" \""), path.size()));
+        path.remove_prefix((std::min)(path.find_first_not_of(" \""), path.size()));
         path = path.substr(0, path.find_last_not_of(" \"") + 1);
         if (path.empty())
         {
