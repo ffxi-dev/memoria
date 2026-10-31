@@ -41,7 +41,8 @@ struct RecorderStatus
     std::filesystem::path capture; // empty when nothing is open
     uint64_t              packets{};
     uint64_t              dropped{};
-    std::string           error; // the last write error, if any
+    std::string           error;       // the last write error, if any
+    xicap::PublicKey      publicKey{}; // the install's, once a capture has opened
 };
 
 // Writes what the game thread queues to xicap captures, on a thread of its

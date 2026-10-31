@@ -1,12 +1,18 @@
 #pragma once
 
+#include "core/clock.h"
+#include "core/recorder.h"
+
 #include <Ashita.h>
+
+#include <memory>
+#include <optional>
 
 namespace memoria
 {
 
-// The Ashita plugin. For now it loads, says which version it is, and unloads;
-// recording follows (vault openspec add-memoria, group 2).
+// The Ashita plugin: hands every game packet and every login and logout to the
+// recorder. Its hooks run after every other plugin's and only copy.
 class Plugin final : public IPlugin
 {
 public:
@@ -15,13 +21,30 @@ public:
     auto GetDescription() const -> const char* override;
     auto GetLink() const -> const char* override;
     auto GetVersion() const -> double override;
+    auto GetPriority() const -> int32_t override;
     auto GetFlags() const -> uint32_t override;
 
     auto Initialize(IAshitaCore* core, ILogManager* logger, uint32_t id) -> bool override;
     auto Release() -> void override;
 
+    auto HandleCommand(int32_t mode, const char* command, bool injected) -> bool override;
+    auto HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
+    auto HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
+
 private:
-    ILogManager* log_{ nullptr };
+    auto record(bool clientToServer, uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
+    auto network() -> xicap::Network;
+    auto say(const std::string& text) -> void;
+
+    IAshitaCore*              core_{ nullptr };
+    ILogManager*              log_{ nullptr };
+    Clock                     clock_;
+    std::unique_ptr<Recorder> recorder_;
+    std::string               startError_;
+    bool                      loggedIn_{ false };
+    // Per direction: the last packet's offset in its chunk, to tell when a new
+    // chunk starts.
+    std::optional<uintptr_t> lastOffset_[2];
 };
 
 } // namespace memoria

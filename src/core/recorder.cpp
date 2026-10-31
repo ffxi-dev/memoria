@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
-#include <cstdio>
 #include <cstring>
 #include <format>
 #include <fstream>
@@ -39,12 +39,11 @@ auto parseHex(std::string_view text) -> std::optional<xicap::CaptureId>
     }
     for (size_t i = 0; i < id.size(); ++i)
     {
-        unsigned value = 0;
-        if (std::sscanf(std::string(text.substr(i * 2, 2)).c_str(), "%02x", &value) != 1)
+        const auto* first = text.data() + i * 2;
+        if (std::from_chars(first, first + 2, id[i], 16).ptr != first + 2)
         {
             return std::nullopt;
         }
-        id[i] = static_cast<uint8_t>(value);
     }
     return id;
 }
@@ -303,7 +302,8 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
         writer_->mark(xicap::MarkerKind::Login);
     }
     std::lock_guard lock(statusMutex_);
-    status_.capture = path;
+    status_.capture   = path;
+    status_.publicKey = writer_->publicKey();
 }
 
 auto Recorder::close() -> void
