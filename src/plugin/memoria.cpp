@@ -146,6 +146,23 @@ auto count(uint64_t n) -> std::string
     return text;
 }
 
+// "20261031-075857-Nouuurs-c96ece1b.xicap" reads as "Nouuurs (started Oct 31 07:58 UTC)".
+auto captureName(const std::string& file) -> std::string
+{
+    constexpr std::array<std::string_view, 12> months{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    const auto                                 parts = file | std::views::split('-') | std::ranges::to<std::vector<std::string>>();
+    if (parts.size() < 4 || parts[0].size() != 8 || parts[1].size() != 6)
+    {
+        return file;
+    }
+    const auto month = std::stoi(parts[0].substr(4, 2));
+    if (month < 1 || month > 12)
+    {
+        return file;
+    }
+    return std::format("{} (started {} {} {}:{} UTC)", parts[2], months[month - 1], parts[0].substr(6, 2), parts[1].substr(0, 2), parts[1].substr(2, 2));
+}
+
 } // namespace
 
 auto Plugin::GetName() const -> const char*
@@ -559,28 +576,54 @@ auto Plugin::status() -> void
         say("Uploads: " + paint(Color::Yellow, uploadsOff_));
         return;
     }
-    const auto files   = uploader_->status();
-    uint64_t   total   = 0;
-    uint64_t   sent    = 0;
-    size_t     pending = 0;
+    const auto files = uploader_->status();
+    const auto own   = s.capture.filename().string();
+    const auto sent  = [](const UploadStatus& u)
+    {
+        return std::format("{} of {} sent", size(u.sent), size(u.size));
+    };
+    say("Uploads: linked to " + link_->account);
+    if (const auto it = std::ranges::find(files, own, &UploadStatus::name); it != files.end())
+    {
+        say("This capture: " + sent(*it));
+    }
+    size_t uploaded = 0;
     for (const auto& u : files)
     {
-        total += u.size;
-        sent += u.closed ? u.size : u.sent;
-        pending += u.closed ? 0 : 1;
+        if (u.stage == UploadStage::Uploaded && u.error.empty())
+        {
+            ++uploaded;
+            continue;
+        }
+        if (u.name == own)
+        {
+            continue;
+        }
+        std::string what;
+        switch (u.stage)
+        {
+            case UploadStage::Uploaded:
+                what = "uploaded";
+                break;
+            case UploadStage::Recording:
+                what = "recording on another client, " + sent(u);
+                break;
+            case UploadStage::Finishing:
+                what = "ended, " + sent(u);
+                break;
+            case UploadStage::CutOff:
+                what = paint(Color::Yellow, "cut off without an end") + "; Mogsafe files it as cut off a day after its last byte";
+                break;
+        }
+        say(std::format("{}: {}", captureName(u.name), what));
+        if (!u.error.empty())
+        {
+            say(paint(Color::Red, "  " + u.error));
+        }
     }
-    say("Uploads: linked to " + link_->account);
-    if (const auto own = std::ranges::find(files, s.capture.filename().string(), &UploadStatus::name); own != files.end())
+    if (uploaded > 0)
     {
-        say(std::format("This capture: {} of {} sent", size(own->sent), size(own->size)));
-    }
-    say(std::format("This folder: {} of {} sent, {} of {} captures still open{}", size(sent), size(total), pending, files.size(), uploader_->uploading() ? "" : paint(Color::Grey, " (another client sharing this Ashita folder sends them)")));
-    for (const auto& u : files | std::views::filter([](const UploadStatus& u)
-                                                    {
-                                                        return !u.error.empty();
-                                                    }))
-    {
-        say(paint(Color::Red, std::format("{}: {}", u.name, u.error)));
+        say(std::format("{} earlier capture{} uploaded", uploaded, uploaded == 1 ? "" : "s"));
     }
 }
 

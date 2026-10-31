@@ -28,12 +28,20 @@ struct UploadOptions
     std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
 };
 
+enum class UploadStage
+{
+    Uploaded,
+    Recording, // still growing, in this client or another sharing the folder
+    Finishing, // ended; the close follows once the rest is sent
+    CutOff,    // stopped without an end: Mogsafe files it as cut off a day after its last byte
+};
+
 struct UploadStatus
 {
     std::string name;
     uint64_t    sent{};
     uint64_t    size{};
-    bool        closed{};
+    UploadStage stage{};
     std::string error;
 };
 
