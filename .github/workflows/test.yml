@@ -8,7 +8,7 @@ on:
 
 jobs:
   core:
-    uses: ffxi-dev/vault/.github/workflows/cmake.yml@ci/v1.6
+    uses: ffxi-dev/vault/.github/workflows/cmake.yml@ci/v1.7
     with:
       configure-args: -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
       targets: memoria_core_tests
