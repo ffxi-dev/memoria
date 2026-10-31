@@ -55,6 +55,7 @@ private:
     std::string               uploadsOff_; // why uploads are off, when they are
     HANDLE                    uploadMutex_{ nullptr };
     std::string               searchError_; // why search is not recorded, when it is not
+    std::string               lobbyError_;  // why the client version cannot be read
     std::wstring              polModule_;   // polplugins/Memoria.dll
     bool                      polFound_{ false };
     uint64_t                  polTaken_{ 0 };

@@ -4,6 +4,7 @@
 
 #include <xicap/writer.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -35,6 +36,7 @@ struct Login
     xicap::CharacterIdentity character{};
     xicap::Network           network    = xicap::Network::Unknown;
     bool                     midSession = false; // the plugin loaded after the login
+    std::array<char, 32>     clientVersion{};    // as the client told the lobby; empty: RecorderOptions'
 };
 
 struct RecorderStatus

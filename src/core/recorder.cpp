@@ -295,7 +295,7 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
     }
     xicap::WriterConfig config{};
     config.captureAgent      = options_.captureAgent;
-    config.clientVersion     = options_.clientVersion;
+    config.clientVersion     = who.clientVersion[0] != 0 ? std::string(who.clientVersion.data(), strnlen(who.clientVersion.data(), who.clientVersion.size())) : options_.clientVersion;
     config.character         = who.character;
     config.clockSource       = xicap::ClockSource::Live;
     config.origin            = xicap::Origin::Live;

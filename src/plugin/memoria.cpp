@@ -191,6 +191,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     {
         recorder_ = std::make_unique<Recorder>(std::move(options));
         startUploads(install);
+        lobbyError_  = client::lobby::install();
         instance_    = this;
         searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
                                                {
@@ -225,6 +226,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
 auto Plugin::Release() -> void
 {
     client::search::remove(); // before the recorder it feeds goes
+    client::lobby::remove();
     if (recorder_)
     {
         recorder_->stop();
@@ -252,7 +254,10 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         const auto who = characterOf(data, size);
         if (!loggedIn_ || who.characterId != loggedInAs_)
         {
-            recorder_->login(clock_.nowMs(), Login{ .character = who, .network = network(), .midSession = false });
+            Login      login{ .character = who, .network = network(), .midSession = false };
+            const auto version = client::lobby::version();
+            std::memcpy(login.clientVersion.data(), version.data(), (std::min)(version.size(), login.clientVersion.size() - 1));
+            recorder_->login(clock_.nowMs(), login);
             loggedIn_   = true;
             loggedInAs_ = who.characterId;
         }
@@ -471,6 +476,8 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
             say("last write error: " + status.error);
         }
         say(polFound_ ? std::format("PlayOnline: {} records", polTaken_) : "PlayOnline: the POL plugin is not loaded");
+        say(client::lobby::version().empty() ? "client version: unknown until character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")")
+                                             : "client version " + client::lobby::version());
         if (!searchError_.empty())
         {
             say("search not recorded: " + searchError_);

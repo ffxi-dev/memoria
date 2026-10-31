@@ -212,4 +212,69 @@ auto remove() -> void
 
 } // namespace search
 
+namespace lobby
+{
+namespace
+{
+
+// build(packet, type, context), cdecl: the callers clean up.
+using Build = int(__cdecl*)(uint8_t* packet, uint32_t type, const uint8_t* context);
+
+constexpr uintptr_t VERSION_OFFSET = 0x1A08; // in the lobby context, 15 bytes
+constexpr size_t    VERSION_SIZE   = 15;
+
+Build                          build_{};
+uintptr_t                      operand_{};
+uint32_t                       backup_{};
+std::array<char, VERSION_SIZE> version_{};
+
+auto __cdecl buildHook(uint8_t* packet, uint32_t type, const uint8_t* context) -> int
+{
+    try
+    {
+        std::memcpy(version_.data(), context + VERSION_OFFSET, VERSION_SIZE);
+    }
+    catch (...) // /EHa
+    {
+    }
+    return build_(packet, type, context);
+}
+
+} // namespace
+
+auto install() -> std::string
+{
+    // mov ecx,[edi+4F1ACh] (the lobby context); mov edx,[esp+10h]; push ecx; push 26h; push edx; call build
+    const auto site = find("8B8FACF104008B542410516A2652E8");
+    if (site == 0)
+    {
+        return "the lobby signature is missing";
+    }
+    operand_ = site + 15;
+    backup_  = read32(operand_);
+    build_   = reinterpret_cast<Build>(operand_ + 4 + backup_);
+    if (!write32(operand_, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&buildHook) - (operand_ + 4))))
+    {
+        operand_ = 0;
+        return "cannot patch the lobby call";
+    }
+    return {};
+}
+
+auto version() -> std::string
+{
+    return { version_.data(), strnlen(version_.data(), version_.size()) };
+}
+
+auto remove() -> void
+{
+    if (operand_ != 0)
+    {
+        write32(operand_, backup_);
+        operand_ = 0;
+    }
+}
+
+} // namespace lobby
+
 } // namespace memoria::client
