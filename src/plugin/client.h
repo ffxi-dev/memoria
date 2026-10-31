@@ -26,9 +26,7 @@ auto remove() -> void;
 namespace lobby
 {
 
-auto install() -> std::string;
-auto version() -> std::string; // empty until character select
-auto remove() -> void;
+auto version() -> std::string; // from the same copy of the lobby context; empty before the first login
 
 // Fills c's content id, world id, and world name from FFXiMain's copy of the lobby context, which outlives the login, if the selected character is c's character id.
 auto character(xicap::CharacterIdentity& c) -> std::string; // why not, or empty

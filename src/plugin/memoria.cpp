@@ -222,7 +222,6 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         return true;
     }
     instance_    = this;
-    lobbyError_  = client::lobby::install();
     searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
                                            {
                                                instance_->recordSearch(clientToServer, data, size);
@@ -232,7 +231,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     auto* party = core_->GetMemoryManager()->GetParty();
     if (core_->GetMemoryManager()->GetPlayer()->GetLoginStatus() == 2 && party->GetMemberServerId(0) != 0)
     {
-        Login late{ .network = network(), .midSession = true };
+        Login late{ .network = network(), .midSession = true, .clientVersion = client::lobby::version() };
         late.character.characterId = party->GetMemberServerId(0);
         const char* name           = party->GetMemberName(0);
         std::memcpy(late.character.characterName.data(), name, strnlen(name, late.character.characterName.size() - 1));
@@ -250,7 +249,6 @@ auto Plugin::Release() -> void
 {
     linker_ = {}; // stops and joins
     client::search::remove();
-    client::lobby::remove();
     if (recorder_)
     {
         recorder_->stop();
@@ -551,7 +549,7 @@ auto Plugin::status() -> void
         say(characterError_.empty() ? std::format("Character: {} on {}, content id {}", name, character_.worldName.data(), character_.contentId) : "Character: " + name + paint(Color::Grey, " (world unknown: " + characterError_ + ")"));
     }
     const auto version = client::lobby::version();
-    say("Client: " + (version.empty() ? paint(Color::Grey, "known after character select" + (lobbyError_.empty() ? "" : " (" + lobbyError_ + ")")) : version));
+    say("Client: " + (version.empty() ? paint(Color::Grey, "unknown before the first login") : version));
     if (!searchError_.empty())
     {
         say(paint(Color::Red, "Search not recorded: " + searchError_));

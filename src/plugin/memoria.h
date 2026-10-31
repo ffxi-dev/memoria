@@ -75,7 +75,6 @@ private:
     std::string               startError_;
     std::string               uploadsOff_;
     std::string               searchError_;
-    std::string               lobbyError_;
     std::string               characterError_; // why the content id and world are missing
     xicap::CharacterIdentity  character_{};
     bool                      loggedIn_{ false };

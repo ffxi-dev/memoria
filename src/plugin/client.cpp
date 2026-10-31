@@ -2,6 +2,7 @@
 
 #include <Ashita.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <optional>
@@ -198,61 +199,57 @@ namespace lobby
 namespace
 {
 
-using Build = int(__cdecl*)(uint8_t* packet, uint32_t type, const uint8_t* context);
-
+constexpr uintptr_t LIST_OFFSET    = 0x148; // in the lobby context
 constexpr uintptr_t VERSION_OFFSET = 0x1A08;
 
-Build                build_{};
-std::optional<Patch> patch_;
-std::array<char, 15> version_{};
-
-auto __cdecl buildHook(uint8_t* packet, uint32_t type, const uint8_t* context) -> int
+// The content id getter: mov ecx,[esp+4]; index * 0x8C; mov ecx,[client]; mov eax,[ecx+eax*4+list]; ret
+auto getter() -> uintptr_t
 {
-    try
-    {
-        std::memcpy(version_.data(), context + VERSION_OFFSET, version_.size());
-    }
-    catch (...) // /EHa
-    {
-    }
-    return build_(packet, type, context);
+    static const auto address = find("8B4C24048D04CD000000002BC18B0D????????8D04808B8481????????C3");
+    return address;
+}
+
+// The character list in FFXiMain's copy of the lobby context, which the client keeps after the login; 0 before it has one.
+auto list() -> uintptr_t
+{
+    const auto client = read32(read32(getter() + 15));
+    return client ? client + read32(getter() + 25) : 0;
 }
 
 } // namespace
 
-auto install() -> std::string
-{
-    // mov ecx,[edi+4F1ACh] (the lobby context); mov edx,[esp+10h]; push ecx; push 26h; push edx; call build
-    const auto site = find("8B8FACF104008B542410516A2652E8");
-    if (site == 0)
-    {
-        return "the lobby signature is missing";
-    }
-    const auto operand = site + 15;
-    build_             = reinterpret_cast<Build>(operand + 4 + read32(operand));
-    patch_             = redirect(operand, reinterpret_cast<uintptr_t>(build_), reinterpret_cast<uintptr_t>(&buildHook));
-    return patch_ ? "" : "cannot patch the lobby call";
-}
-
 auto version() -> std::string
 {
-    return { version_.data(), strnlen(version_.data(), version_.size()) };
-}
-
-auto remove() -> void
-{
-    if (patch_)
+    if (getter() == 0)
     {
-        write32(patch_->operand, patch_->backup);
-        patch_.reset();
+        return {};
+    }
+    try
+    {
+        const auto l = list();
+        if (l == 0)
+        {
+            return {};
+        }
+        const auto*       text = reinterpret_cast<const char*>(l - LIST_OFFSET + VERSION_OFFSET);
+        const std::string version(text, strnlen(text, 15));
+        // Anything but digits and underscores means the layout moved: say nothing rather than record noise.
+        return std::ranges::all_of(version, [](char ch)
+                                   {
+                                       return (ch >= '0' && ch <= '9') || ch == '_';
+                                   })
+                   ? version
+                   : std::string{};
+    }
+    catch (...) // /EHa
+    {
+        return {};
     }
 }
 
 auto character(xicap::CharacterIdentity& c) -> std::string
 {
-    // The content id getter: mov ecx,[esp+4]; index * 0x8C; mov ecx,[client]; mov eax,[ecx+eax*4+list]; ret
-    static const auto getter = find("8B4C24048D04CD000000002BC18B0D????????8D04808B8481????????C3");
-    if (getter == 0)
+    if (getter() == 0)
     {
         return "the character signature is missing";
     }
@@ -260,8 +257,7 @@ auto character(xicap::CharacterIdentity& c) -> std::string
     constexpr uint32_t ENTRY_SIZE = 0x8C;
     try
     {
-        const auto client = read32(read32(getter + 15));
-        const auto list   = client ? client + read32(getter + 25) : 0;
+        const auto list = lobby::list();
         if (list == 0)
         {
             return "no character list";
