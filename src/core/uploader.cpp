@@ -95,7 +95,8 @@ auto Uploader::run() -> void
         bool failed = true;
         try
         {
-            failed = (!options_.mayRun || options_.mayRun()) && pass().has_value();
+            uploading_ = !options_.mayRun || options_.mayRun();
+            failed     = uploading_ && pass().has_value();
             if (unauthorized_)
             {
                 return;
@@ -119,6 +120,7 @@ auto Uploader::run() -> void
 
 auto Uploader::pass() -> std::optional<std::string>
 {
+    uploading_ = true;
     if (!std::exchange(loaded_, true))
     {
         load();
@@ -311,21 +313,30 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     return res;
 }
 
-// One line per file: name, url, closed, refused, separated by tabs.
-auto Uploader::load() -> void
+// One line per file: name, url, closed, refused, and bytes the server holds, separated by tabs. Lines from before the last field read as nothing sent.
+auto Uploader::saved() const -> std::map<std::string, File>
 {
-    std::ifstream   in(options_.dir / STATE_FILE);
-    std::string     line;
-    std::lock_guard lock(mutex_);
+    std::map<std::string, File> files;
+    std::ifstream               in(options_.dir / STATE_FILE);
+    std::string                 line;
     while (std::getline(in, line))
     {
         std::istringstream fields(line);
-        std::string        name, url, closed, refused;
-        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, closed, '\t') && std::getline(fields, refused))
+        std::string        name, url, closed, refused, sent;
+        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, closed, '\t') && std::getline(fields, refused, '\t'))
         {
-            files_[name] = { .url = url, .closed = closed == "1", .refused = parseU64(refused).value_or(0) };
+            std::getline(fields, sent);
+            files[name] = { .url = url, .closed = closed == "1", .refused = parseU64(refused).value_or(0), .sent = parseU64(sent).value_or(0) };
         }
     }
+    return files;
+}
+
+auto Uploader::load() -> void
+{
+    auto            files = saved();
+    std::lock_guard lock(mutex_);
+    files_ = std::move(files);
 }
 
 auto Uploader::save() -> void
@@ -336,7 +347,7 @@ auto Uploader::save() -> void
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            out << std::format("{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused);
+            out << std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused, f.sent);
         }
         if (!out)
         {
@@ -352,14 +363,39 @@ auto Uploader::unauthorized() const -> bool
     return unauthorized_;
 }
 
+auto Uploader::uploading() const -> bool
+{
+    return uploading_;
+}
+
 auto Uploader::status() const -> std::vector<UploadStatus>
 {
-    std::lock_guard lock(mutex_);
-    return files_ | std::views::transform([](const auto& entry)
-                                          {
-                                              const auto& [name, f] = entry;
-                                              return UploadStatus{ .name = name, .sent = f.sent, .size = f.size, .closed = f.closed, .error = f.error };
-                                          }) |
+    // Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk are the truth.
+    std::map<std::string, File> files;
+    {
+        std::lock_guard lock(mutex_);
+        if (uploading_ && loaded_)
+        {
+            files = files_;
+        }
+    }
+    if (files.empty())
+    {
+        files = saved();
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
+        {
+            if (entry.is_regular_file(ec) && entry.path().extension() == ".xicap")
+            {
+                files[entry.path().filename().string()].size = entry.file_size(ec);
+            }
+        }
+    }
+    return files | std::views::transform([](const auto& entry)
+                                         {
+                                             const auto& [name, f] = entry;
+                                             return UploadStatus{ .name = name, .sent = f.closed ? f.size : f.sent, .size = f.size, .closed = f.closed, .error = f.error };
+                                         }) |
            std::ranges::to<std::vector>();
 }
 

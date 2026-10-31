@@ -571,7 +571,12 @@ auto Plugin::status() -> void
         sent += u.closed ? u.size : u.sent;
         pending += u.closed ? 0 : 1;
     }
-    say(std::format("Uploads: linked to {}, {} of {} sent, {} of {} captures still open", link_->account, size(sent), size(total), pending, files.size()));
+    say("Uploads: linked to " + link_->account);
+    if (const auto own = std::ranges::find(files, s.capture.filename().string(), &UploadStatus::name); own != files.end())
+    {
+        say(std::format("This capture: {} of {} sent", size(own->sent), size(own->size)));
+    }
+    say(std::format("This folder: {} of {} sent, {} of {} captures still open{}", size(sent), size(total), pending, files.size(), uploader_->uploading() ? "" : paint(Color::Grey, " (another client sharing this Ashita folder sends them)")));
     for (const auto& u : files | std::views::filter([](const UploadStatus& u)
                                                     {
                                                         return !u.error.empty();

@@ -50,8 +50,9 @@ public:
     auto start() -> void;
     auto pass() -> std::optional<std::string>; // the first error, if any
 
-    [[nodiscard]] auto status() const -> std::vector<UploadStatus>;
-    [[nodiscard]] auto unauthorized() const -> bool; // Mogsafe refused the credentials: stopped
+    [[nodiscard]] auto status() const -> std::vector<UploadStatus>; // every capture in the folder, whichever client sends it
+    [[nodiscard]] auto uploading() const -> bool;                   // false while another client sharing the folder sends its captures
+    [[nodiscard]] auto unauthorized() const -> bool;                // Mogsafe refused the credentials: stopped
 
 private:
     struct File
@@ -72,6 +73,7 @@ private:
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
     auto load() -> void;
     auto save() -> void;
+    auto saved() const -> std::map<std::string, File>;
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
@@ -85,6 +87,7 @@ private:
     std::condition_variable wake_;
     std::atomic<bool>       stopping_{ false };
     std::atomic<bool>       unauthorized_{ false };
+    std::atomic<bool>       uploading_{ false };
 };
 
 } // namespace memoria

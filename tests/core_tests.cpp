@@ -559,6 +559,27 @@ TEST_CASE("an upload follows a growing file and closes once it is complete")
     CHECK(status[0].error.empty());
 }
 
+TEST_CASE("a client that is not uploading reports what the uploading one sent")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    auto        sender = uploader(dir, server);
+    auto        other  = uploader(dir, server);
+    CHECK(other->status().empty());
+
+    append(file, std::string(500, 'x'));
+    CHECK(!sender->pass());
+    append(file, std::string(100, 'x'));
+    const auto status = other->status();
+    CHECK(!other->uploading());
+    REQUIRE(status.size() == 1);
+    CHECK(status[0].name == "a.xicap");
+    CHECK(status[0].sent == 500);
+    CHECK(status[0].size == 600);
+    CHECK(!status[0].closed);
+}
+
 TEST_CASE("a restart resumes the same upload")
 {
     const auto  dir  = tempDir();
