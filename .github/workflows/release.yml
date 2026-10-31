@@ -1,0 +1,49 @@
+name: release
+
+# A v<version> tag publishes Memoria to https://memoria.sruon.dev, where captain
+# installs and updates it from: v<version>/Memoria.dll, then latest.json.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    uses: sruon/Ashita4-plugin-ci/.github/workflows/build-plugin.yml@v1.1
+    with:
+      targets: memoria
+      output-dir-variable: MEMORIA_OUTPUT_DIR
+      cmake-args: -DMEMORIA_BUILD_TESTS=OFF
+      private-owner: ffxi-dev
+    secrets:
+      ssh-key: ${{ secrets.XICAP_DEPLOY_KEY }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: memoria
+          path: out
+      - name: Check the tag names the built version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "project(memoria VERSION ${version} " CMakeLists.txt || { echo "tag $GITHUB_REF_NAME does not match CMakeLists.txt" >&2; exit 1; }
+      - name: Publish
+        env:
+          RELEASES_S3: ${{ secrets.RELEASES_S3 }}
+        run: |
+          set -eu
+          set -a; eval "$(printf '%s\n' "$RELEASES_S3" | grep '=')"; set +a
+          version="${GITHUB_REF_NAME#v}"
+          dll=out/Memoria.dll
+          sha=$(sha256sum "$dll" | cut -d' ' -f1)
+          size=$(stat -c%s "$dll")
+          aws s3 cp "$dll" "s3://$RELEASES_BUCKET/v$version/Memoria.dll" --content-type application/octet-stream
+          printf '{"version":"%s","url":"%s/v%s/Memoria.dll","sha256":"%s","size":%s}\n' \
+            "$version" "$RELEASES_URL" "$version" "$sha" "$size" > latest.json
+          aws s3 cp latest.json "s3://$RELEASES_BUCKET/latest.json" --content-type application/json --cache-control no-cache
+          cat latest.json

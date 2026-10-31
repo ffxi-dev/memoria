@@ -139,7 +139,7 @@ auto Plugin::GetLink() const -> const char*
 
 auto Plugin::GetVersion() const -> double
 {
-    return 0.2;
+    return MEMORIA_VERSION; // from CMakeLists.txt
 }
 
 auto Plugin::GetPriority() const -> int32_t

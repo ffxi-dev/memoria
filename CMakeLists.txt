@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.1.0 LANGUAGES C CXX)
+project(memoria VERSION 0.2.0 LANGUAGES C CXX)
 
 # The core (queue, clock, keys, recording) builds anywhere and is tested on
 # Linux and Windows; the plugin needs Windows, 32-bit MSVC, and the Ashita SDK.
@@ -58,6 +58,8 @@ if(MEMORIA_BUILD_PLUGIN)
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
     target_link_libraries(memoria PRIVATE memoria_core)
+    # One version: the release tag, latest.json, and what the plugin reports.
+    target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
     # The SDK helper clears the global flags, /EHsc among them, so the core
     # gets the plugin's exception model back explicitly.
     target_compile_options(memoria_core PRIVATE /EHa)
