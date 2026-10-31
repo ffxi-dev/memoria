@@ -66,7 +66,7 @@ if(MEMORIA_BUILD_PLUGIN)
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
     target_link_libraries(memoria PRIVATE memoria_core winhttp)
-    # One version: the release tag, latest.json, and what the plugin reports.
+    # One version: the release tag and what the plugin reports.
     target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${PROJECT_VERSION}")
     # The SDK helper clears the global flags, /EHsc among them, so the core
     # gets the plugin's exception model back explicitly.
