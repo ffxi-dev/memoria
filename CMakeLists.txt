@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.4.0 LANGUAGES C CXX)
+project(memoria VERSION 0.4.1 LANGUAGES C CXX)
 
 # The core (queue, clock, keys, recording) builds anywhere and is tested on
 # Linux and Windows; the plugin needs Windows, 32-bit MSVC, and the Ashita SDK.

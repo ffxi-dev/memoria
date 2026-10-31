@@ -308,6 +308,14 @@ auto Plugin::recordSearch(bool clientToServer, const uint8_t* data, uint32_t siz
     });
 }
 
+// Ashita refuses a plugin that asks for Direct3D callbacks and does not
+// accept the device here.
+auto Plugin::Direct3DInitialize(IDirect3DDevice8* device) -> bool
+{
+    UNREFERENCED_PARAMETER(device);
+    return true;
+}
+
 auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
 {
     UNREFERENCED_PARAMETER(isRenderingBackBuffer);
@@ -328,11 +336,13 @@ auto Plugin::takePol() -> void
     {
         if (const auto found = ::GetProcAddress(pol, "memoriaPolTake"))
         {
-            take = reinterpret_cast<decltype(take)>(found);
+            take      = reinterpret_cast<decltype(take)>(found);
+            polFound_ = true;
         }
     }
     take([](void* context, const PolRecord* r)
          {
+             static_cast<Plugin*>(context)->polTaken_++;
              static_cast<Plugin*>(context)->recorder_->packet(Event{
                  .kind           = Event::Kind::Packet,
                  .timestamp      = r->timestamp,
@@ -440,6 +450,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         {
             say("last write error: " + status.error);
         }
+        say(polFound_ ? std::format("PlayOnline: {} records", polTaken_) : "PlayOnline: the POL plugin is not loaded");
         if (!searchError_.empty())
         {
             say("search not recorded: " + searchError_);

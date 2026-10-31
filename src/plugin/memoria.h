@@ -30,6 +30,7 @@ public:
 
     auto HandleCommand(int32_t mode, const char* command, bool injected) -> bool override;
     auto HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
+    auto Direct3DInitialize(IDirect3DDevice8* device) -> bool override;
     auto Direct3DBeginScene(bool isRenderingBackBuffer) -> void override;
     auto HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
 
@@ -54,6 +55,8 @@ private:
     HANDLE                    uploadMutex_{ nullptr };
     std::string               searchError_; // why search is not recorded, when it is not
     std::wstring              polModule_;   // polplugins/Memoria.dll
+    bool                      polFound_{ false };
+    uint64_t                  polTaken_{ 0 };
     std::string               startError_;
     bool                      loggedIn_{ false };
     uint32_t                  loggedInAs_{ 0 }; // the character of the last login
