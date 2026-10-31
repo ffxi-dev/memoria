@@ -6,10 +6,10 @@
 #include <Memory.h>
 #include <xicap/constants.h>
 
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <limits>
 #include <string>
 #include <vector>
 
@@ -146,7 +146,7 @@ auto Plugin::GetPriority() const -> int32_t
 {
     // Higher runs later: after every other plugin, so the blocked and modified
     // flags reflect them all.
-    return std::numeric_limits<int32_t>::max();
+    return INT32_MAX; // not numeric_limits: windows.h defines max
 }
 
 auto Plugin::GetFlags() const -> uint32_t

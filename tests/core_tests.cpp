@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <random>
 #include <string>
 #include <thread>
 
@@ -24,8 +25,10 @@ namespace
 
 auto tempDir() -> fs::path
 {
+    // ctest runs each test in its own process, so the name needs more than a counter.
+    static const auto       run = std::random_device{}();
     static std::atomic<int> counter{ 0 };
-    auto                    dir = fs::temp_directory_path() / ("memoria-test-" + std::to_string(counter++));
+    auto                    dir = fs::temp_directory_path() / (std::format("memoria-test-{}-{}", run, counter++));
     fs::remove_all(dir);
     fs::create_directories(dir);
     return dir;
@@ -311,14 +314,16 @@ TEST_CASE("dropped packets leave a note in the capture")
         rec.stop();
         CHECK(rec.status().dropped > 0);
     }
-    xicap::Reader     r(captures(dir)[0]);
-    xicap::ReadPacket p{};
-    bool              noted = false;
-    while (r.next(p))
+    bool noted = false;
     {
-        for (const auto& m : p.markers)
+        xicap::Reader     r(captures(dir)[0]); // closed before the folder goes: Windows will not delete an open file
+        xicap::ReadPacket p{};
+        while (r.next(p))
         {
-            noted = noted || m.text.starts_with("dropped ");
+            for (const auto& m : p.markers)
+            {
+                noted = noted || m.text.starts_with("dropped ");
+            }
         }
     }
     CHECK(noted);
