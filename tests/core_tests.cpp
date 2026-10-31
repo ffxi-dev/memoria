@@ -2,6 +2,8 @@
 #include "core/event_queue.h"
 #include "core/recorder.h"
 #include "core/seed_file.h"
+#include "core/sha256.h"
+#include "core/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <xicap/reader.h>
@@ -13,6 +15,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <random>
 #include <string>
 #include <thread>
@@ -328,4 +331,205 @@ TEST_CASE("dropped packets leave a note in the capture")
     }
     CHECK(noted);
     fs::remove_all(dir);
+}
+
+namespace
+{
+
+// Mogsafe's upload protocol in memory: tus with deferred length, then a close
+// that wants the file's hash and, like the real one, a complete capture (here:
+// ending with the trailer magic XCPF).
+class FakeMogsafe final : public Http
+{
+public:
+    struct Upload
+    {
+        std::vector<uint8_t> data;
+        bool                 closed{};
+        bool                 gone{};
+    };
+
+    std::map<std::string, Upload> uploads;
+    bool                          down{};
+    int                           creates{};
+
+    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    {
+        if (down)
+        {
+            return std::unexpected("connection refused");
+        }
+        const auto get = [&](std::string_view name)
+        {
+            for (const auto& [k, v] : headers)
+            {
+                if (k == name)
+                {
+                    return v;
+                }
+            }
+            return std::string{};
+        };
+        if (get("CF-Access-Client-Secret") != "secret")
+        {
+            return HttpResponse{ .status = 403 };
+        }
+        if (method == "POST" && url == "https://mogsafe.test/v1/uploads/")
+        {
+            const auto path = std::format("/v1/uploads/{}", ++creates);
+            uploads[path]   = {};
+            return HttpResponse{ .status = 201, .headers = { { "location", path } } };
+        }
+        const auto path    = url.substr(std::string("https://mogsafe.test").size());
+        const bool isClose = path.ends_with("/close");
+        const auto it      = uploads.find(isClose ? path.substr(0, path.size() - 6) : path);
+        if (it == uploads.end() || it->second.gone)
+        {
+            return HttpResponse{ .status = method == "PATCH" ? 410 : 404 };
+        }
+        auto& u = it->second;
+        if (method == "HEAD")
+        {
+            return u.closed ? HttpResponse{ .status = 404 } : HttpResponse{ .status = 200, .headers = { { "upload-offset", std::to_string(u.data.size()) } } };
+        }
+        if (method == "PATCH")
+        {
+            if (u.closed || get("Upload-Offset") != std::to_string(u.data.size()))
+            {
+                return HttpResponse{ .status = u.closed ? 410 : 409 };
+            }
+            u.data.insert(u.data.end(), body.begin(), body.end());
+            return HttpResponse{ .status = 204 };
+        }
+        Sha256 sha;
+        sha.update(u.data);
+        const auto want = std::format(R"({{"sha256":"{}"}})", sha.hex());
+        if (std::string(body.begin(), body.end()) != want)
+        {
+            return HttpResponse{ .status = 409 };
+        }
+        const bool complete = u.data.size() >= 4 && std::string(u.data.end() - 4, u.data.end()) == "XCPF";
+        if (!complete)
+        {
+            return HttpResponse{ .status = 409 };
+        }
+        u.closed = true;
+        return HttpResponse{ .status = 200 };
+    }
+};
+
+// Hands requests to a fake that outlives the uploader.
+class Forward final : public Http
+{
+public:
+    explicit Forward(FakeMogsafe& to)
+    : to_(to)
+    {
+    }
+
+    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    {
+        return to_.request(method, url, headers, body);
+    }
+
+private:
+    FakeMogsafe& to_;
+};
+
+auto append(const fs::path& path, const std::string& bytes) -> void
+{
+    std::ofstream(path, std::ios::binary | std::ios::app) << bytes;
+}
+
+auto readAll(const fs::path& path) -> std::vector<uint8_t>
+{
+    std::ifstream in(path, std::ios::binary);
+    return { std::istreambuf_iterator<char>(in), {} };
+}
+
+auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_ptr<Uploader>
+{
+    UploadOptions options;
+    options.dir         = dir;
+    options.server      = "https://mogsafe.test";
+    options.credentials = { { "CF-Access-Client-Secret", "secret" } };
+    options.idle        = std::chrono::milliseconds(0);
+    return std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
+}
+
+} // namespace
+
+TEST_CASE("sha256 matches the FIPS 180-4 examples")
+{
+    Sha256 abc;
+    abc.update({ reinterpret_cast<const uint8_t*>("abc"), 3 });
+    CHECK(abc.hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    Sha256            longer;
+    const std::string two = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    longer.update({ reinterpret_cast<const uint8_t*>(two.data()), two.size() });
+    CHECK(longer.hex() == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+}
+
+TEST_CASE("an upload follows a growing file and closes once it is complete")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+
+    append(file, std::string(100, 'x'));
+    CHECK(!up->pass());
+    CHECK(server.creates == 0); // no header yet
+
+    append(file, std::string(400, 'x'));
+    CHECK(!up->pass());
+    CHECK(!up->pass()); // all sent; the close is refused: no footer yet
+    append(file, std::string(50, 'x') + "XCPF");
+    CHECK(!up->pass()); // sends the rest
+    CHECK(!up->pass()); // closes
+    REQUIRE(server.creates == 1);
+    const auto& u = server.uploads.begin()->second;
+    CHECK(u.closed);
+    CHECK(u.data == readAll(file));
+    const auto status = up->status();
+    REQUIRE(status.size() == 1);
+    CHECK(status[0].closed);
+    CHECK(status[0].sent == 554);
+    CHECK(status[0].error.empty());
+}
+
+TEST_CASE("a restart resumes the same upload")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    append(file, std::string(500, 'x'));
+    CHECK(!uploader(dir, server)->pass());
+    append(file, std::string(300, 'x'));
+    CHECK(!uploader(dir, server)->pass());
+    CHECK(server.creates == 1);
+    CHECK(server.uploads.begin()->second.data == readAll(file));
+}
+
+TEST_CASE("an upload the server cut off starts over, and outages only delay")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+    append(file, std::string(500, 'x'));
+    CHECK(!up->pass());
+
+    server.down = true;
+    append(file, std::string(100, 'x'));
+    CHECK(up->pass().has_value());
+    CHECK(up->status()[0].error.find("refused") != std::string::npos);
+
+    server.down                         = false;
+    server.uploads.begin()->second.gone = true;
+    CHECK(!up->pass()); // 410: forgets the upload
+    CHECK(!up->pass()); // a new upload of the whole file
+    CHECK(server.creates == 2);
+    CHECK(server.uploads.rbegin()->second.data == readAll(file));
+    CHECK(up->status()[0].error.empty());
 }

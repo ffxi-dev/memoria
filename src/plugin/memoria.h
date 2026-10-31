@@ -2,6 +2,7 @@
 
 #include "core/clock.h"
 #include "core/recorder.h"
+#include "core/uploader.h"
 
 #include <Ashita.h>
 
@@ -35,11 +36,14 @@ private:
     auto record(bool clientToServer, uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto network() -> xicap::Network;
     auto say(const std::string& text) -> void;
+    auto startUploads(const std::filesystem::path& install) -> void;
 
     IAshitaCore*              core_{ nullptr };
     ILogManager*              log_{ nullptr };
     Clock                     clock_;
     std::unique_ptr<Recorder> recorder_;
+    std::unique_ptr<Uploader> uploader_;
+    std::string               uploadsOff_; // why uploads are off, when they are
     std::string               startError_;
     bool                      loggedIn_{ false };
     // Per direction: the last packet's offset in its chunk, to tell when a new

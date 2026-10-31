@@ -26,6 +26,8 @@ add_library(memoria_core STATIC
     src/core/event_queue.cpp
     src/core/recorder.cpp
     src/core/seed_file.cpp
+    src/core/sha256.cpp
+    src/core/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src)
 target_link_libraries(memoria_core PUBLIC xicap)
@@ -39,6 +41,8 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/exports.def
         src/plugin/memoria.cpp
         src/plugin/memoria.h
+        src/plugin/winhttp.cpp
+        src/plugin/winhttp.h
     )
     set_target_properties(memoria PROPERTIES OUTPUT_NAME "Memoria" CXX_EXTENSIONS ON)
     if(MEMORIA_OUTPUT_DIR)
@@ -57,7 +61,7 @@ if(MEMORIA_BUILD_PLUGIN)
     else()
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
-    target_link_libraries(memoria PRIVATE memoria_core)
+    target_link_libraries(memoria PRIVATE memoria_core winhttp)
     # One version: the release tag, latest.json, and what the plugin reports.
     target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
     # The SDK helper clears the global flags, /EHsc among them, so the core

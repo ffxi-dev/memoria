@@ -1,6 +1,7 @@
 #include "plugin/memoria.h"
 
 #include "core/seed_file.h"
+#include "plugin/winhttp.h"
 
 #include <Commands.h>
 #include <Memory.h>
@@ -10,6 +11,8 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -175,6 +178,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     options.captureAgent  = std::format("Memoria {:.1f}", GetVersion());
     options.clientVersion = clientBuild();
     recorder_             = std::make_unique<Recorder>(std::move(options));
+    startUploads(install);
 
     // Loaded while already in a zone: record from here, marked mid-session.
     auto* party = core_->GetMemoryManager()->GetParty();
@@ -200,6 +204,7 @@ auto Plugin::Release() -> void
         recorder_->stop();
         recorder_.reset();
     }
+    uploader_.reset(); // waits for a request in flight, up to WinHTTP's timeouts
 }
 
 auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
@@ -281,6 +286,51 @@ auto Plugin::network() -> xicap::Network
     return ip >= RETAIL_FIRST && ip <= RETAIL_LAST ? xicap::Network::Retail : xicap::Network::Private;
 }
 
+// config/memoria/upload.ini holds Mogsafe's address and the Access service
+// token, as "key = value" lines: server, client_id, client_secret. Without it,
+// Memoria records and keeps everything locally.
+auto Plugin::startUploads(const std::filesystem::path& install) -> void
+{
+    std::ifstream                      in(install / "config" / "memoria" / "upload.ini");
+    std::map<std::string, std::string> config;
+    std::string                        line;
+    if (!in)
+    {
+        uploadsOff_ = "no config/memoria/upload.ini";
+        return;
+    }
+    while (std::getline(in, line))
+    {
+        const auto eq = line.find('=');
+        if (eq == std::string::npos || line.starts_with('#') || line.starts_with(';'))
+        {
+            continue;
+        }
+        const auto trim = [](std::string s)
+        {
+            s.erase(0, s.find_first_not_of(" \t\r"));
+            s.erase(s.find_last_not_of(" \t\r") + 1);
+            return s;
+        };
+        config[trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
+    }
+    if (!config["server"].starts_with("https://") || config["client_id"].empty() || config["client_secret"].empty())
+    {
+        uploadsOff_ = "upload.ini needs an https server, client_id, and client_secret";
+        return;
+    }
+    UploadOptions options;
+    options.dir         = install / "captures" / "memoria";
+    options.server      = config["server"];
+    options.credentials = { { "CF-Access-Client-Id", config["client_id"] }, { "CF-Access-Client-Secret", config["client_secret"] } };
+    while (options.server.ends_with('/'))
+    {
+        options.server.pop_back();
+    }
+    uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>(std::format("Memoria/{:.1f}", GetVersion())));
+    uploader_->start();
+}
+
 auto Plugin::say(const std::string& text) -> void
 {
     core_->GetChatManager()->Writef(1, false, "\x1E\x51[Memoria]\x1E\x01 %s", text.c_str());
@@ -310,6 +360,21 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         if (!status.error.empty())
         {
             say("last write error: " + status.error);
+        }
+        if (!uploader_)
+        {
+            say("uploads off: " + uploadsOff_);
+        }
+        else
+        {
+            for (const auto& u : uploader_->status())
+            {
+                if (u.closed && u.error.empty())
+                {
+                    continue; // done; the file stays in the captures folder
+                }
+                say(std::format("{}: {} of {} bytes uploaded{}", u.name, u.sent, u.size, u.error.empty() ? "" : " (" + u.error + ")"));
+            }
         }
     }
     else if (sub == "key")
