@@ -76,6 +76,7 @@ private:
     auto startUploads() -> void;
     auto link() -> void;
     auto unlink(const std::string& why) -> void;
+    auto linked() const -> std::optional<Linked>; // read each time: clients sharing the install share its token
     auto remind() -> void;
     auto hello() -> std::string;
     auto stopLive() -> void;
@@ -85,7 +86,6 @@ private:
     std::filesystem::path              captures_;
     xicap::SecretSeed                  seed_{};
     std::string                        server_ = "https://mogsafe.sruon.dev";
-    std::optional<Linked>              link_;
     std::mutex                         inboxMutex_;
     std::vector<std::string>           inbox_;
     std::optional<Linked>              arrived_; // from the link thread
@@ -97,7 +97,6 @@ private:
     std::vector<std::unique_ptr<Live>> closing_;
     HANDLE                             uploadMutex_{ nullptr };
     std::string                        startError_;
-    std::string                        uploadsOff_;
     std::string                        searchError_;
     std::string                        characterError_; // why the content id and world are missing
     xicap::CharacterIdentity           character_{};

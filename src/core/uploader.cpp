@@ -1,5 +1,7 @@
 #include "core/uploader.h"
 
+#include "core/link.h"
+
 #include <picosha2.h>
 #include <xicap/constants.h>
 
@@ -97,10 +99,6 @@ auto Uploader::run() -> void
         {
             uploading_ = !options_.mayRun || options_.mayRun();
             failed     = uploading_ && pass().has_value();
-            if (unauthorized_)
-            {
-                return;
-            }
         }
         catch (const std::exception&) // out of memory, or the folder went away
         {
@@ -130,7 +128,7 @@ auto Uploader::pass() -> std::optional<std::string>
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (stopping_ || unauthorized_)
+        if (stopping_ || !allowed())
         {
             break;
         }
@@ -242,7 +240,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
 
 auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>
 {
-    while (offset < size && !stopping_)
+    while (offset < size && !stopping_ && allowed())
     {
         const auto n    = std::min(size - offset, CHUNK_SIZE);
         const auto data = readRange(path, offset, n);
@@ -301,14 +299,35 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
     }
 }
 
+// Read before each file and chunk: another client sharing the install may have paused, unlinked, or linked again.
+auto Uploader::allowed() -> bool
+{
+    std::error_code ec;
+    if (std::filesystem::exists(options_.config / "paused", ec) || ec)
+    {
+        return false;
+    }
+    const auto link = loadLink(options_.config / "token");
+    token_          = link ? link->token : std::string{};
+    return !token_.empty();
+}
+
 auto Uploader::request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
 {
     headers.emplace_back("Tus-Resumable", "1.0.0");
-    headers.insert(headers.end(), options_.credentials.begin(), options_.credentials.end());
+    headers.emplace_back("Authorization", "Bearer " + token_);
     auto res = http_->request(method, url, headers, body);
     if (res && res->status == 401)
     {
-        unauthorized_ = true;
+        // A client that linked again since this token was read saved a new one: only the refused token goes.
+        const auto path = options_.config / "token";
+        if (const auto link = loadLink(path); link && link->token == token_)
+        {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+            unauthorized_ = true;
+        }
+        token_.clear();
         return std::unexpected("Mogsafe refused this install's token");
     }
     return res;
@@ -359,9 +378,9 @@ auto Uploader::save() -> void
     std::filesystem::rename(tmp, options_.dir / STATE_FILE, ec);
 }
 
-auto Uploader::unauthorized() const -> bool
+auto Uploader::unauthorized() -> bool
 {
-    return unauthorized_;
+    return unauthorized_.exchange(false);
 }
 
 auto Uploader::uploading() const -> bool

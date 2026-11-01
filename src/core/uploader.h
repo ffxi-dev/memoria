@@ -22,7 +22,7 @@ struct UploadOptions
 {
     std::filesystem::path     dir;
     std::string               server;
-    HttpHeaders               credentials;
+    std::filesystem::path     config; // its token file authorizes uploads and a paused file there stops them, for every client sharing the install
     std::chrono::milliseconds every{ 5000 };
     std::chrono::milliseconds idle{ 30000 }; // a file unchanged this long gets a close
     std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
@@ -52,7 +52,7 @@ public:
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>; // every capture in the folder, whichever client sends it
     [[nodiscard]] auto uploading() const -> bool;                   // false while another client sharing the folder sends its captures
-    [[nodiscard]] auto unauthorized() const -> bool;                // Mogsafe refused the credentials: stopped
+    [[nodiscard]] auto unauthorized() -> bool;                      // true once each time Mogsafe refuses the token on disk, which it then deletes
 
 private:
     struct File
@@ -70,6 +70,7 @@ private:
     auto step(const std::filesystem::path& path, File& f) -> std::optional<std::string>;
     auto send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
     auto close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>;
+    auto allowed() -> bool;
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
     auto load() -> void;
     auto save() -> void;
@@ -77,6 +78,7 @@ private:
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
+    std::string           token_; // upload thread only
 
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name

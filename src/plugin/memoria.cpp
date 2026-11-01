@@ -197,7 +197,6 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         return true; // stay loaded so /memoria status can say why
     }
     seed_ = *seed;
-    link_ = loadLink(config_ / "token");
     if (auto config = readIni(config_ / "upload.ini"); config && (*config)["server"].starts_with("https://"))
     {
         server_ = (*config)["server"];
@@ -375,10 +374,7 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
     }
     if (arrived)
     {
-        link_ = std::move(arrived);
-        say(paint(Color::Green, std::format("Linked to {}.", link_->account)) + " Your captures upload from now on.");
-        uploader_.reset();
-        startUploads();
+        say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
     }
     std::erase_if(closing_, [](const auto& l)
                   {
@@ -404,22 +400,13 @@ auto Plugin::network() -> xicap::Network
     return ip >= RETAIL_FIRST && ip <= RETAIL_LAST ? xicap::Network::Retail : xicap::Network::Private;
 }
 
+// Runs until the plugin unloads; the token and paused files decide each pass whether it sends.
 auto Plugin::startUploads() -> void
 {
-    if (!link_)
-    {
-        uploadsOff_ = "not linked: /memoria link";
-        return;
-    }
-    if (std::filesystem::exists(config_ / "paused"))
-    {
-        uploadsOff_ = "paused: /memoria upload on";
-        return;
-    }
     UploadOptions options{
-        .dir         = captures_,
-        .server      = server_,
-        .credentials = { { "Authorization", "Bearer " + link_->token } },
+        .dir    = captures_,
+        .server = server_,
+        .config = config_,
     };
     // Clients sharing an install share its captures folder; the one whose upload thread holds this mutex uploads, and Windows hands it on when that client exits.
     if (!uploadMutex_)
@@ -453,7 +440,7 @@ auto Plugin::remind() -> void
     const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
     std::string last;
     std::getline(std::ifstream(path), last);
-    if (link_ || last == today)
+    if (linked() || last == today)
     {
         return;
     }
@@ -513,14 +500,14 @@ auto Plugin::link() -> void
                            });
 }
 
+auto Plugin::linked() const -> std::optional<Linked>
+{
+    return loadLink(config_ / "token");
+}
+
 auto Plugin::unlink(const std::string& why) -> void
 {
     stopLive();
-    uploader_.reset();
-    link_.reset();
-    std::error_code ec;
-    std::filesystem::remove(config_ / "token", ec);
-    uploadsOff_ = "not linked: /memoria link";
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
 }
 
@@ -591,9 +578,10 @@ auto Plugin::status() -> void
     {
         say("Live: " + live_->status());
     }
-    if (!uploader_)
+    const auto link = linked();
+    if (!link || std::filesystem::exists(config_ / "paused"))
     {
-        say("Uploads: " + paint(Color::Yellow, uploadsOff_));
+        say("Uploads: " + paint(Color::Yellow, link ? "paused: /memoria upload on" : "not linked: /memoria link"));
         return;
     }
     // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
@@ -612,18 +600,18 @@ auto Plugin::status() -> void
             failed = &u;
         }
     }
-    const auto linked = paint(Color::Grey, " · linked to " + link_->account);
+    const auto account = paint(Color::Grey, " · linked to " + link->account);
     if (failed != nullptr)
     {
-        say("Uploads: " + paint(Color::Red, "cannot reach Mogsafe (" + failed->error + "), retrying") + linked);
+        say("Uploads: " + paint(Color::Red, "cannot reach Mogsafe (" + failed->error + "), retrying") + account);
     }
     else if (behind > 0)
     {
-        say(std::format("Uploads: catching up, {} to send", size(behind)) + linked);
+        say(std::format("Uploads: catching up, {} to send", size(behind)) + account);
     }
     else
     {
-        say("Uploads: " + paint(Color::Green, "all sent") + linked);
+        say("Uploads: " + paint(Color::Green, "all sent") + account);
     }
     for (const auto& u : files | std::views::filter(&UploadStatus::refused))
     {
@@ -698,7 +686,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
             say("Not live.");
         }
     }
-    else if (sub == "live" && !link_)
+    else if (const auto link = linked(); sub == "live" && !link)
     {
         say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
     }
@@ -709,14 +697,16 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     }
     else if (sub == "live")
     {
-        live_ = std::make_unique<Live>(server_, link_->token, recorder_->live(), hello(), [this](std::string text)
+        live_ = std::make_unique<Live>(server_, link->token, recorder_->live(), hello(), [this](std::string text)
                                        {
                                            post(std::move(text));
                                        });
         say(paint(Color::Grey, "Asking Vault for a live link..."));
     }
-    else if (sub == "unlink" && link_)
+    else if (sub == "unlink" && linked())
     {
+        std::error_code ec;
+        std::filesystem::remove(config_ / "token", ec);
         unlink("Unlinked");
     }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
@@ -727,18 +717,12 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         {
             std::ofstream{ paused };
             stopLive();
-            uploader_.reset();
-            uploadsOff_ = "paused: /memoria upload on";
             say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
         }
         else
         {
             std::filesystem::remove(paused, ec);
-            if (!uploader_)
-            {
-                startUploads();
-            }
-            say(uploader_ ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: " + uploadsOff_));
+            say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
         }
     }
     else

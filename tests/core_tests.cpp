@@ -562,11 +562,14 @@ public:
     };
 
     std::map<std::string, Upload> uploads;
+    std::string                   token = "t0ken";
     bool                          down{};
     int                           creates{};
+    int                           requests{};
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
+        ++requests;
         if (down)
         {
             return std::unexpected("connection refused");
@@ -582,9 +585,9 @@ public:
             }
             return std::string{};
         };
-        if (get("CF-Access-Client-Secret") != "secret")
+        if (get("Authorization") != "Bearer " + token)
         {
-            return HttpResponse{ .status = 403 };
+            return HttpResponse{ .status = 401 };
         }
         if (method == "POST" && url == "https://mogsafe.test/v1/uploads/")
         {
@@ -659,11 +662,15 @@ auto readAll(const fs::path& path) -> std::vector<uint8_t>
 
 auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_ptr<Uploader>
 {
+    if (!fs::exists(dir / "config" / "token"))
+    {
+        saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" });
+    }
     UploadOptions options;
-    options.dir         = dir;
-    options.server      = "https://mogsafe.test";
-    options.credentials = { { "CF-Access-Client-Secret", "secret" } };
-    options.idle        = std::chrono::milliseconds(0);
+    options.dir    = dir;
+    options.server = "https://mogsafe.test";
+    options.config = dir / "config";
+    options.idle   = std::chrono::milliseconds(0);
     return std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
 }
 
@@ -870,20 +877,98 @@ TEST_CASE("the link is kept across restarts")
     fs::remove_all(dir);
 }
 
-TEST_CASE("a refused token stops the uploader")
+TEST_CASE("a refused token is forgotten, and sending stops until a new link")
 {
-    struct Revoked final : Http
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    server.token = "revoked";
+    auto up      = uploader(dir, server);
+    append(dir / "a.xicap", std::string(500, 'x'));
+    CHECK(up->pass().has_value());
+    CHECK(up->unauthorized());
+    CHECK(!up->unauthorized()); // said once
+    CHECK(!fs::exists(dir / "config" / "token"));
+
+    const auto requests = server.requests;
+    CHECK(!up->pass());
+    CHECK(server.requests == requests);
+
+    saveLink(dir / "config" / "token", { .token = "revoked", .account = "sruon" });
+    CHECK(!up->pass());
+    CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
+    fs::remove_all(dir);
+}
+
+TEST_CASE("pause, unlink, and a new link govern every client sharing the install")
+{
+    const auto  dir    = tempDir();
+    const auto  file   = dir / "a.xicap";
+    const auto  token  = dir / "config" / "token";
+    const auto  paused = dir / "config" / "paused";
+    FakeMogsafe server;
+    auto        first  = uploader(dir, server);
+    auto        second = uploader(dir, server);
+
+    append(file, std::string(500, 'x'));
+    std::ofstream{ paused }; // /memoria upload off in a client that is not uploading
+    CHECK(!first->pass());
+    first.reset(); // the uploading client exits, and the other takes the upload mutex
+    CHECK(!second->pass());
+    CHECK(server.requests == 0);
+
+    fs::remove(paused);
+    CHECK(!second->pass());
+    CHECK(server.uploads.begin()->second.data.size() == 500);
+
+    fs::remove(token); // /memoria unlink in another client
+    append(file, std::string(100, 'x'));
+    CHECK(!second->pass());
+    CHECK(server.uploads.begin()->second.data.size() == 500);
+
+    server.token = "t1"; // /memoria link in another client
+    saveLink(token, { .token = "t1", .account = "sruon" });
+    CHECK(!second->pass());
+    CHECK(server.uploads.begin()->second.data == readAll(file));
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a refusal of an old token keeps the token another client just saved")
+{
+    // Another client links again while this one's request with the old token is in flight.
+    class Relink final : public Http
     {
-        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+    public:
+        Relink(FakeMogsafe& to, fs::path token)
+        : to_(to)
+        , token_(std::move(token))
         {
-            return HttpResponse{ .status = 401 };
         }
+
+        auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+        {
+            if (to_.token == "t0ken")
+            {
+                to_.token = "t1";
+                saveLink(token_, { .token = "t1", .account = "sruon" });
+            }
+            return to_.request(method, url, headers, body);
+        }
+
+    private:
+        FakeMogsafe& to_;
+        fs::path     token_;
     };
-    const auto dir = tempDir();
-    std::ofstream(dir / "a.xicap", std::ios::binary) << std::string(500, 'x');
-    Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test" }, std::make_unique<Revoked>());
-    CHECK(up.pass().has_value());
-    CHECK(up.unauthorized());
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" });
+    Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .idle = std::chrono::milliseconds(0) }, std::make_unique<Relink>(server, dir / "config" / "token"));
+    append(dir / "a.xicap", std::string(500, 'x'));
+    CHECK(up.pass().has_value()); // 401 for the old token
+    CHECK(!up.unauthorized());
+    REQUIRE(loadLink(dir / "config" / "token"));
+    CHECK(loadLink(dir / "config" / "token")->token == "t1");
+    CHECK(!up.pass());
+    CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
     fs::remove_all(dir);
 }
 
