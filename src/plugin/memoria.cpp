@@ -5,7 +5,6 @@
 #include "plugin/winhttp.h"
 
 #include <Commands.h>
-#include <shellapi.h>
 #include <xicap/constants.h>
 
 #include <algorithm>
@@ -104,21 +103,6 @@ auto readIni(const std::filesystem::path& path) -> std::optional<std::map<std::s
 }
 
 Plugin* instance_ = nullptr; // for the search hooks, which take a plain function
-
-// Ashita's chat colours, as its chat.lua names them: 0x1E, then a colour number; 0x1E 0x01 goes back to normal.
-enum class Color : uint8_t
-{
-    Green  = 2,
-    Cyan   = 6,
-    Grey   = 67,
-    Red    = 68,
-    Yellow = 104,
-};
-
-auto paint(Color c, std::string_view text) -> std::string
-{
-    return std::format("\x1E{}{}\x1E\x01", static_cast<char>(c), text);
-}
 
 auto size(uint64_t bytes) -> std::string
 {
@@ -254,6 +238,8 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
 auto Plugin::Release() -> void
 {
     linker_ = {}; // stops and joins
+    stopLive();
+    closing_.clear(); // joins
     client::search::remove();
     if (recorder_)
     {
@@ -285,6 +271,10 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
             loggedInAs_     = who.characterId;
             remind();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
+            if (live_)
+            {
+                live_->setHello(hello());
+            }
         }
     }
     record(false, size, data, modified, sizeChunk, dataChunk, injected, blocked);
@@ -383,6 +373,14 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
         uploader_.reset();
         startUploads();
     }
+    std::erase_if(closing_, [](const auto& l)
+                  {
+                      return l->finished();
+                  });
+    if (live_ && live_->finished())
+    {
+        live_.reset();
+    }
     if (uploader_ && uploader_->unauthorized())
     {
         unlink("Vault no longer accepts this install");
@@ -474,12 +472,7 @@ auto Plugin::link() -> void
                                // Only Mogsafe's own link page: never a URL the server could swap for another.
                                if (code->url.starts_with(server_ + "/link"))
                                {
-                                   const auto com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-                                   ::ShellExecuteW(nullptr, L"open", std::wstring(code->url.begin(), code->url.end()).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-                                   if (SUCCEEDED(com))
-                                   {
-                                       ::CoUninitialize();
-                                   }
+                                   browse(code->url);
                                }
                                std::mutex                  mutex;
                                std::condition_variable_any wake;
@@ -515,12 +508,28 @@ auto Plugin::link() -> void
 
 auto Plugin::unlink(const std::string& why) -> void
 {
+    stopLive();
     uploader_.reset();
     link_.reset();
     std::error_code ec;
     std::filesystem::remove(install_ / "config" / "memoria" / "token", ec);
     uploadsOff_ = "not linked: /memoria link";
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
+}
+
+auto Plugin::hello() -> std::string
+{
+    return liveHello(character_.characterName.data(), character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
+}
+
+// Ends the link without waiting: the live thread closes the connection, and a later frame joins it.
+auto Plugin::stopLive() -> void
+{
+    if (live_)
+    {
+        live_->stop();
+        closing_.push_back(std::move(live_));
+    }
 }
 
 auto Plugin::status() -> void
@@ -566,6 +575,10 @@ auto Plugin::status() -> void
     if (!s.error.empty())
     {
         say(paint(Color::Red, "Cannot write the capture: " + s.error));
+    }
+    if (live_)
+    {
+        say("Live: " + live_->status());
     }
     if (!uploader_)
     {
@@ -665,6 +678,35 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         say(paint(Color::Grey, "Asking Vault for a link code..."));
         link();
     }
+    else if (sub == "live" && args.size() > 2 && args[2] == "off")
+    {
+        if (live_)
+        {
+            stopLive();
+            say(paint(Color::Yellow, "Live off.") + " The link has ended.");
+        }
+        else
+        {
+            say("Not live.");
+        }
+    }
+    else if (sub == "live" && !link_)
+    {
+        say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
+    }
+    else if (sub == "live" && live_)
+    {
+        live_->reopen();
+        say("Opening the live link again.");
+    }
+    else if (sub == "live")
+    {
+        live_ = std::make_unique<Live>(server_, link_->token, recorder_->live(), hello(), [this](std::string text)
+                                       {
+                                           post(std::move(text));
+                                       });
+        say(paint(Color::Grey, "Asking Vault for a live link..."));
+    }
     else if (sub == "unlink" && link_)
     {
         unlink("Unlinked");
@@ -676,6 +718,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         if (args[2] == "off")
         {
             std::ofstream{ paused };
+            stopLive();
             uploader_.reset();
             uploadsOff_ = "paused: /memoria upload on";
             say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
@@ -692,7 +735,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     }
     else
     {
-        say("/memoria status | link | unlink | upload on|off | key | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | live [off] | upload on|off | key | note <text> | session start <file.xicap> | session stop");
     }
     return true;
 }

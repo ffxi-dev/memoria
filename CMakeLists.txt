@@ -58,6 +58,8 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/exports.def
         src/plugin/client.cpp
         src/plugin/client.h
+        src/plugin/live.cpp
+        src/plugin/live.h
         src/plugin/memoria.cpp
         src/plugin/memoria.h
         src/plugin/winhttp.cpp

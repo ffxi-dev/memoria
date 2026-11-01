@@ -6,6 +6,10 @@ It replaces the earlier Memoria plugin (`Ashita4-Memoria`) and captain's PacketL
 
 Status: early. The plugin loads and unloads; recording is being built. The plan is in `ffxi-dev/vault`, `openspec/changes/add-memoria/`.
 
+## Live
+
+`/memoria live` opens Lens on the capture as it records, for anyone with the link. It needs `/memoria link` first. Memoria asks Mogsafe for a link, opens it in your browser, and sends packets over a WebSocket only while someone watches. Viewers see what the capture holds, so chat stays stubbed. `/memoria live` again reopens the link; `/memoria live off` ends it, as do `/memoria unlink`, `/memoria upload off`, and unloading. A link lasts at most 12 hours. The protocol is in `ffxi-dev/vault`, `openspec/changes/add-memoria-live/design.md`.
+
 ## Build
 
 From an MSVC x86 developer shell, with `ASHITA4_SDK_PATH` pointing at Ashita's `plugins/sdk`:

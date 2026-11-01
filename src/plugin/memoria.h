@@ -4,18 +4,37 @@
 #include "core/link.h"
 #include "core/recorder.h"
 #include "core/uploader.h"
+#include "plugin/live.h"
 
 #include <Ashita.h>
 
 #include <array>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 namespace memoria
 {
+
+// Ashita's chat colours, as its chat.lua names them: 0x1E, then a colour number; 0x1E 0x01 goes back to normal.
+enum class Color : uint8_t
+{
+    Green  = 2,
+    Cyan   = 6,
+    Grey   = 67,
+    Red    = 68,
+    Yellow = 104,
+};
+
+inline auto paint(Color c, std::string_view text) -> std::string
+{
+    return std::format("\x1E{}{}\x1E\x01", static_cast<char>(c), text);
+}
 
 class Plugin final : public IPlugin
 {
@@ -58,29 +77,33 @@ private:
     auto link() -> void;
     auto unlink(const std::string& why) -> void;
     auto remind() -> void;
+    auto hello() -> std::string;
+    auto stopLive() -> void;
 
-    IAshitaCore*              core_{ nullptr };
-    std::filesystem::path     install_;
-    xicap::SecretSeed         seed_{};
-    std::string               server_ = "https://mogsafe.sruon.dev";
-    std::optional<Linked>     link_;
-    std::mutex                inboxMutex_;
-    std::vector<std::string>  inbox_;
-    std::optional<Linked>     arrived_; // from the link thread
-    ILogManager*              log_{ nullptr };
-    Clock                     clock_;
-    std::unique_ptr<Recorder> recorder_;
-    std::unique_ptr<Uploader> uploader_;
-    HANDLE                    uploadMutex_{ nullptr };
-    std::string               startError_;
-    std::string               uploadsOff_;
-    std::string               searchError_;
-    std::string               characterError_; // why the content id and world are missing
-    xicap::CharacterIdentity  character_{};
-    bool                      loggedIn_{ false };
-    uint32_t                  loggedInAs_{ 0 };
-    std::optional<ChunkKey>   lastChunk_[2]; // per direction
-    std::jthread              linker_;       // last: destroyed first, before what its thread uses
+    IAshitaCore*                       core_{ nullptr };
+    std::filesystem::path              install_;
+    xicap::SecretSeed                  seed_{};
+    std::string                        server_ = "https://mogsafe.sruon.dev";
+    std::optional<Linked>              link_;
+    std::mutex                         inboxMutex_;
+    std::vector<std::string>           inbox_;
+    std::optional<Linked>              arrived_; // from the link thread
+    ILogManager*                       log_{ nullptr };
+    Clock                              clock_;
+    std::unique_ptr<Recorder>          recorder_;
+    std::unique_ptr<Uploader>          uploader_;
+    std::unique_ptr<Live>              live_; // after recorder_, whose feed it reads
+    std::vector<std::unique_ptr<Live>> closing_;
+    HANDLE                             uploadMutex_{ nullptr };
+    std::string                        startError_;
+    std::string                        uploadsOff_;
+    std::string                        searchError_;
+    std::string                        characterError_; // why the content id and world are missing
+    xicap::CharacterIdentity           character_{};
+    bool                               loggedIn_{ false };
+    uint32_t                           loggedInAs_{ 0 };
+    std::optional<ChunkKey>            lastChunk_[2]; // per direction
+    std::jthread                       linker_;       // last: destroyed first, before what its thread uses
 };
 
 } // namespace memoria
