@@ -1,6 +1,7 @@
 #include "core/uploader.h"
 
 #include <picosha2.h>
+#include <xicap/constants.h>
 
 #include <algorithm>
 #include <charconv>
@@ -15,10 +16,9 @@ namespace memoria
 namespace
 {
 
-constexpr uint64_t HEADER_SIZE = 384; // Mogsafe refuses a first append without the whole xicap header
-constexpr uint64_t CHUNK_SIZE  = 1 << 20;
-constexpr auto     STATE_FILE  = "uploads.txt";
-constexpr auto     MAX_WAIT    = std::chrono::minutes(5);
+constexpr uint64_t CHUNK_SIZE = 1 << 20;
+constexpr auto     STATE_FILE = "uploads.txt";
+constexpr auto     MAX_WAIT   = std::chrono::minutes(5);
 
 auto parseU64(std::string_view s) -> std::optional<uint64_t>
 {
@@ -121,9 +121,10 @@ auto Uploader::run() -> void
 auto Uploader::pass() -> std::optional<std::string>
 {
     uploading_ = true;
-    if (!std::exchange(loaded_, true))
+    if (!loaded_)
     {
         load();
+        loaded_ = true; // status() trusts files_ once this is set
     }
     std::optional<std::string> first;
     std::error_code            ec;
@@ -178,7 +179,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
         f.size = size;
         f.seen = now;
     }
-    if (size < HEADER_SIZE)
+    if (size < xicap::HEADER_SIZE) // Mogsafe refuses a first append without the whole header
     {
         return std::nullopt;
     }

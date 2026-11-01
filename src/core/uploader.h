@@ -80,7 +80,7 @@ private:
 
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
-    bool                        loaded_{ false };
+    std::atomic<bool>           loaded_{ false };
 
     std::thread             thread_;
     std::mutex              wakeMutex_;
