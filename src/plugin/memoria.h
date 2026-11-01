@@ -81,7 +81,8 @@ private:
     auto stopLive() -> void;
 
     IAshitaCore*                       core_{ nullptr };
-    std::filesystem::path              install_;
+    std::filesystem::path              config_;
+    std::filesystem::path              captures_;
     xicap::SecretSeed                  seed_{};
     std::string                        server_ = "https://mogsafe.sruon.dev";
     std::optional<Linked>              link_;

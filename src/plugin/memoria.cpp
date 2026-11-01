@@ -5,6 +5,7 @@
 #include "plugin/winhttp.h"
 
 #include <Commands.h>
+#include <picosha2.h>
 #include <xicap/constants.h>
 
 #include <algorithm>
@@ -28,9 +29,6 @@ namespace memoria
 {
 namespace
 {
-
-constexpr uint16_t ZONE_IN = 0x00A;
-constexpr uint16_t LOGOUT  = 0x00B;
 
 // Square Enix's retail zone servers, 124.150.152.0/21.
 constexpr uint32_t RETAIL_FIRST = 0x7C969800;
@@ -132,8 +130,15 @@ auto count(uint64_t n) -> std::string
 
 auto duration(uint64_t seconds) -> std::string
 {
-    return seconds < 60 ? std::format("{} s", seconds) : seconds < 3600 ? std::format("{} min", seconds / 60)
-                                                                        : std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
+    if (seconds < 60)
+    {
+        return std::format("{} s", seconds);
+    }
+    if (seconds < 3600)
+    {
+        return std::format("{} min", seconds / 60);
+    }
+    return std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
 }
 
 } // namespace
@@ -181,8 +186,10 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     core_ = core;
     log_  = logger;
 
-    install_        = core_->GetInstallPath();
-    const auto seed = loadOrCreateSeed(install_ / "config" / "memoria" / "key");
+    const std::filesystem::path install = core_->GetInstallPath();
+    config_                             = install / "config" / "memoria";
+    captures_                           = install / "captures" / "memoria";
+    const auto seed                     = loadOrCreateSeed(config_ / "key");
     if (!seed)
     {
         startError_ = seed.error();
@@ -190,8 +197,8 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         return true; // stay loaded so /memoria status can say why
     }
     seed_ = *seed;
-    link_ = loadLink(install_ / "config" / "memoria" / "token");
-    if (auto config = readIni(install_ / "config" / "memoria" / "upload.ini"); config && (*config)["server"].starts_with("https://"))
+    link_ = loadLink(config_ / "token");
+    if (auto config = readIni(config_ / "upload.ini"); config && (*config)["server"].starts_with("https://"))
     {
         server_ = (*config)["server"];
         while (server_.ends_with('/'))
@@ -202,7 +209,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
 
     try
     {
-        recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = install_ / "captures" / "memoria", .seed = seed_, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
+        recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = captures_, .seed = seed_, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
         startUploads();
     }
     catch (const std::exception& error)
@@ -231,7 +238,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
         loggedInAs_     = late.character.characterId;
         recorder_->login(clock_.nowMs(), std::move(late));
     }
-    log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, (install_ / "captures" / "memoria").string().c_str());
+    log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, captures_.string().c_str());
     return true;
 }
 
@@ -260,7 +267,7 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         return false;
     }
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
-    if (id == ZONE_IN)
+    if (id == xicap::FFXIPacket::LOGIN_ZONE)
     {
         auto who = characterOf(data, size);
         if (!loggedIn_ || who.characterId != loggedInAs_)
@@ -278,7 +285,7 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         }
     }
     record(false, size, data, modified, sizeChunk, dataChunk, injected, blocked);
-    if (id == LOGOUT && size > 4 && leavesGame(data[4]))
+    if (id == xicap::FFXIPacket::LOGOUT && size > 4 && leavesGame(data[4]))
     {
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
@@ -404,13 +411,13 @@ auto Plugin::startUploads() -> void
         uploadsOff_ = "not linked: /memoria link";
         return;
     }
-    if (std::filesystem::exists(install_ / "config" / "memoria" / "paused"))
+    if (std::filesystem::exists(config_ / "paused"))
     {
         uploadsOff_ = "paused: /memoria upload on";
         return;
     }
     UploadOptions options{
-        .dir         = install_ / "captures" / "memoria",
+        .dir         = captures_,
         .server      = server_,
         .credentials = { { "Authorization", "Bearer " + link_->token } },
     };
@@ -442,7 +449,7 @@ auto Plugin::post(std::string text) -> void
 // Once a day while unlinked: the date of the last reminder is kept across restarts.
 auto Plugin::remind() -> void
 {
-    const auto  path  = install_ / "config" / "memoria" / "reminded";
+    const auto  path  = config_ / "reminded";
     const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
     std::string last;
     std::getline(std::ifstream(path), last);
@@ -496,7 +503,7 @@ auto Plugin::link() -> void
                                    }
                                    if (*result)
                                    {
-                                       saveLink(install_ / "config" / "memoria" / "token", **result);
+                                       saveLink(config_ / "token", **result);
                                        std::lock_guard inbox(inboxMutex_);
                                        arrived_ = **result;
                                        return;
@@ -512,7 +519,7 @@ auto Plugin::unlink(const std::string& why) -> void
     uploader_.reset();
     link_.reset();
     std::error_code ec;
-    std::filesystem::remove(install_ / "config" / "memoria" / "token", ec);
+    std::filesystem::remove(config_ / "token", ec);
     uploadsOff_ = "not linked: /memoria link";
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
 }
@@ -643,10 +650,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     else if (sub == "key")
     {
         const auto s = recorder_->status();
-        say(s.capture.empty() ? "the key shows once a capture opens" : "public key " + std::ranges::fold_left(s.publicKey, std::string{}, [](std::string hex, uint8_t b)
-                                                                                                              {
-                                                                                                                  return hex + std::format("{:02x}", b);
-                                                                                                              }));
+        say(s.capture.empty() ? "the key shows once a capture opens" : "public key " + picosha2::bytes_to_hex_string(s.publicKey));
     }
     else if (sub == "note" && args.size() > 2)
     {
@@ -713,7 +717,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
     {
-        const auto      paused = install_ / "config" / "memoria" / "paused";
+        const auto      paused = config_ / "paused";
         std::error_code ec;
         if (args[2] == "off")
         {
