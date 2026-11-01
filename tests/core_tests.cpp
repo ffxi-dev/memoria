@@ -2,6 +2,7 @@
 #include "core/ed25519.h"
 #include "core/event_queue.h"
 #include "core/link.h"
+#include "core/live.h"
 #include "core/recorder.h"
 #include "core/seed_file.h"
 #include "core/uploader.h"
@@ -747,4 +748,191 @@ TEST_CASE("a refused token stops the uploader")
     CHECK(up.pass().has_value());
     CHECK(up.unauthorized());
     fs::remove_all(dir);
+}
+
+namespace
+{
+
+struct Frame
+{
+    uint8_t              channel{};
+    uint16_t             flags{};
+    uint64_t             timestamp{};
+    std::vector<uint8_t> data;
+};
+
+auto frames(const std::vector<std::vector<uint8_t>>& messages) -> std::vector<Frame>
+{
+    std::vector<Frame> out;
+    for (const auto& m : messages)
+    {
+        for (size_t at = 0; at < m.size();)
+        {
+            REQUIRE(m[at] == 1);
+            Frame    f{ .channel = m[at + 1] };
+            uint32_t length = 0;
+            std::memcpy(&f.flags, &m[at + 2], 2);
+            std::memcpy(&f.timestamp, &m[at + 4], 8);
+            std::memcpy(&length, &m[at + 12], 4);
+            f.data.assign(m.begin() + static_cast<std::ptrdiff_t>(at + 16), m.begin() + static_cast<std::ptrdiff_t>(at + 16 + length));
+            out.push_back(std::move(f));
+            at += 16 + length;
+        }
+    }
+    return out;
+}
+
+auto outPacket(const Event& e) -> xicap::OutPacket
+{
+    return { .timestamp = e.timestamp, .direction = e.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }), .channel = e.channel, .opcode = e.opcode, .provenance = e.provenance };
+}
+
+} // namespace
+
+TEST_CASE("a live frame is version, channel, flags, time, length, then the packet")
+{
+    auto e           = gamePacket(0x0102030405060708ULL, 0x015);
+    e.clientToServer = true;
+    e.provenance     = xicap::PacketFlag::Injected;
+    e.data.resize(6);
+    const std::vector<uint8_t> want{
+        0x01,
+        0x00,
+        0x03,
+        0x00, // version 1, game channel, from the client and injected
+        0x08,
+        0x07,
+        0x06,
+        0x05,
+        0x04,
+        0x03,
+        0x02,
+        0x01, // Unix ms
+        0x06,
+        0x00,
+        0x00,
+        0x00, // length
+        0x15,
+        0x08,
+        0xAB,
+        0xAB,
+        0xAB,
+        0xAB,
+    };
+    CHECK(liveFrame(outPacket(e)) == want);
+}
+
+TEST_CASE("live frames hold what the capture holds, so chat goes out stubbed")
+{
+    const auto dir = tempDir();
+    {
+        Recorder rec(options(dir));
+        rec.live().open(true);
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1, 0x017)); // chat to the client
+        auto said           = gamePacket(T0 + 2, 0x0B5);
+        said.clientToServer = true;
+        rec.packet(std::move(said));
+        rec.packet(gamePacket(T0 + 3, 0x015));
+        rec.packet({ .timestamp = T0 + 4, .clientToServer = true, .channel = 1, .opcode = 0x05, .data = std::vector<uint8_t>(40, 0xCD) });
+        rec.stop();
+
+        const auto live = frames(rec.live().take());
+        REQUIRE(live.size() == 4);
+        CHECK(live[0].data.size() == 4);
+        CHECK((live[0].flags & xicap::PacketFlag::Excluded) != 0);
+        CHECK(live[1].data.size() == 4);
+        CHECK(live[1].flags == (xicap::PacketFlag::Excluded | xicap::PacketFlag::ClientToServer));
+        CHECK(live[2].data.size() == 16);
+        CHECK(live[3].channel == 1);
+
+        xicap::Reader     r(captures(dir)[0]);
+        xicap::ReadPacket p{};
+        for (const auto& f : live)
+        {
+            REQUIRE(r.next(p));
+            CHECK(f.channel == p.channel);
+            CHECK(f.flags == p.flags);
+            CHECK(f.timestamp == p.timestamp);
+            CHECK(std::ranges::equal(std::as_bytes(std::span{ f.data }), p.data));
+        }
+    }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("the live feed batches frames into messages and takes nothing while closed")
+{
+    LiveFeed feed;
+    feed.push(outPacket(gamePacket(T0)));
+    CHECK(feed.take().empty());
+
+    feed.open(true);
+    for (int i = 0; i < 3; ++i)
+    {
+        feed.push(outPacket(gamePacket(T0 + i)));
+    }
+    auto messages = feed.take();
+    REQUIRE(messages.size() == 1);
+    CHECK(frames(messages).size() == 3);
+    CHECK(feed.take().empty());
+
+    // 5,000 frames of 32 bytes do not fit one 64 KiB message.
+    for (int i = 0; i < 5000; ++i)
+    {
+        feed.push(outPacket(gamePacket(T0 + i)));
+    }
+    messages = feed.take();
+    REQUIRE(messages.size() == 3);
+    CHECK(messages[0].size() <= LiveFeed::MESSAGE_BYTES);
+    CHECK(frames(messages).size() == 5000);
+
+    feed.push(outPacket(gamePacket(T0)));
+    feed.open(false);
+    CHECK(feed.take().empty());
+}
+
+TEST_CASE("a full live feed drops packets and counts them")
+{
+    LiveFeed feed(3 * 32);
+    feed.open(true);
+    for (int i = 0; i < 5; ++i)
+    {
+        feed.push(outPacket(gamePacket(T0 + i)));
+    }
+    CHECK(feed.takeDropped() == 2);
+    CHECK(feed.takeDropped() == 0);
+    CHECK(frames(feed.take()).size() == 3);
+    feed.push(outPacket(gamePacket(T0)));
+    CHECK(feed.takeDropped() == 0);
+}
+
+TEST_CASE("a live link comes from Mogsafe with the install's token")
+{
+    struct Live final : Http
+    {
+        std::string auth;
+        int         status = 201;
+
+        auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            CHECK(method == "POST");
+            CHECK(url == "https://mogsafe.test/v1/live");
+            auth = headers.at(0).second;
+            return HttpResponse{ .status = status, .body = R"({"token":"l1ve","url":"https://lens.sruon.dev/live#l1ve","expires":1790000000000})" };
+        }
+    } mogsafe;
+    const auto link = startLive(mogsafe, "https://mogsafe.test", "t0ken");
+    REQUIRE(link.has_value());
+    CHECK(mogsafe.auth == "Bearer t0ken");
+    CHECK(link->token == "l1ve");
+    CHECK(link->url == "https://lens.sruon.dev/live#l1ve");
+
+    mogsafe.status = 401;
+    CHECK(startLive(mogsafe, "https://mogsafe.test", "t0ken").error() == "Mogsafe answered 401");
+
+    CHECK(liveViewers(R"({"viewers":2})") == 2);
+    CHECK(!liveViewers(R"({"sender":true})"));
+    CHECK(!liveViewers("not json"));
+    CHECK(nlohmann::json::parse(liveHello("Nouurs", "Asura", "30261006_0", "Memoria 0.6.0")) ==
+          nlohmann::json::parse(R"({"hello":{"character":"Nouurs","world":"Asura","client_version":"30261006_0","agent":"Memoria 0.6.0"}})"));
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/event_queue.h"
+#include "core/live.h"
 
 #include <xicap/writer.h>
 
@@ -63,6 +64,11 @@ public:
 
     [[nodiscard]] auto status() const -> RecorderStatus;
 
+    auto live() -> LiveFeed&
+    {
+        return live_;
+    }
+
     auto stop() -> void; // writes what is queued and closes the capture
 
 private:
@@ -81,6 +87,7 @@ private:
 
     RecorderOptions options_;
     EventQueue      queue_;
+    LiveFeed        live_;
 
     std::thread             thread_;
     std::mutex              wakeMutex_;

@@ -330,6 +330,7 @@ auto Recorder::write(const Event& event) -> void
         }
     }
     writer_->write(packet);
+    live_.push(packet);
     std::lock_guard lock(statusMutex_);
     status_.packets++;
     (event.clientToServer ? status_.packetsOut : status_.packetsIn)++;

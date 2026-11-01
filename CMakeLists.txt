@@ -41,6 +41,7 @@ add_library(memoria_core STATIC
     src/core/clock.cpp
     src/core/event_queue.cpp
     src/core/link.cpp
+    src/core/live.cpp
     src/core/recorder.cpp
     src/core/seed_file.cpp
     src/core/uploader.cpp
