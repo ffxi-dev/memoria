@@ -81,7 +81,17 @@ auto LiveFeed::push(const xicap::OutPacket& packet) -> void
     {
         return;
     }
-    auto            frame = liveFrame(packet);
+    std::vector<uint8_t> frame;
+    try
+    {
+        frame = liveFrame(packet);
+    }
+    catch (const std::exception&) // a packet the policy refuses is a gap for viewers, never an error in the capture
+    {
+        std::lock_guard lock(mutex_);
+        dropped_++;
+        return;
+    }
     std::lock_guard lock(mutex_);
     if (!open_)
     {

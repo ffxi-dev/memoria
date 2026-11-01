@@ -1041,6 +1041,10 @@ TEST_CASE("a full live feed drops packets and counts them")
     CHECK(frames(feed.take()).size() == 3);
     feed.push(outPacket(gamePacket(T0)));
     CHECK(feed.takeDropped() == 0);
+
+    const std::vector<std::byte> stub(2); // a game packet the policy cannot apply to
+    feed.push({ .timestamp = T0, .direction = xicap::PacketDirection::ServerToClient, .data = stub });
+    CHECK(feed.takeDropped() == 1);
 }
 
 TEST_CASE("a live link comes from Mogsafe with the install's token")
