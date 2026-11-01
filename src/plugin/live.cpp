@@ -200,7 +200,7 @@ auto Live::run(const std::stop_token& stop) -> void
     }
     browse(link->url);
     post_(paint(Color::Green, "Live.") + " Anyone with the link can watch until " + paint(Color::Cyan, "/memoria live off") + ". Nothing is sent while nobody watches.");
-    post_(paint(Color::Grey, "No browser? Open " + link->url));
+    post_(link->url);
 
     const Handle session(WinHttpOpen(L"Memoria/" MEMORIA_VERSION_TEXT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (session)

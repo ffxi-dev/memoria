@@ -468,7 +468,7 @@ auto Plugin::link() -> void
                                    return;
                                }
                                post("Sign in on the page that opened in your browser and enter " + paint(Color::Yellow, code->code));
-                               post(paint(Color::Grey, "No browser? Open " + code->url));
+                               post(code->url);
                                // Only Mogsafe's own link page: never a URL the server could swap for another.
                                if (code->url.starts_with(server_ + "/link"))
                                {
