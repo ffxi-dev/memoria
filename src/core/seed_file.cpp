@@ -1,12 +1,45 @@
 #include "core/seed_file.h"
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <fstream>
 #include <random>
+#include <thread>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace memoria
 {
+
+// Not std::ios::noreplace: Wine, which runs the tests, has no fopen "x" mode.
+auto createNew(const std::filesystem::path& path) -> bool
+{
+#ifdef _WIN32
+    int fd = -1;
+    if (_wsopen_s(&fd, path.c_str(), _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0)
+    {
+        return false;
+    }
+    _close(fd);
+#else
+    const int fd = ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if (fd < 0)
+    {
+        return false;
+    }
+    ::close(fd);
+#endif
+    return true;
+}
 
 auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap::SecretSeed, std::string>
 {
@@ -14,12 +47,17 @@ auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap:
     std::error_code   ec;
     if (std::filesystem::exists(path, ec))
     {
-        std::ifstream in(path, std::ios::binary);
-        if (std::filesystem::file_size(path, ec) != seed.size() || !in.read(reinterpret_cast<char*>(seed.data()), seed.size()))
+        // Wine refuses to open a new key for the moment its creator removes the temporary link to it.
+        for (int attempt = 0; attempt < 10; ++attempt)
         {
-            return std::unexpected(std::format("cannot read the signing key {}; recording is off until it is fixed", path.string()));
+            std::ifstream in(path, std::ios::binary);
+            if (std::filesystem::file_size(path, ec) == seed.size() && in.read(reinterpret_cast<char*>(seed.data()), seed.size()))
+            {
+                return seed;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        return seed;
+        return std::unexpected(std::format("cannot read the signing key {}; recording is off until it is fixed", path.string()));
     }
     if (ec)
     {
@@ -36,11 +74,11 @@ auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap:
     // Each client starting together writes its own file, so the one whose link wins is the seed it returns.
     const auto temp = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.new", random(), random()));
     {
-        std::ofstream out(temp, std::ios::binary | std::ios::noreplace);
-        if (!out.is_open())
+        if (!createNew(temp))
         {
             return std::unexpected(std::format("cannot create {}", temp.string()));
         }
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         out.write(reinterpret_cast<const char*>(seed.data()), seed.size());
         out.close();
         if (!out)

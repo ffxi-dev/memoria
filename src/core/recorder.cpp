@@ -1,5 +1,7 @@
 #include "core/recorder.h"
 
+#include "core/seed_file.h"
+
 #include <picosha2.h>
 
 #include <algorithm>
@@ -366,7 +368,7 @@ auto Recorder::openSession(const std::filesystem::path& path) -> void
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
         // Created here, never replaced: an existing file, the main capture among them, refuses the session.
-        created = std::ofstream(path, std::ios::binary | std::ios::noreplace).is_open();
+        created = createNew(path);
         if (!created)
         {
             throw std::runtime_error(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));

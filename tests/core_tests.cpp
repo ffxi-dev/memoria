@@ -138,7 +138,10 @@ TEST_CASE("clients starting together on a fresh install all get the key on disk"
         REQUIRE(onDisk.has_value());
         for (const auto& seed : seeds)
         {
-            REQUIRE(seed.has_value());
+            if (!seed)
+            {
+                FAIL(seed.error());
+            }
             CHECK(*seed == *onDisk);
         }
         CHECK(std::distance(fs::directory_iterator(dir), fs::directory_iterator{}) == 1); // no temporary file left
