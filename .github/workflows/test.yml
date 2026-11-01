@@ -8,7 +8,7 @@ on:
 
 jobs:
   core:
-    uses: ffxi-dev/vault/.github/workflows/cmake.yml@ci/v1.10
+    uses: ffxi-dev/vault/.github/workflows/cmake.yml@ci/v1.12
     with:
       windows: '["x86"]'
       configure-args: -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
