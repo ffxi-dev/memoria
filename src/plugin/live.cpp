@@ -104,6 +104,7 @@ Live::Live(std::string server, std::string installToken, LiveFeed& feed, std::st
 : server_(std::move(server))
 , installToken_(std::move(installToken))
 , feed_(feed)
+, owner_(feed.claim())
 , post_(std::move(post))
 , hello_(std::move(hello))
 , thread_([this](const std::stop_token& stop)
@@ -282,7 +283,6 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                                     wake_.notify_all();
                                 });
 
-        // Only this thread opens and closes the feed, so a link being stopped cannot reopen it under a new one.
         bool open = false;
         while (!stop.stop_requested())
         {
@@ -296,16 +296,16 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             }
             if (const bool watched = viewers_ > 0; watched != open)
             {
-                feed_.open(watched);
+                feed_.open(owner_, watched);
                 open = watched;
             }
             bool ok = true;
-            if (const auto dropped = feed_.takeDropped(); dropped > 0)
+            if (const auto dropped = feed_.takeDropped(owner_); dropped > 0)
             {
                 dropped_ += dropped;
                 ok = sendText(ws.get(), std::format(R"({{"dropped":{}}})", dropped));
             }
-            for (const auto& message : feed_.take())
+            for (const auto& message : feed_.take(owner_))
             {
                 ok = ok && sendBytes(ws.get(), WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, message);
             }
@@ -315,7 +315,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             }
         }
     }
-    feed_.open(false);
+    feed_.open(owner_, false);
     viewers_ = 0;
     if (stop.stop_requested())
     {

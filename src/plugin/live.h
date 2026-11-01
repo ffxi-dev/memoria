@@ -48,6 +48,7 @@ private:
     std::string                      server_;
     std::string                      installToken_;
     LiveFeed&                        feed_;
+    uint64_t                         owner_; // of the feed
     std::function<void(std::string)> post_;
 
     mutable std::mutex          mutex_;

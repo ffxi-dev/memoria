@@ -113,9 +113,23 @@ auto LiveFeed::push(const xicap::OutPacket& packet) -> void
     }
 }
 
-auto LiveFeed::open(bool on) -> void
+auto LiveFeed::claim() -> uint64_t
 {
     std::lock_guard lock(mutex_);
+    open_ = false;
+    messages_.clear();
+    bytes_   = 0;
+    dropped_ = 0;
+    return ++owner_;
+}
+
+auto LiveFeed::open(uint64_t owner, bool on) -> void
+{
+    std::lock_guard lock(mutex_);
+    if (owner != owner_)
+    {
+        return;
+    }
     open_ = on;
     if (!on)
     {
@@ -124,16 +138,24 @@ auto LiveFeed::open(bool on) -> void
     }
 }
 
-auto LiveFeed::take() -> std::vector<std::vector<uint8_t>>
+auto LiveFeed::take(uint64_t owner) -> std::vector<std::vector<uint8_t>>
 {
     std::lock_guard lock(mutex_);
+    if (owner != owner_)
+    {
+        return {};
+    }
     bytes_ = 0;
     return std::exchange(messages_, {});
 }
 
-auto LiveFeed::takeDropped() -> uint64_t
+auto LiveFeed::takeDropped(uint64_t owner) -> uint64_t
 {
     std::lock_guard lock(mutex_);
+    if (owner != owner_)
+    {
+        return 0;
+    }
     return std::exchange(dropped_, 0);
 }
 

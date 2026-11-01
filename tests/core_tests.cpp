@@ -1139,8 +1139,9 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out stubbed")
 {
     const auto dir = tempDir();
     {
-        Recorder rec(options(dir));
-        rec.live().open(true);
+        Recorder   rec(options(dir));
+        const auto owner = rec.live().claim();
+        rec.live().open(owner, true);
         rec.login(T0, who("Nouurs", 1));
         rec.packet(gamePacket(T0 + 1, 0x017)); // chat to the client
         auto said           = gamePacket(T0 + 2, 0x0B5);
@@ -1150,7 +1151,7 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out stubbed")
         rec.packet({ .timestamp = T0 + 4, .clientToServer = true, .channel = 1, .opcode = 0x05, .data = std::vector<uint8_t>(40, 0xCD) });
         rec.stop();
 
-        const auto live = frames(rec.live().take());
+        const auto live = frames(rec.live().take(owner));
         REQUIRE(live.size() == 4);
         CHECK(live[0].data.size() == 4);
         CHECK((live[0].flags & xicap::PacketFlag::Excluded) != 0);
@@ -1175,52 +1176,67 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out stubbed")
 
 TEST_CASE("the live feed batches frames into messages and takes nothing while closed")
 {
-    LiveFeed feed;
+    LiveFeed   feed;
+    const auto owner = feed.claim();
     feed.push(outPacket(gamePacket(T0)));
-    CHECK(feed.take().empty());
+    CHECK(feed.take(owner).empty());
 
-    feed.open(true);
+    feed.open(owner, true);
     for (int i = 0; i < 3; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)));
     }
-    auto messages = feed.take();
+    auto messages = feed.take(owner);
     REQUIRE(messages.size() == 1);
     CHECK(frames(messages).size() == 3);
-    CHECK(feed.take().empty());
+    CHECK(feed.take(owner).empty());
 
     // 5,000 frames of 32 bytes do not fit one 64 KiB message.
     for (int i = 0; i < 5000; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)));
     }
-    messages = feed.take();
+    messages = feed.take(owner);
     REQUIRE(messages.size() == 3);
     CHECK(messages[0].size() <= LiveFeed::MESSAGE_BYTES);
     CHECK(frames(messages).size() == 5000);
 
     feed.push(outPacket(gamePacket(T0)));
-    feed.open(false);
-    CHECK(feed.take().empty());
+    feed.open(owner, false);
+    CHECK(feed.take(owner).empty());
 }
 
 TEST_CASE("a full live feed drops packets and counts them")
 {
-    LiveFeed feed(3 * 32);
-    feed.open(true);
+    LiveFeed   feed(3 * 32);
+    const auto owner = feed.claim();
+    feed.open(owner, true);
     for (int i = 0; i < 5; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)));
     }
-    CHECK(feed.takeDropped() == 2);
-    CHECK(feed.takeDropped() == 0);
-    CHECK(frames(feed.take()).size() == 3);
+    CHECK(feed.takeDropped(owner) == 2);
+    CHECK(feed.takeDropped(owner) == 0);
+    CHECK(frames(feed.take(owner)).size() == 3);
     feed.push(outPacket(gamePacket(T0)));
-    CHECK(feed.takeDropped() == 0);
+    CHECK(feed.takeDropped(owner) == 0);
 
     const std::vector<std::byte> stub(2); // a game packet the policy cannot apply to
     feed.push({ .timestamp = T0, .direction = xicap::PacketDirection::ServerToClient, .data = stub });
-    CHECK(feed.takeDropped() == 1);
+    CHECK(feed.takeDropped(owner) == 1);
+}
+
+TEST_CASE("a live link stopped late cannot close the feed of the one that replaced it")
+{
+    LiveFeed   feed;
+    const auto old = feed.claim();
+    feed.open(old, true);
+    const auto now = feed.claim(); // /memoria live off, then /memoria live, while the old send still hangs
+    feed.open(now, true);
+    feed.open(old, false); // the old link's send returns, and it closes what it thinks is its feed
+    feed.push(outPacket(gamePacket(T0)));
+    CHECK(feed.take(old).empty());
+    CHECK(frames(feed.take(now)).size() == 1);
 }
 
 TEST_CASE("a live link comes from Mogsafe with the install's token")
