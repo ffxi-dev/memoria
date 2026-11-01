@@ -3,7 +3,6 @@
 #include <picosha2.h>
 
 #include <algorithm>
-#include <array>
 #include <charconv>
 #include <format>
 #include <fstream>
@@ -20,21 +19,6 @@ constexpr uint64_t HEADER_SIZE = 384; // Mogsafe refuses a first append without 
 constexpr uint64_t CHUNK_SIZE  = 1 << 20;
 constexpr auto     STATE_FILE  = "uploads.txt";
 constexpr auto     MAX_WAIT    = std::chrono::minutes(5);
-constexpr auto     STALE       = std::chrono::minutes(2);
-
-// Whether a capture ends with xicap's footer, which its writer adds on a clean close.
-auto ended(const std::filesystem::path& path) -> bool
-{
-    std::ifstream in(path, std::ios::binary | std::ios::ate);
-    if (!in || in.tellg() < 4)
-    {
-        return false;
-    }
-    std::array<char, 4> tail{};
-    in.seekg(-4, std::ios::end);
-    in.read(tail.data(), tail.size());
-    return in && std::string_view(tail.data(), tail.size()) == "XCPF";
-}
 
 auto parseU64(std::string_view s) -> std::optional<uint64_t>
 {
@@ -402,23 +386,15 @@ auto Uploader::status() const -> std::vector<UploadStatus>
     }
     std::vector<UploadStatus> out;
     std::error_code           ec;
-    const auto                now = std::filesystem::file_time_type::clock::now();
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
         if (!entry.is_regular_file(ec) || entry.path().extension() != ".xicap")
         {
             continue;
         }
-        const auto& f     = files[entry.path().filename().string()];
-        const auto  size  = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
-        auto        stage = UploadStage::Uploaded;
-        if (!f.closed)
-        {
-            // A capture being recorded gains a frame every few seconds while its client is in game; one untouched for minutes has no writer left.
-            stage = ended(entry.path()) ? UploadStage::Finishing : now - entry.last_write_time(ec) < STALE ? UploadStage::Recording
-                                                                                                           : UploadStage::CutOff;
-        }
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed ? size : f.sent, .size = size, .stage = stage, .error = f.error });
+        const auto& f    = files[entry.path().filename().string()];
+        const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
+        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed ? size : f.sent, .size = size, .refused = !f.closed && f.refused == size && !f.error.empty(), .error = f.error });
     }
     return out;
 }

@@ -554,7 +554,6 @@ TEST_CASE("an upload follows a growing file and closes once it is complete")
     CHECK(u.data == readAll(file));
     const auto status = up->status();
     REQUIRE(status.size() == 1);
-    CHECK(status[0].stage == UploadStage::Uploaded);
     CHECK(status[0].sent == 554);
     CHECK(status[0].error.empty());
 }
@@ -577,29 +576,6 @@ TEST_CASE("a client that is not uploading reports what the uploading one sent")
     CHECK(status[0].name == "a.xicap");
     CHECK(status[0].sent == 500);
     CHECK(status[0].size == 600);
-    CHECK(status[0].stage == UploadStage::Recording);
-}
-
-TEST_CASE("a capture nobody writes any more reads as cut off, and one with its end as finishing")
-{
-    const auto  dir = tempDir();
-    FakeMogsafe server;
-    auto        up = uploader(dir, server);
-    append(dir / "live.xicap", std::string(500, 'x'));
-    append(dir / "dead.xicap", std::string(500, 'x'));
-    append(dir / "done.xicap", std::string(500, 'x') + "XCPF");
-    fs::last_write_time(dir / "dead.xicap", fs::file_time_type::clock::now() - std::chrono::hours(1));
-    fs::last_write_time(dir / "done.xicap", fs::file_time_type::clock::now() - std::chrono::hours(1));
-
-    const auto status = up->status();
-    const auto stage  = [&](const std::string& name)
-    {
-        return std::ranges::find(status, name, &UploadStatus::name)->stage;
-    };
-    REQUIRE(status.size() == 3);
-    CHECK(stage("live.xicap") == UploadStage::Recording);
-    CHECK(stage("dead.xicap") == UploadStage::CutOff);
-    CHECK(stage("done.xicap") == UploadStage::Finishing);
 }
 
 TEST_CASE("a restart resumes the same upload")

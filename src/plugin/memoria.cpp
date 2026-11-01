@@ -146,21 +146,10 @@ auto count(uint64_t n) -> std::string
     return text;
 }
 
-// "20261031-075857-Nouuurs-c96ece1b.xicap" reads as "Nouuurs (started Oct 31 07:58 UTC)".
-auto captureName(const std::string& file) -> std::string
+auto duration(uint64_t seconds) -> std::string
 {
-    constexpr std::array<std::string_view, 12> months{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    const auto                                 parts = file | std::views::split('-') | std::ranges::to<std::vector<std::string>>();
-    if (parts.size() < 4 || parts[0].size() != 8 || parts[1].size() != 6)
-    {
-        return file;
-    }
-    const auto month = std::stoi(parts[0].substr(4, 2));
-    if (month < 1 || month > 12)
-    {
-        return file;
-    }
-    return std::format("{} (started {} {} {}:{} UTC)", parts[2], months[month - 1], parts[0].substr(6, 2), parts[1].substr(0, 2), parts[1].substr(2, 2));
+    return seconds < 60 ? std::format("{} s", seconds) : seconds < 3600 ? std::format("{} min", seconds / 60)
+                                                                        : std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
 }
 
 } // namespace
@@ -543,87 +532,78 @@ auto Plugin::status() -> void
     }
     else
     {
-        std::error_code ec;
-        const auto      onDisk  = std::filesystem::file_size(s.capture, ec);
-        const auto      raw     = s.bytesIn + s.bytesOut;
-        const auto      seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
-        say(paint(Color::Green, "Recording") + " " + s.capture.filename().string());
-        say(std::format("Packets: {} ({} in, {} out), {:.1f}/s", count(s.packets), count(s.packetsIn), count(s.packetsOut), static_cast<double>(s.packets) / static_cast<double>(seconds)));
-        say(std::format("Size: {} raw, {} on disk{}", size(raw), size(onDisk), onDisk > 0 ? std::format(" ({:.1f}x)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
-        say(std::format("Search: {}, dropped: {}", count(s.search), count(s.dropped)));
-    }
-    if (!s.session.empty())
-    {
-        say("Session: " + s.session.string());
-    }
-    if (!s.error.empty())
-    {
-        say(paint(Color::Red, "Last write error: " + s.error));
-    }
-    if (loggedIn_)
-    {
+        std::error_code   ec;
+        const auto        onDisk  = std::filesystem::file_size(s.capture, ec);
+        const auto        raw     = s.bytesIn + s.bytesOut;
+        const auto        seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
         const std::string name(character_.characterName.data());
-        say(characterError_.empty() ? std::format("Character: {} on {}, content id {}", name, character_.worldName.data(), character_.contentId) : "Character: " + name + paint(Color::Grey, " (world unknown: " + characterError_ + ")"));
+        const std::string world(character_.worldName.data());
+        say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), name, world.empty() ? "" : " on " + world, duration(seconds), count(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), size(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
     }
     const auto version = client::lobby::version();
-    say("Client: " + (version.empty() ? paint(Color::Grey, "unknown before the first login") : version));
+    auto       client  = "Client " + (version.empty() ? paint(Color::Grey, "unknown before the first login") : version);
+    if (searchError_.empty())
+    {
+        client += std::format(" · {} search packets", count(s.search));
+    }
+    if (s.dropped > 0)
+    {
+        client += " · " + paint(Color::Yellow, std::format("{} packets dropped", count(s.dropped)));
+    }
+    say(client);
+    if (!s.session.empty())
+    {
+        say("Session: " + s.session.filename().string());
+    }
     if (!searchError_.empty())
     {
         say(paint(Color::Red, "Search not recorded: " + searchError_));
+    }
+    if (!characterError_.empty() && loggedIn_)
+    {
+        say(paint(Color::Grey, "World unknown: " + characterError_));
+    }
+    if (!s.error.empty())
+    {
+        say(paint(Color::Red, "Cannot write the capture: " + s.error));
     }
     if (!uploader_)
     {
         say("Uploads: " + paint(Color::Yellow, uploadsOff_));
         return;
     }
-    const auto files = uploader_->status();
-    const auto own   = s.capture.filename().string();
-    const auto sent  = [](const UploadStatus& u)
-    {
-        return std::format("{} of {} sent", size(u.sent), size(u.size));
-    };
-    say("Uploads: linked to " + link_->account);
-    if (const auto it = std::ranges::find(files, own, &UploadStatus::name); it != files.end())
-    {
-        say("This capture: " + sent(*it));
-    }
-    size_t uploaded = 0;
+    // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
+    const auto  files  = uploader_->status();
+    uint64_t    behind = 0;
+    const auto* failed = static_cast<const UploadStatus*>(nullptr);
     for (const auto& u : files)
     {
-        if (u.stage == UploadStage::Uploaded && u.error.empty())
-        {
-            ++uploaded;
-            continue;
-        }
-        if (u.name == own)
+        if (u.refused)
         {
             continue;
         }
-        std::string what;
-        switch (u.stage)
+        behind += u.size > u.sent ? u.size - u.sent : 0;
+        if (!u.error.empty() && failed == nullptr)
         {
-            case UploadStage::Uploaded:
-                what = "uploaded";
-                break;
-            case UploadStage::Recording:
-                what = "recording on another client, " + sent(u);
-                break;
-            case UploadStage::Finishing:
-                what = "ended, " + sent(u);
-                break;
-            case UploadStage::CutOff:
-                what = paint(Color::Yellow, "cut off without an end") + "; Mogsafe files it as cut off a day after its last byte";
-                break;
-        }
-        say(std::format("{}: {}", captureName(u.name), what));
-        if (!u.error.empty())
-        {
-            say(paint(Color::Red, "  " + u.error));
+            failed = &u;
         }
     }
-    if (uploaded > 0)
+    const auto linked = paint(Color::Grey, " · linked to " + link_->account);
+    if (failed != nullptr)
     {
-        say(std::format("{} earlier capture{} uploaded", uploaded, uploaded == 1 ? "" : "s"));
+        say("Uploads: " + paint(Color::Red, "cannot reach Mogsafe (" + failed->error + "), retrying") + linked);
+    }
+    else if (behind > 0)
+    {
+        say(std::format("Uploads: catching up, {} to send", size(behind)) + linked);
+    }
+    else
+    {
+        say("Uploads: " + paint(Color::Green, "all sent") + linked);
+    }
+    for (const auto& u : files | std::views::filter(&UploadStatus::refused))
+    {
+        say(paint(Color::Red, std::format("Mogsafe refused {}: {}", u.name, u.error)));
     }
 }
 
