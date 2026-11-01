@@ -47,11 +47,15 @@ auto readRange(const std::filesystem::path& path, uint64_t offset, uint64_t n) -
 }
 
 // Only the first size bytes: the file may still be growing.
-auto sha256(const std::filesystem::path& path, uint64_t size) -> std::optional<std::string>
+auto sha256(const std::filesystem::path& path, uint64_t size, const std::atomic<bool>& stopping) -> std::optional<std::string>
 {
     picosha2::hash256_one_by_one hasher;
     for (uint64_t offset = 0; offset < size; offset += CHUNK_SIZE)
     {
+        if (stopping)
+        {
+            return std::nullopt;
+        }
         const auto chunk = readRange(path, offset, std::min(size - offset, CHUNK_SIZE));
         if (!chunk)
         {
@@ -77,6 +81,7 @@ Uploader::~Uploader()
         std::lock_guard lock(wakeMutex_);
         stopping_ = true;
     }
+    http_->cancel();
     wake_.notify_all();
     if (thread_.joinable())
     {
@@ -270,7 +275,7 @@ auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset,
 
 auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>
 {
-    const auto hash = sha256(path, size);
+    const auto hash = sha256(path, size, stopping_);
     if (!hash)
     {
         return "cannot read the capture";

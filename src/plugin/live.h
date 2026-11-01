@@ -63,6 +63,7 @@ private:
     std::atomic<int>      viewers_{ 0 };
     std::atomic<uint64_t> dropped_{ 0 };
     std::atomic<bool>     finished_{ false };
+    WinHttp               http_{ "Memoria/" MEMORIA_VERSION_TEXT };
     std::jthread          thread_; // last: started once the rest is ready
 };
 

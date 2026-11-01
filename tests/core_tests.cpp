@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -874,6 +875,57 @@ TEST_CASE("the link is kept across restarts")
     REQUIRE(link);
     CHECK(link->token == "t0ken");
     CHECK(link->account == "sruon");
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an uploader stops without waiting for a request in flight")
+{
+    // A request that hangs, as one can through an outage, until cancelled.
+    class Stuck final : public Http
+    {
+    public:
+        std::atomic<bool> waiting{ false };
+
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            std::unique_lock lock(mutex_);
+            waiting = true;
+            wake_.wait_for(lock, std::chrono::seconds(60), [this]
+                           {
+                               return cancelled_;
+                           });
+            return std::unexpected("cancelled");
+        }
+
+        auto cancel() -> void override
+        {
+            {
+                std::lock_guard lock(mutex_);
+                cancelled_ = true;
+            }
+            wake_.notify_all();
+        }
+
+    private:
+        std::mutex              mutex_;
+        std::condition_variable wake_;
+        bool                    cancelled_{ false };
+    };
+    const auto dir = tempDir();
+    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" });
+    append(dir / "a.xicap", std::string(500, 'x'));
+    auto  stuck = std::make_unique<Stuck>();
+    auto& http  = *stuck;
+    auto  up    = std::make_unique<Uploader>(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config" }, std::move(stuck));
+    up->start();
+    for (int i = 0; i < 500 && !http.waiting; ++i)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(http.waiting);
+    const auto before = std::chrono::steady_clock::now();
+    up.reset();
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(5));
     fs::remove_all(dir);
 }
 

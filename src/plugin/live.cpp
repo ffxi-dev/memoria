@@ -121,6 +121,7 @@ Live::~Live()
 auto Live::stop() -> void
 {
     thread_.request_stop();
+    http_.cancel();
 }
 
 auto Live::reopen() -> void
@@ -166,8 +167,7 @@ auto Live::status() const -> std::string
 
 auto Live::run(const std::stop_token& stop) -> void
 {
-    WinHttp    http("Memoria/" MEMORIA_VERSION_TEXT);
-    const auto link = startLive(http, server_, installToken_);
+    const auto link = startLive(http_, server_, installToken_);
     if (!link || stop.stop_requested())
     {
         if (!link)

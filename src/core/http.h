@@ -26,6 +26,11 @@ public:
     virtual ~Http() = default;
 
     virtual auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> = 0;
+
+    // From another thread: ends the request in flight, and refuses any after it.
+    virtual auto cancel() -> void
+    {
+    }
 };
 
 } // namespace memoria
