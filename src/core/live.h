@@ -31,7 +31,7 @@ auto liveHello(std::string_view character, std::string_view world, std::string_v
 // Mogsafe's {"viewers": n}; nothing for any other message.
 auto liveViewers(std::string_view message) -> std::optional<int>;
 
-// The frame of a packet as xicap's writer stores it: after the exclusion policy, with the capture's flags.
+// The frame of a packet as the capture stores it.
 auto liveFrame(const xicap::OutPacket& packet) -> std::vector<uint8_t>;
 
 // Frames from the writer thread to the live thread. Takes nothing while closed; past maxBytes, drops and counts.

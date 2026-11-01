@@ -2,11 +2,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <format>
-#include <span>
 #include <utility>
 
 namespace memoria
@@ -56,52 +54,19 @@ auto liveViewers(std::string_view message) -> std::optional<int>
     return json["viewers"].get<int>();
 }
 
-// xicap applies its policy inside Writer::write and exports only the rules, so this follows its writer.cpp; a test checks it against what the writer stores.
 auto liveFrame(const xicap::OutPacket& packet) -> std::vector<uint8_t>
 {
-    std::span  data{ reinterpret_cast<const uint8_t*>(packet.data.data()), packet.data.size() };
-    const bool game   = packet.channel == std::to_underlying(xicap::Channel::Game);
-    const auto opcode = game && data.size() >= 2 ? static_cast<uint16_t>((data[0] | data[1] << 8) & 0x1FF) : packet.opcode;
-    auto       flags  = static_cast<uint16_t>(packet.provenance & xicap::PacketFlag::Provenance);
-    if (packet.direction == xicap::PacketDirection::ClientToServer)
-    {
-        flags |= xicap::PacketFlag::ClientToServer;
-    }
-
-    std::vector<uint8_t> redacted;
-    const auto&          rules = xicap::defaultExclusionPolicy().rules; // the policy Recorder gives its writers
-    const auto           rule  = std::ranges::find_if(rules, [&](const xicap::ExclusionRule& r)
-                                                      {
-                                               return r.channel == packet.channel && r.opcode == opcode &&
-                                                      (r.direction == xicap::ExclusionDirection::Both || std::to_underlying(r.direction) == std::to_underlying(packet.direction));
-                                                      });
-    if (rule != rules.end() && rule->action == xicap::ExclusionAction::Stub)
-    {
-        data = data.first((std::min)(data.size(), sizeof(xicap::FFXIPacketHeader)));
-        flags |= xicap::PacketFlag::Excluded;
-    }
-    else if (rule != rules.end())
-    {
-        redacted.assign(data.begin(), data.end());
-        for (const auto& range : rule->ranges)
-        {
-            if (range.offset < redacted.size())
-            {
-                std::fill_n(redacted.begin() + range.offset, (std::min)(uint64_t{ range.length }, uint64_t{ redacted.size() - range.offset }), uint8_t{ 0 });
-            }
-        }
-        data = redacted;
-        flags |= xicap::PacketFlag::Redacted;
-    }
+    const auto  stored = xicap::applyPolicy(xicap::defaultExclusionPolicy(), packet); // the policy Recorder gives its writers
+    const auto* data   = reinterpret_cast<const uint8_t*>(stored.data.data());
 
     std::vector<uint8_t> frame;
-    frame.reserve(16 + data.size());
+    frame.reserve(16 + stored.data.size());
     append<uint8_t>(frame, 1);
     append<uint8_t>(frame, packet.channel);
-    append<uint16_t>(frame, flags);
+    append<uint16_t>(frame, stored.flags);
     append<uint64_t>(frame, packet.timestamp);
-    append<uint32_t>(frame, static_cast<uint32_t>(data.size()));
-    frame.insert(frame.end(), data.begin(), data.end());
+    append<uint32_t>(frame, static_cast<uint32_t>(stored.data.size()));
+    frame.insert(frame.end(), data, data + stored.data.size());
     return frame;
 }
 
