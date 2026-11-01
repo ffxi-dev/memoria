@@ -567,6 +567,8 @@ public:
     bool                          down{};
     int                           creates{};
     int                           requests{};
+    int                           patches{};
+    int                           crashAtPatch = -1; // the game dies during this PATCH, before any answer
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
@@ -610,6 +612,10 @@ public:
         }
         if (method == "PATCH")
         {
+            if (patches++ == crashAtPatch)
+            {
+                throw std::runtime_error("the game crashed");
+            }
             if (u.closed || get("Upload-Offset") != std::to_string(u.data.size()))
             {
                 return HttpResponse{ .status = u.closed ? 410 : 409 };
@@ -735,6 +741,39 @@ TEST_CASE("a restart resumes the same upload")
     CHECK(!uploader(dir, server)->pass());
     CHECK(server.creates == 1);
     CHECK(server.uploads.begin()->second.data == readAll(file));
+}
+
+TEST_CASE("a crash during the first pass resumes the upload it created")
+{
+    for (const int crashAt : { 0, 1 }) // before the first chunk is accepted, and after it
+    {
+        const auto  dir  = tempDir();
+        const auto  file = dir / "a.xicap";
+        FakeMogsafe server;
+        server.crashAtPatch = crashAt;
+        append(file, std::string(3 * 512 * 1024, 'x'));
+        CHECK_THROWS(uploader(dir, server)->pass()); // no save at the end of the pass, as in a crash
+        server.crashAtPatch = -1;
+        CHECK(!uploader(dir, server)->pass());
+        CHECK(server.creates == 1);
+        CHECK(server.uploads.begin()->second.data == readAll(file));
+        fs::remove_all(dir);
+    }
+}
+
+TEST_CASE("a progress file that cannot be saved is an error in status")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+    append(dir / "a.xicap", std::string(500, 'x'));
+    fs::create_directory(dir / "uploads.txt.tmp");
+    CHECK(up->pass().has_value());
+    CHECK(!up->saveError().empty());
+    fs::remove(dir / "uploads.txt.tmp");
+    CHECK(!up->pass());
+    CHECK(up->saveError().empty());
+    fs::remove_all(dir);
 }
 
 TEST_CASE("an upload the server cut off starts over, and outages only delay")

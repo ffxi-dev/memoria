@@ -613,6 +613,10 @@ auto Plugin::status() -> void
     {
         say("Uploads: " + paint(Color::Green, "all sent") + account);
     }
+    if (const auto error = uploader_->saveError(); !error.empty())
+    {
+        say(paint(Color::Red, "Cannot save upload progress: " + error));
+    }
     for (const auto& u : files | std::views::filter(&UploadStatus::refused))
     {
         say(paint(Color::Red, std::format("Mogsafe refused {}: {}", u.name, u.error)));

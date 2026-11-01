@@ -52,6 +52,7 @@ public:
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>; // every capture in the folder, whichever client sends it
     [[nodiscard]] auto uploading() const -> bool;                   // false while another client sharing the folder sends its captures
+    [[nodiscard]] auto saveError() const -> std::string;            // why the last save of upload progress failed, if it did
     [[nodiscard]] auto unauthorized() -> bool;                      // true once each time Mogsafe refuses the token on disk, which it then deletes
 
 private:
@@ -73,7 +74,7 @@ private:
     auto allowed() -> bool;
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
     auto load() -> void;
-    auto save() -> void;
+    auto save() -> std::optional<std::string>;
     auto saved() const -> std::map<std::string, File>;
 
     UploadOptions         options_;
@@ -82,6 +83,7 @@ private:
 
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
+    std::string                 saveError_;
     std::atomic<bool>           loaded_{ false };
 
     std::thread             thread_;

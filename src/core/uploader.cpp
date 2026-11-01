@@ -160,7 +160,10 @@ auto Uploader::pass() -> std::optional<std::string>
         std::lock_guard lock(mutex_);
         files_[name] = f;
     }
-    save();
+    if (const auto error = save())
+    {
+        first = first.value_or(*error);
+    }
     return first;
 }
 
@@ -204,6 +207,12 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
         {
             f.url = options_.server.substr(0, options_.server.find('/', options_.server.find("://") + 3)) + f.url;
         }
+        // Saved before the first byte goes, so a crash later in the pass resumes this upload instead of sending the file again.
+        {
+            std::lock_guard lock(mutex_);
+            files_[path.filename().string()] = f;
+        }
+        save();
     }
 
     const auto res = request("HEAD", f.url, {});
@@ -364,9 +373,10 @@ auto Uploader::load() -> void
     files_ = std::move(files);
 }
 
-auto Uploader::save() -> void
+auto Uploader::save() -> std::optional<std::string>
 {
-    const auto tmp = options_.dir / std::format("{}.tmp", STATE_FILE);
+    const auto                 tmp = options_.dir / std::format("{}.tmp", STATE_FILE);
+    std::optional<std::string> error;
     {
         std::ofstream   out(tmp, std::ios::trunc);
         std::lock_guard lock(mutex_);
@@ -374,13 +384,30 @@ auto Uploader::save() -> void
         {
             out << std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused, f.sent);
         }
+        out.close();
         if (!out)
         {
-            return;
+            error = std::format("cannot write {}", tmp.string());
         }
     }
     std::error_code ec;
-    std::filesystem::rename(tmp, options_.dir / STATE_FILE, ec);
+    if (!error)
+    {
+        std::filesystem::rename(tmp, options_.dir / STATE_FILE, ec);
+    }
+    if (ec)
+    {
+        error = std::format("cannot save {}: {}", STATE_FILE, ec.message());
+    }
+    std::lock_guard lock(mutex_);
+    saveError_ = error.value_or("");
+    return error;
+}
+
+auto Uploader::saveError() const -> std::string
+{
+    std::lock_guard lock(mutex_);
+    return saveError_;
 }
 
 auto Uploader::unauthorized() -> bool
