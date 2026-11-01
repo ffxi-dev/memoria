@@ -28,7 +28,7 @@ public:
 
     auto stop() -> void; // closes with 1000 "off", which ends the link
     auto reopen() -> void;
-    auto setHello(std::string hello) -> void; // sent on each connect
+    auto setHello(std::string hello) -> void; // sent on each connect, and at once while connected
 
     [[nodiscard]] auto finished() const -> bool;
     [[nodiscard]] auto status() const -> std::string;
@@ -44,6 +44,7 @@ private:
     auto run(const std::stop_token& stop) -> void;
     auto stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t;
     auto wait(const std::stop_token& stop, std::chrono::milliseconds time) -> void;
+    auto helloNow() const -> std::string;
 
     std::string                      server_;
     std::string                      installToken_;

@@ -300,6 +300,11 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                 open = watched;
             }
             bool ok = true;
+            if (const auto now = helloNow(); now != hello) // the character or client changed
+            {
+                hello = now;
+                ok    = sendText(ws.get(), hello);
+            }
             if (const auto dropped = feed_.takeDropped(owner_); dropped > 0)
             {
                 dropped_ += dropped;
@@ -335,6 +340,12 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     std::lock_guard lock(mutex_);
     closed_ = false;
     return closeCode_;
+}
+
+auto Live::helloNow() const -> std::string
+{
+    std::lock_guard lock(mutex_);
+    return hello_;
 }
 
 // Waits on the live thread, opening the link again when asked; a closed connection ends the wait early.
