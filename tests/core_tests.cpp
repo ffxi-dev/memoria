@@ -393,6 +393,39 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     CHECK(notes == "cap start;");
 }
 
+TEST_CASE("a session never replaces a file, the main capture least of all")
+{
+    const auto dir      = tempDir();
+    const auto existing = dir / "yesterday" / "memoria.xicap";
+    fs::create_directories(existing.parent_path());
+    std::ofstream(existing) << "yesterday's session";
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        for (int i = 0; i < 200 && rec.status().capture.empty(); ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        rec.sessionStart(T0 + 2, existing);
+        rec.packet(gamePacket(T0 + 3));
+        rec.sessionStart(T0 + 4, rec.status().capture);
+        rec.packet(gamePacket(T0 + 5));
+        rec.stop();
+        CHECK(rec.status().error.empty());
+        CHECK(rec.status().sessionError.find("exists") != std::string::npos);
+    }
+    std::string text;
+    std::getline(std::ifstream(existing), text);
+    CHECK(text == "yesterday's session");
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 1);
+    const auto main = readCapture(files[0]);
+    CHECK(main.complete);
+    CHECK(main.packets == 3);
+    fs::remove_all(dir);
+}
+
 TEST_CASE("a session that cannot start leaves the main capture recording")
 {
     const auto dir = tempDir();

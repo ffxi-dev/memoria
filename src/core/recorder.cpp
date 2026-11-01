@@ -356,6 +356,7 @@ auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
 auto Recorder::openSession(const std::filesystem::path& path) -> void
 {
     closeSession();
+    bool created = false;
     try
     {
         if (!writer_)
@@ -364,10 +365,21 @@ auto Recorder::openSession(const std::filesystem::path& path) -> void
         }
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
+        // Created here, never replaced: an existing file, the main capture among them, refuses the session.
+        created = std::ofstream(path, std::ios::binary | std::ios::noreplace).is_open();
+        if (!created)
+        {
+            throw std::runtime_error(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));
+        }
         session_ = std::make_unique<xicap::Writer>(path, config(*login_, xicap::StartContext::MidSession, writer_->captureId()));
     }
     catch (const std::exception& error)
     {
+        if (created)
+        {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
         sessionFailed(error);
         return;
     }
