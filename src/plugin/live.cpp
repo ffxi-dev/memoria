@@ -26,6 +26,8 @@ constexpr auto BACKOFF_MAX = 60s;
 constexpr uint16_t REPLACED = 1008; // another client took the link
 constexpr uint16_t ENDED    = 4000; // the link's 12 hours ran out
 
+constexpr std::string_view OFF = "off"; // closing with 1000 and this reason ends the link
+
 struct Socket
 {
     InternetHandle connection;
@@ -82,6 +84,20 @@ auto sendBytes(HINTERNET ws, WINHTTP_WEB_SOCKET_BUFFER_TYPE type, std::span<cons
 auto sendText(HINTERNET ws, std::string_view text) -> bool
 {
     return sendBytes(ws, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, { reinterpret_cast<const uint8_t*>(text.data()), text.size() });
+}
+
+// Connects only to end the link, for a player who turned live off while the socket was down.
+auto sendOff(HINTERNET session, const std::string& url, const std::string& token) -> void
+{
+    WinHttpSetTimeouts(session, 3'000, 3'000, 3'000, 3'000);
+    const auto s = upgrade(session, url, token);
+    if (!s.ws)
+    {
+        return;
+    }
+    DWORD wait = 3'000;
+    WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &wait, sizeof(wait));
+    WinHttpWebSocketClose(s.ws.get(), WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, const_cast<char*>(OFF.data()), static_cast<DWORD>(OFF.size()));
 }
 
 } // namespace
@@ -226,6 +242,10 @@ auto Live::run(const std::stop_token& stop) -> void
         wait(stop, backoff);
         backoff = (std::min)(backoff * 2, std::chrono::milliseconds(BACKOFF_MAX));
     }
+    if (stop.stop_requested() && !offSent_)
+    {
+        sendOff(session.get(), url, installToken_);
+    }
     finished_ = true;
 }
 
@@ -324,8 +344,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     viewers_ = 0;
     if (stop.stop_requested())
     {
-        constexpr std::string_view off = "off";
-        WinHttpWebSocketShutdown(ws.get(), WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, const_cast<char*>(off.data()), static_cast<DWORD>(off.size()));
+        offSent_ = WinHttpWebSocketShutdown(ws.get(), WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, const_cast<char*>(OFF.data()), static_cast<DWORD>(OFF.size())) == NO_ERROR;
         std::unique_lock lock(mutex_);
         wake_.wait_for(lock, 3s, [this]
                        {

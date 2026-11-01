@@ -26,7 +26,7 @@ public:
     Live(const Live&)                    = delete;
     auto operator=(const Live&) -> Live& = delete;
 
-    auto stop() -> void; // closes with 1000 "off", which ends the link
+    auto stop() -> void; // closes with 1000 "off", which ends the link, reconnecting once to send it if the socket is down
     auto reopen() -> void;
     auto setHello(std::string hello) -> void; // sent on each connect, and at once while connected
 
@@ -60,6 +60,7 @@ private:
     bool                        reopen_{ false };
     bool                        closed_{ false }; // the server ended the connection
     uint16_t                    closeCode_{ 0 };
+    bool                        offSent_{ false }; // live thread only
 
     std::atomic<State>    state_{ State::Starting };
     std::atomic<int>      viewers_{ 0 };
