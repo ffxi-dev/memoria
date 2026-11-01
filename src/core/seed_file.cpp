@@ -33,10 +33,22 @@ auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap:
                           });
 
     std::filesystem::create_directories(path.parent_path(), ec);
-    const auto temp = std::filesystem::path(path).concat(".new");
-    if (!std::ofstream(temp, std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(seed.data()), seed.size()))
+    // Each client starting together writes its own file, so the one whose link wins is the seed it returns.
+    const auto temp = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.new", random(), random()));
     {
-        return std::unexpected(std::format("cannot write the signing key {}", temp.string()));
+        std::ofstream out(temp, std::ios::binary | std::ios::noreplace);
+        if (!out.is_open())
+        {
+            return std::unexpected(std::format("cannot create {}", temp.string()));
+        }
+        out.write(reinterpret_cast<const char*>(seed.data()), seed.size());
+        out.close();
+        if (!out)
+        {
+            std::error_code ignored;
+            std::filesystem::remove(temp, ignored);
+            return std::unexpected(std::format("cannot write the signing key {}", temp.string()));
+        }
     }
     // A hard link fails when the key exists: of two clients starting together, one creates it and the other reads it.
     std::filesystem::create_hard_link(temp, path, ec);

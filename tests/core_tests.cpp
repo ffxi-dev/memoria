@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <latch>
 #include <map>
 #include <random>
 #include <string>
@@ -106,6 +107,37 @@ TEST_CASE("the install key is created once and never replaced")
     fs::create_directory(path); // something there that is not a file
     CHECK_FALSE(loadOrCreateSeed(path).has_value());
     fs::remove_all(dir);
+}
+
+TEST_CASE("clients starting together on a fresh install all get the key on disk")
+{
+    for (int round = 0; round < 20; ++round)
+    {
+        const auto                                                 dir  = tempDir();
+        const auto                                                 path = dir / "key";
+        std::vector<std::expected<xicap::SecretSeed, std::string>> seeds(8);
+        {
+            std::latch                go(static_cast<std::ptrdiff_t>(seeds.size()));
+            std::vector<std::jthread> clients;
+            for (auto& seed : seeds)
+            {
+                clients.emplace_back([&]
+                                     {
+                                         go.arrive_and_wait();
+                                         seed = loadOrCreateSeed(path);
+                                     });
+            }
+        }
+        const auto onDisk = loadOrCreateSeed(path);
+        REQUIRE(onDisk.has_value());
+        for (const auto& seed : seeds)
+        {
+            REQUIRE(seed.has_value());
+            CHECK(*seed == *onDisk);
+        }
+        CHECK(std::distance(fs::directory_iterator(dir), fs::directory_iterator{}) == 1); // no temporary file left
+        fs::remove_all(dir);
+    }
 }
 
 namespace
