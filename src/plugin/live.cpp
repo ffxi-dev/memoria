@@ -26,44 +26,27 @@ constexpr auto BACKOFF_MAX = 60s;
 constexpr uint16_t REPLACED = 1008; // another client took the link
 constexpr uint16_t ENDED    = 4000; // the link's 12 hours ran out
 
-struct CloseHandle
-{
-    auto operator()(HINTERNET h) const -> void
-    {
-        WinHttpCloseHandle(h);
-    }
-};
-using Handle = std::unique_ptr<void, CloseHandle>;
-
-auto wide(std::string_view s) -> std::wstring
-{
-    return { s.begin(), s.end() };
-}
-
 struct Socket
 {
-    Handle      connection;
-    Handle      ws;
-    int         status{};
-    std::string error;
+    InternetHandle connection;
+    InternetHandle ws;
+    int            status{};
+    std::string    error;
 };
 
 auto upgrade(HINTERNET session, const std::string& url, const std::string& token) -> Socket
 {
-    Socket         s;
-    const auto     wurl = wide(url);
-    URL_COMPONENTS parts{ .dwStructSize = sizeof(URL_COMPONENTS), .dwHostNameLength = DWORD(-1), .dwUrlPathLength = DWORD(-1), .dwExtraInfoLength = DWORD(-1) };
-    if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts))
+    Socket s;
+    auto   open = openRequest(session, "GET", url);
+    if (!open)
     {
-        s.error = std::format("bad URL, WinHTTP error {}", GetLastError());
+        s.error = open.error();
         return s;
     }
-    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-    const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) + std::wstring(parts.lpszExtraInfo, parts.dwExtraInfoLength);
-    s.connection.reset(WinHttpConnect(session, host.c_str(), parts.nPort, 0));
-    const Handle req(s.connection ? WinHttpOpenRequest(s.connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) : nullptr);
-    const auto   headers = wide("Authorization: Bearer " + token);
-    if (!req || !WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), headers.c_str(), DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+    s.connection        = std::move(open->connection);
+    const auto& req     = open->request;
+    const auto  headers = wide("Authorization: Bearer " + token);
+    if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), headers.c_str(), DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(req.get(), nullptr))
     {
         s.error = std::format("WinHTTP error {}", GetLastError());
@@ -202,7 +185,7 @@ auto Live::run(const std::stop_token& stop) -> void
     post_(paint(Color::Green, "Live.") + " Anyone with the link can watch until " + paint(Color::Cyan, "/memoria live off") + ". Nothing is sent while nobody watches.");
     post_(link->url);
 
-    const Handle session(WinHttpOpen(L"Memoria/" MEMORIA_VERSION_TEXT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+    const InternetHandle session(WinHttpOpen(L"Memoria/" MEMORIA_VERSION_TEXT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (session)
     {
         WinHttpSetTimeouts(session.get(), 10'000, 10'000, 10'000, 10'000);
@@ -216,7 +199,7 @@ auto Live::run(const std::stop_token& stop) -> void
         {
             state_          = State::Connected;
             backoff         = 1s;
-            const auto code = stream(stop, s.ws.release());
+            const auto code = stream(stop, std::move(s.ws));
             if (stop.stop_requested())
             {
                 break;
@@ -245,10 +228,9 @@ auto Live::run(const std::stop_token& stop) -> void
     finished_ = true;
 }
 
-// Takes the WebSocket handle and closes it. Returns the code Mogsafe closed with, if it did.
-auto Live::stream(const std::stop_token& stop, void* handle) -> uint16_t
+// Closes the WebSocket. Returns the code Mogsafe closed with, if it did.
+auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
 {
-    Handle      ws(handle);
     std::string hello;
     {
         std::lock_guard lock(mutex_);

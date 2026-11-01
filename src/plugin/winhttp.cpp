@@ -15,21 +15,6 @@ namespace memoria
 namespace
 {
 
-struct CloseHandle
-{
-    auto operator()(HINTERNET h) const -> void
-    {
-        WinHttpCloseHandle(h);
-    }
-};
-using Handle = std::unique_ptr<void, CloseHandle>;
-
-// URLs and headers here are ASCII.
-auto wide(std::string_view s) -> std::wstring
-{
-    return { s.begin(), s.end() };
-}
-
 auto narrow(std::wstring_view s) -> std::string
 {
     return s | std::views::transform([](wchar_t c)
@@ -52,30 +37,19 @@ auto trim(std::string_view s) -> std::string_view
 
 } // namespace
 
-WinHttp::WinHttp(const std::string& agent)
-: session_(WinHttpOpen(wide(agent).c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0))
+auto CloseInternetHandle::operator()(void* handle) const -> void
 {
-    if (session_)
-    {
-        // Mogsafe hashes and checks a whole capture before it answers a close.
-        WinHttpSetTimeouts(session_, 10'000, 10'000, 120'000, 120'000);
-    }
+    WinHttpCloseHandle(handle);
 }
 
-WinHttp::~WinHttp()
+// URLs and headers here are ASCII.
+auto wide(std::string_view ascii) -> std::wstring
 {
-    if (session_)
-    {
-        WinHttpCloseHandle(session_);
-    }
+    return { ascii.begin(), ascii.end() };
 }
 
-auto WinHttp::request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
+auto openRequest(void* session, std::string_view method, const std::string& url) -> std::expected<OpenRequest, std::string>
 {
-    if (!session_)
-    {
-        return std::unexpected("WinHTTP did not start");
-    }
     const auto     wurl = wide(url);
     URL_COMPONENTS parts{ .dwStructSize = sizeof(URL_COMPONENTS), .dwHostNameLength = DWORD(-1), .dwUrlPathLength = DWORD(-1), .dwExtraInfoLength = DWORD(-1) };
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts))
@@ -85,16 +59,41 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
     const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
     const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) + std::wstring(parts.lpszExtraInfo, parts.dwExtraInfoLength);
 
-    const Handle connection(WinHttpConnect(session_, host.c_str(), parts.nPort, 0));
-    if (!connection)
+    OpenRequest open{ .connection = InternetHandle(WinHttpConnect(session, host.c_str(), parts.nPort, 0)) };
+    if (!open.connection)
     {
         return failed("connect");
     }
-    const Handle req(WinHttpOpenRequest(connection.get(), wide(method).c_str(), path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0));
-    if (!req)
+    open.request.reset(WinHttpOpenRequest(open.connection.get(), wide(method).c_str(), path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0));
+    if (!open.request)
     {
         return failed("open request");
     }
+    return open;
+}
+
+WinHttp::WinHttp(const std::string& agent)
+: session_(WinHttpOpen(wide(agent).c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0))
+{
+    if (session_)
+    {
+        // Mogsafe hashes and checks a whole capture before it answers a close.
+        WinHttpSetTimeouts(session_.get(), 10'000, 10'000, 120'000, 120'000);
+    }
+}
+
+auto WinHttp::request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
+{
+    if (!session_)
+    {
+        return std::unexpected("WinHTTP did not start");
+    }
+    const auto open = openRequest(session_.get(), method, url);
+    if (!open)
+    {
+        return std::unexpected(open.error());
+    }
+    const auto&  req = open->request;
     std::wstring lines;
     for (const auto& [name, value] : headers)
     {

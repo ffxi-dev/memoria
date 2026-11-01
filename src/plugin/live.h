@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/live.h"
+#include "plugin/winhttp.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -41,7 +42,7 @@ private:
     };
 
     auto run(const std::stop_token& stop) -> void;
-    auto stream(const std::stop_token& stop, void* ws) -> uint16_t;
+    auto stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t;
     auto wait(const std::stop_token& stop, std::chrono::milliseconds time) -> void;
 
     std::string                      server_;
