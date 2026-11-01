@@ -25,6 +25,11 @@
 #include <string>
 #include <thread>
 
+#ifdef __linux__
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace memoria;
 
@@ -387,6 +392,73 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     CHECK(packets == 2);
     CHECK(notes == "cap start;");
 }
+
+TEST_CASE("a session that cannot start leaves the main capture recording")
+{
+    const auto dir = tempDir();
+    std::ofstream(dir / "blocker") << "a file, not a folder";
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        rec.sessionStart(T0 + 2, dir / "blocker" / "memoria.xicap");
+        rec.packet(gamePacket(T0 + 3));
+        rec.stop();
+        CHECK(rec.status().error.empty());
+        CHECK(!rec.status().sessionError.empty());
+    }
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 1);
+    const auto main = readCapture(files[0]);
+    CHECK(main.complete);
+    CHECK(main.packets == 2);
+    fs::remove_all(dir);
+}
+
+#ifdef __linux__
+TEST_CASE("a session write that fails leaves the main capture recording")
+{
+    const auto dir     = tempDir();
+    const auto session = dir / "session" / "memoria.xicap";
+    auto       opts    = options(dir);
+    opts.flushEvery    = std::chrono::hours(1); // only the logout's marker writes the session
+    {
+        Recorder rec(opts);
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        rec.sessionStart(T0 + 2, session);
+        for (int i = 0; i < 200 && rec.status().session.empty(); ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(!rec.status().session.empty());
+        // From here the session's file writes to /dev/full.
+        const int full = ::open("/dev/full", O_WRONLY);
+        REQUIRE(full >= 0);
+        for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
+        {
+            std::error_code ec;
+            if (fs::read_symlink(fd.path(), ec) == fs::canonical(session))
+            {
+                ::dup2(full, std::stoi(fd.path().filename().string()));
+            }
+        }
+        ::close(full);
+        rec.packet(gamePacket(T0 + 3));
+        rec.logout(T0 + 4);
+        rec.login(T0 + 5, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 6));
+        rec.stop();
+        CHECK(rec.status().error.empty());
+        CHECK(!rec.status().sessionError.empty());
+    }
+    const auto main = readCapture(captures(dir)[0]);
+    CHECK(main.complete);
+    CHECK(main.packets == 3);
+    CHECK(main.markers == std::vector{ xicap::MarkerKind::Login, xicap::MarkerKind::Logout, xicap::MarkerKind::Login });
+    fs::remove_all(dir);
+}
+#endif
 
 TEST_CASE("packets before any login are not recorded, and the flush timer writes while open")
 {

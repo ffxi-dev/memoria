@@ -41,6 +41,7 @@ struct RecorderStatus
     uint64_t              lastMs{};
     uint64_t              dropped{};
     std::string           error;
+    std::string           sessionError; // why the last session ended early or never started
     xicap::PublicKey      publicKey{};
 };
 
@@ -80,6 +81,9 @@ private:
     auto mark(xicap::MarkerKind kind, std::string_view text = {}) -> void;
     auto openSession(const std::filesystem::path& path) -> void;
     auto closeSession() -> void;
+    template <typename Op>
+    auto onSession(Op op) -> void;
+    auto sessionFailed(const std::exception& error) -> void;
     auto close() -> void;
     auto fail(const std::exception& error) -> void;
     auto broken(const std::exception& error) -> void;

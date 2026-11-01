@@ -144,6 +144,24 @@ auto Recorder::stop() -> void
     }
 }
 
+// A session is optional: its failure ends it and leaves the main capture recording.
+template <typename Op>
+auto Recorder::onSession(Op op) -> void
+{
+    if (!session_)
+    {
+        return;
+    }
+    try
+    {
+        op(*session_);
+    }
+    catch (const std::exception& error)
+    {
+        sessionFailed(error);
+    }
+}
+
 auto Recorder::run() -> void
 {
     std::vector<Event> events;
@@ -183,18 +201,10 @@ auto Recorder::run() -> void
             {
                 broken(error);
             }
-            if (session_)
-            {
-                try
-                {
-                    session_->flush();
-                }
-                catch (const std::exception& error)
-                {
-                    fail(error);
-                    session_.reset();
-                }
-            }
+            onSession([](xicap::Writer& session)
+                      {
+                          session.flush();
+                      });
             lastFlush_ = now;
         }
         if (stopping)
@@ -317,18 +327,10 @@ auto Recorder::write(const Event& event) -> void
         .opcode     = event.opcode,
         .provenance = event.provenance,
     };
-    if (session_)
-    {
-        try
-        {
-            session_->write(packet);
-        }
-        catch (const std::exception& error) // the main capture carries on
-        {
-            fail(error);
-            session_.reset();
-        }
-    }
+    onSession([&](xicap::Writer& session)
+              {
+                  session.write(packet);
+              });
     writer_->write(packet);
     live_.push(packet);
     std::lock_guard lock(statusMutex_);
@@ -341,10 +343,10 @@ auto Recorder::write(const Event& event) -> void
 
 auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
 {
-    if (session_)
-    {
-        session_->mark(kind, text);
-    }
+    onSession([&](xicap::Writer& session)
+              {
+                  session.mark(kind, text);
+              });
     if (writer_)
     {
         writer_->mark(kind, text);
@@ -354,34 +356,42 @@ auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
 auto Recorder::openSession(const std::filesystem::path& path) -> void
 {
     closeSession();
-    if (!writer_)
+    try
     {
-        fail(std::runtime_error("no capture is open, so no session either"));
+        if (!writer_)
+        {
+            throw std::runtime_error("no capture is open, so no session either");
+        }
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+        session_ = std::make_unique<xicap::Writer>(path, config(*login_, xicap::StartContext::MidSession, writer_->captureId()));
+    }
+    catch (const std::exception& error)
+    {
+        sessionFailed(error);
         return;
     }
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    session_ = std::make_unique<xicap::Writer>(path, config(*login_, xicap::StartContext::MidSession, writer_->captureId()));
     std::lock_guard lock(statusMutex_);
     status_.session = path;
+    status_.sessionError.clear();
 }
 
 auto Recorder::closeSession() -> void
 {
-    if (!session_)
-    {
-        return;
-    }
-    try
-    {
-        session_->close();
-    }
-    catch (const std::exception& error)
-    {
-        fail(error);
-    }
+    onSession([](xicap::Writer& session)
+              {
+                  session.close();
+              });
     session_.reset();
     std::lock_guard lock(statusMutex_);
+    status_.session.clear();
+}
+
+auto Recorder::sessionFailed(const std::exception& error) -> void
+{
+    session_.reset();
+    std::lock_guard lock(statusMutex_);
+    status_.sessionError = error.what();
     status_.session.clear();
 }
 

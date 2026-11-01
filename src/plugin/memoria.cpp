@@ -571,6 +571,10 @@ auto Plugin::status() -> void
     {
         say("Session: " + s.session.filename().string());
     }
+    if (!s.sessionError.empty())
+    {
+        say(paint(Color::Red, "Session stopped: " + s.sessionError));
+    }
     if (!searchError_.empty())
     {
         say(paint(Color::Red, "Search not recorded: " + searchError_));
