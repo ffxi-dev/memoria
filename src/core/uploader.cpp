@@ -333,12 +333,8 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     auto res = http_->request(method, url, headers, body);
     if (res && res->status == 401)
     {
-        // A client that linked again since this token was read saved a new one: only the refused token goes.
-        const auto path = options_.config / "token";
-        if (const auto link = loadLink(path); link && link->token == token_)
+        if (removeLink(options_.config / "token", token_))
         {
-            std::error_code ec;
-            std::filesystem::remove(path, ec);
             unauthorized_ = true;
         }
         token_.clear();

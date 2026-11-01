@@ -8,6 +8,7 @@
 #include <array>
 #include <format>
 #include <fstream>
+#include <random>
 
 namespace memoria
 {
@@ -105,6 +106,27 @@ auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool
     std::filesystem::create_directories(path.parent_path(), ec);
     return static_cast<bool>(std::ofstream(path, std::ios::trunc) << link.token << '\n'
                                                                   << link.account << '\n');
+}
+
+auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool
+{
+    std::random_device random;
+    const auto         taken = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.old", random(), random()));
+    std::error_code    ec;
+    std::filesystem::rename(path, taken, ec);
+    if (ec)
+    {
+        return false;
+    }
+    const auto link    = loadLink(taken);
+    const bool refused = link && link->token == token;
+    if (!refused)
+    {
+        // A hard link fails where a token was saved since the rename, so the newer one stays.
+        std::filesystem::create_hard_link(taken, path, ec);
+    }
+    std::filesystem::remove(taken, ec);
+    return refused;
 }
 
 } // namespace memoria

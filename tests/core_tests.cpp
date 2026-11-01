@@ -920,6 +920,21 @@ TEST_CASE("the link is kept across restarts")
     fs::remove_all(dir);
 }
 
+TEST_CASE("only the refused token is deleted")
+{
+    const auto dir  = tempDir();
+    const auto path = dir / "token";
+    CHECK(!removeLink(path, "t0ken"));
+    REQUIRE(saveLink(path, { .token = "n3w", .account = "sruon" }));
+    CHECK(!removeLink(path, "t0ken"));
+    REQUIRE(loadLink(path));
+    CHECK(loadLink(path)->token == "n3w");
+    CHECK(removeLink(path, "n3w"));
+    CHECK(!fs::exists(path));
+    CHECK(fs::is_empty(dir));
+    fs::remove_all(dir);
+}
+
 TEST_CASE("an uploader stops without waiting for a request in flight")
 {
     // A request that hangs, as one can through an outage, until cancelled.

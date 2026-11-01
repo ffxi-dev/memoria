@@ -37,4 +37,7 @@ auto pollLink(Http& http, const std::string& server, const std::string& poll) ->
 auto loadLink(const std::filesystem::path& path) -> std::optional<Linked>;
 auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool;
 
+// Deletes the link only while it holds this token: one saved since, even mid-call, stays.
+auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool;
+
 } // namespace memoria
