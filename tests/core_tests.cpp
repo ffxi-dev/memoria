@@ -1,3 +1,4 @@
+#include "core/captain.h"
 #include "core/clock.h"
 #include "core/ed25519.h"
 #include "core/event_queue.h"
@@ -11,6 +12,7 @@
 #include <nlohmann/json.hpp>
 #include <picosha2.h>
 #include <xicap/reader.h>
+#include <zstd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -20,9 +22,12 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <latch>
 #include <map>
 #include <random>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -554,24 +559,53 @@ TEST_CASE("dropped packets leave a note in the capture")
 namespace
 {
 
+auto fromBase64(std::string_view in) -> std::string
+{
+    constexpr std::string_view digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string                out;
+    uint32_t                   v    = 0;
+    int                        bits = 0;
+    for (const char c : in)
+    {
+        if (c == '=')
+        {
+            break;
+        }
+        v = v << 6 | static_cast<uint32_t>(digits.find(c));
+        if ((bits += 6) >= 8)
+        {
+            out += static_cast<char>(v >> (bits -= 8) & 0xFF);
+        }
+    }
+    return out;
+}
+
 // Mogsafe's upload protocol in memory. Like the real one, a close wants the file's hash and a complete capture: here, one ending in the trailer magic XCPF.
+// A captain import instead names its log's CRC-32 and size, which a later import of the same log meets as a 409.
 class FakeMogsafe final : public Http
 {
 public:
     struct Upload
     {
-        std::vector<uint8_t> data;
-        bool                 closed{};
-        bool                 gone{};
+        std::vector<uint8_t>               data;
+        bool                               closed{};
+        bool                               gone{};
+        std::map<std::string, std::string> meta;
     };
 
-    std::map<std::string, Upload> uploads;
-    std::string                   token = "t0ken";
-    bool                          down{};
-    int                           creates{};
-    int                           requests{};
-    int                           patches{};
-    int                           crashAtPatch = -1; // the game dies during this PATCH, before any answer
+    std::map<std::string, Upload>           uploads;
+    std::map<std::string, std::string>      imported; // capture id by "crc32:size"
+    std::map<std::string, std::vector<int>> forced;   // answers by method, given before anything else
+    std::set<std::thread::id>               threads;
+    std::string                             token = "t0ken";
+    bool                                    down{};
+    bool                                    crashAfterClose{}; // the game dies once a close is accepted, before its answer
+    int                                     creates{};
+    int                                     requests{};
+    int                                     patches{};
+    uint64_t                                received{};        // bytes accepted by appends
+    int                                     crashAtPatch = -1; // the game dies during this PATCH, before any answer
+    std::function<void()>                   onPatch;
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
@@ -591,14 +625,35 @@ public:
             }
             return std::string{};
         };
+        threads.insert(std::this_thread::get_id());
         if (get("Authorization") != "Bearer " + token)
         {
             return HttpResponse{ .status = 401 };
         }
+        if (auto& f = forced[method]; !f.empty())
+        {
+            const auto status = f.front();
+            f.erase(f.begin());
+            return HttpResponse{ .status = status, .body = "forced\n" };
+        }
         if (method == "POST" && url == "https://mogsafe.test/v1/uploads/")
         {
+            std::map<std::string, std::string> meta;
+            std::istringstream                 fields(get("Upload-Metadata"));
+            for (std::string field; std::getline(fields, field, ',');)
+            {
+                meta[field.substr(0, field.find(' '))] = fromBase64(field.substr(field.find(' ') + 1));
+            }
+            if (meta["format"] == "captain" && meta["manifest"].find("StartTime") == std::string::npos)
+            {
+                return HttpResponse{ .status = 400, .body = "manifest.txt has no StartTime\n" };
+            }
+            if (const auto it = imported.find(meta["crc32"] + ":" + meta["size"]); it != imported.end())
+            {
+                return HttpResponse{ .status = 409, .headers = { { "mogsafe-capture", it->second } }, .body = "this log is already in Mogsafe as " + it->second };
+            }
             const auto path = std::format("/v1/uploads/{}", ++creates);
-            uploads[path]   = {};
+            uploads[path]   = { .meta = meta };
             return HttpResponse{ .status = 201, .headers = { { "location", path } } };
         }
         const auto path    = url.substr(std::string("https://mogsafe.test").size());
@@ -624,7 +679,26 @@ public:
                 return HttpResponse{ .status = u.closed ? 410 : 409 };
             }
             u.data.insert(u.data.end(), body.begin(), body.end());
+            received += body.size();
+            if (onPatch)
+            {
+                onPatch();
+            }
             return HttpResponse{ .status = 204 };
+        }
+        if (!u.meta["crc32"].empty())
+        {
+            if (std::string(body.begin(), body.end()) != "{}")
+            {
+                return HttpResponse{ .status = 400 };
+            }
+            u.closed                                         = true;
+            imported[u.meta["crc32"] + ":" + u.meta["size"]] = std::format("cap{}", it->first.back());
+            if (crashAfterClose)
+            {
+                throw std::runtime_error("the game crashed");
+            }
+            return HttpResponse{ .status = 200 };
         }
         const auto want = std::format(R"({{"sha256":"{}"}})", picosha2::hash256_hex_string(u.data));
         if (std::string(body.begin(), body.end()) != want)
@@ -1286,4 +1360,575 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
     CHECK(!liveViewers("not json"));
     CHECK(nlohmann::json::parse(liveHello("Nouurs", "Asura", "30261006_0", "Memoria 0.6.0")) ==
           nlohmann::json::parse(R"({"hello":{"character":"Nouurs","world":"Asura","client_version":"30261006_0","agent":"Memoria 0.6.0"}})"));
+}
+
+namespace
+{
+
+constexpr auto MANIFEST = "StartTime = 2026-08-04 23:54:00\n";
+
+// A folder as captain's PacketLogger leaves it, last written age ago.
+auto captainFolder(const fs::path& root, const std::string& rel, const std::string& log, const std::string& manifest = MANIFEST, std::chrono::minutes age = std::chrono::minutes(20)) -> fs::path
+{
+    const auto dir = root / rel;
+    fs::create_directories(dir / "PacketLogger");
+    std::ofstream(dir / "manifest.txt", std::ios::binary) << manifest;
+    std::ofstream(dir / "PacketLogger" / "full.log", std::ios::binary) << log;
+    fs::last_write_time(dir / "PacketLogger" / "full.log", fs::file_time_type::clock::now() - age);
+    return dir;
+}
+
+auto noise(size_t n) -> std::string
+{
+    std::mt19937 random(42);
+    std::string  out(n, '\0');
+    for (auto& c : out)
+    {
+        c = static_cast<char>(random());
+    }
+    return out;
+}
+
+auto unzstd(const std::vector<uint8_t>& in) -> std::string
+{
+    std::unique_ptr<ZSTD_DCtx, decltype(&ZSTD_freeDCtx)> d(ZSTD_createDCtx(), &ZSTD_freeDCtx);
+    std::string                                          out;
+    std::vector<char>                                    buf(ZSTD_DStreamOutSize());
+    ZSTD_inBuffer                                        input{ in.data(), in.size(), 0 };
+    for (size_t left = 1; left != 0;)
+    {
+        ZSTD_outBuffer o{ buf.data(), buf.size(), 0 };
+        left = ZSTD_decompressStream(d.get(), &o, &input);
+        if (ZSTD_isError(left) || (o.pos == 0 && input.pos == input.size))
+        {
+            return "<not a whole zstd frame>";
+        }
+        out.append(buf.data(), o.pos);
+    }
+    return out;
+}
+
+// <dir>/ashita holds captain's folders and Memoria's state; <dir>/config the install's token.
+struct Install
+{
+    fs::path                 dir = tempDir();
+    fs::path                 captures{ dir / "ashita" / "addons" / "captain" / "captures" };
+    fs::path                 uploaded{ dir / "ashita" / "addons" / "captain" / "captures-uploaded" };
+    fs::path                 state{ dir / "ashita" / "captures" / "memoria" };
+    fs::path                 config{ dir / "config" };
+    std::vector<std::string> said;
+    std::mutex               mutex;
+
+    Install()
+    {
+        fs::create_directories(captures);
+        saveLink(config / "token", { .token = "t0ken", .account = "sruon" });
+    }
+
+    ~Install()
+    {
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+
+    Install(const Install&)                    = delete;
+    auto operator=(const Install&) -> Install& = delete;
+
+    auto options(std::chrono::milliseconds retry = std::chrono::milliseconds(1)) -> ImportOptions
+    {
+        ImportOptions options{ .captures = captures, .uploaded = uploaded, .state = state, .server = "https://mogsafe.test", .config = config, .retry = retry };
+        options.say = [this](std::string text)
+        {
+            std::lock_guard lock(mutex);
+            said.push_back(std::move(text));
+        };
+        return options;
+    }
+
+    auto importer(FakeMogsafe& server, std::chrono::milliseconds retry = std::chrono::milliseconds(1)) -> std::unique_ptr<Importer>
+    {
+        return std::make_unique<Importer>(options(retry), std::make_unique<Forward>(server));
+    }
+
+    auto saidAny(std::string_view text) -> bool
+    {
+        std::lock_guard lock(mutex);
+        return std::ranges::any_of(said, [&](const auto& s)
+                                   {
+                                       return s.find(text) != std::string::npos;
+                                   });
+    }
+};
+
+auto waitFor(const std::function<bool()>& done) -> bool
+{
+    for (int i = 0; i < 1000 && !done(); ++i)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return done();
+}
+
+} // namespace
+
+TEST_CASE("captain captures are found at any depth, and not inside one")
+{
+    Install in;
+    captainFolder(in.captures, "Mining/test_2026-8-4/Audithor", "log");
+    captainFolder(in.captures, "2026-8-4_23_54/Audithor", "log");
+    captainFolder(in.captures, "2026-8-4_23_54/Audithor/inner/Nested", "log"); // inside a match: not searched
+    fs::create_directories(in.captures / "2026-8-5/Audithor");                 // a session made with Memoria
+    std::ofstream(in.captures / "2026-8-5/Audithor/manifest.txt") << MANIFEST;
+    std::ofstream(in.captures / "2026-8-5/Audithor/memoria.xicap") << "x";
+    fs::create_directories(in.captures / "tracker"); // an addon's own data
+    std::ofstream(in.captures / "tracker/data.json") << "{}";
+
+    const auto found = findCaptain(in.captures);
+    REQUIRE(found.size() == 2);
+    CHECK(found[0].folder == "2026-8-4_23_54/Audithor");
+    CHECK(found[1].folder == "Mining/test_2026-8-4/Audithor");
+    CHECK(found[1].character == "Audithor");
+    CHECK(found[1].size == 3);
+    CHECK(!found[1].growing);
+    CHECK(findCaptain(in.dir / "no such folder").empty());
+}
+
+TEST_CASE("a full.log changed in the last 10 minutes is left for later")
+{
+    Install in;
+    captainFolder(in.captures, "a/Audithor", "log", MANIFEST, std::chrono::minutes(2));
+    captainFolder(in.captures, "b/Audithor", "log", MANIFEST, std::chrono::minutes(11));
+    const auto found = findCaptain(in.captures);
+    REQUIRE(found.size() == 2);
+    CHECK(found[0].growing);
+    CHECK(!found[1].growing);
+
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 1/2 a/Audithor: still being written; skipped."));
+    CHECK(fs::exists(in.captures / "a/Audithor"));
+    CHECK(fs::exists(in.uploaded / "b/Audithor"));
+    CHECK(server.creates == 1);
+}
+
+TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
+{
+    Install           in;
+    std::atomic<bool> stop{ false };
+    std::string       log;
+    for (int i = 0; i < 1000; ++i)
+    {
+        log += "[2026-08-04 23:54:01] Incoming packet 0x00A\n|  00 01 02 03 |\n";
+    }
+    std::ofstream(in.dir / "check", std::ios::binary) << "123456789";
+    std::ofstream(in.dir / "full.log", std::ios::binary) << log;
+    // The values Mogsafe's zip.js crc32Of, which browse.html calls, gives for the same bytes.
+    CHECK(crc32File(in.dir / "check", stop)->crc == 0xcbf43926);
+    const auto crc = crc32File(in.dir / "full.log", stop);
+    REQUIRE(crc);
+    CHECK(crc->crc == 0x94175684);
+    CHECK(crc->size == 61000);
+    CHECK(!crc32File(in.dir / "missing", stop));
+    stop = true;
+    CHECK(!crc32File(in.dir / "full.log", stop));
+}
+
+TEST_CASE("a captain import sends full.log compressed with its manifest, then moves the folder")
+{
+    Install    in;
+    const auto log = std::string(5000, 'p') + noise(3000);
+    const auto dir = captainFolder(in.captures, "2026-8-4_23_54/Audithor", log);
+    std::ofstream(dir / "memoria.xicap") << "not sent";
+    fs::create_directories(dir / "PacketLogger" / "incoming");
+    std::ofstream(dir / "PacketLogger" / "incoming" / "0x00A.log") << "not sent";
+    FakeMogsafe server;
+    in.importer(server)->run();
+
+    REQUIRE(server.creates == 1);
+    auto& u = server.uploads.begin()->second;
+    CHECK(u.closed);
+    CHECK(unzstd(u.data) == log);
+    CHECK(u.meta["format"] == "captain");
+    CHECK(u.meta["manifest"] == MANIFEST);
+    CHECK(u.meta["character"] == "Audithor");
+    CHECK(u.meta["folder"] == "2026-8-4_23_54/Audithor");
+    CHECK(u.meta["size"] == "8000");
+    CHECK(u.meta["crc32"].size() == 8);
+    CHECK(!u.meta.contains("zip"));
+
+    CHECK(!fs::exists(in.captures / "2026-8-4_23_54")); // emptied parent removed
+    CHECK(fs::exists(in.captures));
+    CHECK(fs::exists(in.uploaded / "2026-8-4_23_54/Audithor/PacketLogger/incoming/0x00A.log"));
+    CHECK(!Importer::pending(in.state));
+    CHECK(!fs::exists(in.state / "imports"));
+    CHECK(in.said.front() == "Uploading 1 captain capture (7.8 KB) in the background.");
+    CHECK(in.saidAny("Captain 1/1 2026-8-4_23_54/Audithor: uploaded."));
+    CHECK(in.said.back() == "Captain import done: 1 uploaded, 0 already in Vault, 0 refused. Uploaded folders are in addons/captain/captures-uploaded.");
+
+    // Moved folders are never looked at again.
+    const auto requests = server.requests;
+    in.importer(server)->run();
+    CHECK(server.requests == requests);
+    CHECK(in.saidAny("No captain captures to upload."));
+}
+
+TEST_CASE("a log already in Vault sends no bytes and moves")
+{
+    Install    in;
+    const auto log = std::string("[2026-08-04] x\n");
+    captainFolder(in.captures, "s/Audithor", log);
+    FakeMogsafe       server;
+    std::atomic<bool> stop{ false };
+    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Audithor/PacketLogger/full.log", stop)->crc, log.size())] = "cap7";
+    in.importer(server)->run();
+    CHECK(server.creates == 0);
+    CHECK(server.received == 0);
+    CHECK(fs::exists(in.uploaded / "s/Audithor"));
+    CHECK(in.saidAny("Captain 1/1 s/Audithor: already in Vault (cap7)."));
+}
+
+TEST_CASE("a refused capture stays where it is and the next one goes")
+{
+    Install in;
+    captainFolder(in.captures, "a/Audithor", "log a", "Character = Audithor\n"); // no StartTime
+    captainFolder(in.captures, "b/Audithor", "log b");
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 1/2 a/Audithor: refused: manifest.txt has no StartTime."));
+    CHECK(fs::exists(in.captures / "a/Audithor"));
+    CHECK(fs::exists(in.uploaded / "b/Audithor"));
+
+    // A first append Mogsafe refuses (422) is a refusal too.
+    captainFolder(in.captures, "d/Audithor", "log d");
+    server.forced["PATCH"] = { 422 };
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 2/2 d/Audithor: refused: forced."));
+    CHECK(fs::exists(in.captures / "d/Audithor"));
+    CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already in Vault, 2 refused."));
+}
+
+TEST_CASE("an upload Mogsafe lost, at HEAD or at an append, starts over")
+{
+    for (const auto& [method, status] : { std::pair{ "HEAD", 404 }, std::pair{ "PATCH", 410 } })
+    {
+        Install    in;
+        const auto log = noise(3000);
+        captainFolder(in.captures, "s/Audithor", log);
+        FakeMogsafe server;
+        server.forced[method] = { status };
+        in.importer(server)->run();
+        CHECK(server.creates == 2);
+        CHECK(unzstd(server.uploads.rbegin()->second.data) == log);
+        CHECK(fs::exists(in.uploaded / "s/Audithor"));
+    }
+}
+
+TEST_CASE("server errors back off, and the import never gives up")
+{
+    Install    in;
+    const auto log = noise(3000);
+    captainFolder(in.captures, "s/Audithor", log);
+    FakeMogsafe server;
+    server.forced["POST"] = { 503, 500, 502 }; // creates
+    server.forced["HEAD"] = { 502 };
+    const auto before     = std::chrono::steady_clock::now();
+    in.importer(server, std::chrono::milliseconds(20))->run();
+    CHECK(std::chrono::steady_clock::now() - before >= std::chrono::milliseconds(20 + 40 + 80 + 160));
+    CHECK(unzstd(server.uploads.begin()->second.data) == log);
+    CHECK(fs::exists(in.uploaded / "s/Audithor"));
+}
+
+TEST_CASE("a refused token stops the import, unlinks, and the import resumes after a new link")
+{
+    Install in;
+    captainFolder(in.captures, "s/Audithor", "log");
+    FakeMogsafe server;
+    server.token = "revoked";
+    auto imp     = in.importer(server);
+    imp->run();
+    CHECK(imp->unauthorized());
+    CHECK(!fs::exists(in.config / "token"));
+    CHECK(in.saidAny("this install is not linked"));
+    CHECK(fs::exists(in.captures / "s/Audithor"));
+    CHECK(Importer::pending(in.state));
+
+    server.token = "t1";
+    saveLink(in.config / "token", { .token = "t1", .account = "sruon" });
+    in.importer(server)->run();
+    CHECK(fs::exists(in.uploaded / "s/Audithor"));
+    CHECK(!Importer::pending(in.state));
+}
+
+TEST_CASE("an unlinked import sends nothing")
+{
+    Install in;
+    captainFolder(in.captures, "s/Audithor", "log");
+    fs::remove(in.config / "token");
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(server.requests == 0);
+    CHECK(fs::exists(in.captures / "s/Audithor"));
+}
+
+TEST_CASE("a pause stops the import between chunks until uploads are on")
+{
+    Install    in;
+    const auto log = noise(3 << 20); // three appends once compressed
+    captainFolder(in.captures, "s/Audithor", log);
+    FakeMogsafe      server;
+    std::atomic<int> patches{ 0 };
+    server.onPatch = [&]
+    {
+        if (++patches == 1)
+        {
+            std::ofstream{ in.config / "paused" };
+        }
+    };
+    auto imp = in.importer(server);
+    imp->start();
+    REQUIRE(waitFor([&]
+                    {
+                        return patches > 0;
+                    }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    CHECK(patches == 1);
+    CHECK(!imp->finished());
+    const auto p = imp->progress();
+    CHECK(p.index == 1);
+    CHECK(p.count == 1);
+    CHECK(p.character == "Audithor");
+    CHECK(p.sent == Tus::CHUNK_SIZE);
+    CHECK(p.size > 2 * Tus::CHUNK_SIZE);
+
+    fs::remove(in.config / "paused");
+    CHECK(waitFor([&]
+                  {
+                      return imp->finished();
+                  }));
+    CHECK(unzstd(server.uploads.begin()->second.data) == log);
+}
+
+TEST_CASE("an import resumes from each point a crash can leave it at")
+{
+    const auto log = noise(3 << 20);
+    SECTION("asked for, before the first create")
+    {
+        Install in;
+        captainFolder(in.captures, "s/Audithor", log);
+        fs::create_directories(in.state);
+        std::ofstream{ in.state / "imports.txt" };
+        CHECK(Importer::pending(in.state));
+        FakeMogsafe server;
+        in.importer(server)->run();
+        CHECK(server.creates == 1);
+        CHECK(fs::exists(in.uploaded / "s/Audithor"));
+    }
+    SECTION("after the create, before the first byte, and after some appends")
+    {
+        for (const int crashAt : { 0, 1 })
+        {
+            Install in;
+            captainFolder(in.captures, "s/Audithor", log);
+            FakeMogsafe server;
+            server.crashAtPatch = crashAt;
+            CHECK_THROWS(in.importer(server)->run());
+            CHECK(Importer::pending(in.state));
+            server.crashAtPatch = -1;
+            in.importer(server)->run();
+            CHECK(server.creates == 1);
+            const auto& u = server.uploads.begin()->second;
+            CHECK(server.received == u.data.size()); // no byte twice
+            CHECK(unzstd(u.data) == log);
+            CHECK(fs::exists(in.uploaded / "s/Audithor"));
+            CHECK(!Importer::pending(in.state));
+        }
+    }
+    SECTION("closed, before the move")
+    {
+        Install in;
+        captainFolder(in.captures, "s/Audithor", log);
+        FakeMogsafe server;
+        server.crashAfterClose = true;
+        CHECK_THROWS(in.importer(server)->run());
+        CHECK(fs::exists(in.captures / "s/Audithor"));
+        server.crashAfterClose = false;
+        const auto received    = server.received;
+        in.importer(server)->run();
+        CHECK(server.received == received);
+        CHECK(server.creates == 1);
+        CHECK(in.saidAny("s/Audithor: already in Vault (cap1)."));
+        CHECK(fs::exists(in.uploaded / "s/Audithor"));
+        CHECK(fs::is_empty(in.state));
+    }
+}
+
+TEST_CASE("an uploaded folder moves to the same path under captures-uploaded")
+{
+    Install in;
+    captainFolder(in.captures, "Mining/test/Audithor", "a");
+    captainFolder(in.captures, "Mining/test/Nouurs", "b");
+    auto to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Audithor");
+    REQUIRE(to);
+    CHECK(*to == in.uploaded / "Mining/test/Audithor");
+    CHECK(fs::exists(in.captures / "Mining/test/Nouurs")); // the parent still holds another capture
+
+    captainFolder(in.captures, "Mining/test/Audithor", "c"); // the same path again: a clash
+    to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Audithor");
+    REQUIRE(to);
+    CHECK(to->filename() == "Audithor-2");
+    CHECK(fs::exists(in.uploaded / "Mining/test/Audithor/manifest.txt"));
+
+    REQUIRE(moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Nouurs"));
+    CHECK(fs::is_empty(in.captures));
+}
+
+TEST_CASE("a folder that cannot move stays, and the next import moves it")
+{
+    Install in;
+    captainFolder(in.captures, "s/Audithor", "log");
+    std::ofstream{ in.uploaded }; // a file where the folder goes
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 1/1 s/Audithor: in Vault, but its folder could not move: "));
+    CHECK(fs::exists(in.captures / "s/Audithor"));
+    CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already in Vault, 0 refused, 1 in Vault but not moved."));
+
+    fs::remove(in.uploaded);
+    in.importer(server)->run();
+    CHECK(in.saidAny("already in Vault (cap1)."));
+    CHECK(fs::exists(in.uploaded / "s/Audithor"));
+}
+
+namespace
+{
+
+// Hands requests to a fake, except that one method hangs until cancelled, as a request can through an outage.
+class Blocking final : public Http
+{
+public:
+    Blocking(FakeMogsafe& to, std::string method)
+    : to_(to)
+    , method_(std::move(method))
+    {
+    }
+
+    std::atomic<bool>            waiting{ false };
+    std::atomic<std::thread::id> thread;
+
+    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    {
+        if (method != method_)
+        {
+            return to_.request(method, url, headers, body);
+        }
+        std::unique_lock lock(mutex_);
+        thread  = std::this_thread::get_id();
+        waiting = true;
+        wake_.wait_for(lock, std::chrono::seconds(60), [this]
+                       {
+                           return cancelled_;
+                       });
+        return std::unexpected("cancelled");
+    }
+
+    auto cancel() -> void override
+    {
+        {
+            std::lock_guard lock(mutex_);
+            cancelled_ = true;
+        }
+        wake_.notify_all();
+    }
+
+private:
+    FakeMogsafe&            to_;
+    std::string             method_;
+    std::mutex              mutex_;
+    std::condition_variable wake_;
+    bool                    cancelled_{ false };
+};
+
+} // namespace
+
+TEST_CASE("the import runs on its own thread, and stops at once mid-append and mid-compression")
+{
+    Install     in;
+    FakeMogsafe server;
+    captainFolder(in.captures, "s/Audithor", noise(3 << 20));
+    {
+        auto  blocking = std::make_unique<Blocking>(server, "PATCH");
+        auto& http     = *blocking;
+        auto  imp      = std::make_unique<Importer>(in.options(), std::move(blocking));
+        auto  before   = std::chrono::steady_clock::now();
+        imp->start();
+        CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(100));
+        REQUIRE(waitFor([&]
+                        {
+                            return http.waiting.load();
+                        }));
+        CHECK(http.thread.load() != std::this_thread::get_id());
+        CHECK(!server.threads.empty());
+        CHECK(!server.threads.contains(std::this_thread::get_id()));
+        before = std::chrono::steady_clock::now();
+        imp.reset();
+        CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(1));
+        CHECK(Importer::pending(in.state));
+    }
+
+    // Large enough to compress for a while; stop once its .tmp appears.
+    fs::rename(in.captures / "s", in.dir / "s");
+    captainFolder(in.captures, "t/Audithor", noise(64 << 20));
+    auto       imp = std::make_unique<Importer>(in.options(), std::make_unique<Forward>(server));
+    const auto tmp = [&]
+    {
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(in.state / "imports", ec))
+        {
+            if (e.path().extension() == ".tmp")
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    imp->start();
+    for (int i = 0; i < 5000 && !tmp(); ++i)
+    {
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+    REQUIRE(tmp());
+    const auto before = std::chrono::steady_clock::now();
+    imp.reset();
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(1));
+    CHECK(!tmp()); // a stopped compression leaves no partial file
+}
+
+TEST_CASE("the import reminder shows once per install, to one client")
+{
+    Install in;
+    CHECK(!remindImport(in.config, in.captures)); // nothing waiting
+    CHECK(!fs::exists(in.config / "import-reminded"));
+
+    captainFolder(in.captures, "s/Audithor", "log");
+    fs::rename(in.config / "token", in.dir / "token");
+    CHECK(!remindImport(in.config, in.captures)); // not linked
+    fs::rename(in.dir / "token", in.config / "token");
+
+    for (int round = 0; round < 5; ++round) // two clients logging in together, then later logins and restarts
+    {
+        std::atomic<int> shown{ 0 };
+        {
+            std::latch                go(2);
+            std::vector<std::jthread> clients;
+            for (int i = 0; i < 2; ++i)
+            {
+                clients.emplace_back([&]
+                                     {
+                                         go.arrive_and_wait();
+                                         shown += remindImport(in.config, in.captures) ? 1 : 0;
+                                     });
+            }
+        }
+        CHECK(shown == (round == 0 ? 1 : 0));
+    }
 }

@@ -38,6 +38,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 add_library(memoria_core STATIC
+    src/core/captain.cpp
     src/core/clock.cpp
     src/core/event_queue.cpp
     src/core/link.cpp
