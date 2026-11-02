@@ -1,0 +1,12 @@
+schema: spec-driven
+
+context: |
+  Memoria is Vault's Ashita v4 plugin: it records retail sessions to xicap and uploads them to Mogsafe.
+  Its requirements so far live in ffxi-dev/vault's openspec (add-memoria, add-memoria-link, the live-viewing and capture-import specs);
+  changes that touch only Memoria start here. Repository rules live in AGENTS.md: the game thread never waits.
+
+rules:
+  design:
+    - Record implementation deviations under Implementation Notes with the reason and revisit trigger
+  tasks:
+    - Check a task only when implemented and verified by a test or recorded run
