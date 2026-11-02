@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/http.h"
+#include "core/tus.h"
 
 #include <atomic>
 #include <chrono>
@@ -79,7 +80,7 @@ private:
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
-    std::string           token_; // upload thread only
+    Tus                   tus_; // upload thread only, but for unauthorized()
 
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
@@ -90,7 +91,6 @@ private:
     std::mutex              wakeMutex_;
     std::condition_variable wake_;
     std::atomic<bool>       stopping_{ false };
-    std::atomic<bool>       unauthorized_{ false };
     std::atomic<bool>       uploading_{ false };
 };
 

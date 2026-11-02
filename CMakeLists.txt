@@ -44,6 +44,7 @@ add_library(memoria_core STATIC
     src/core/live.cpp
     src/core/recorder.cpp
     src/core/seed_file.cpp
+    src/core/tus.cpp
     src/core/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})

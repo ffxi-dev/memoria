@@ -1,12 +1,9 @@
 #include "core/uploader.h"
 
-#include "core/link.h"
-
 #include <picosha2.h>
 #include <xicap/constants.h>
 
 #include <algorithm>
-#include <charconv>
 #include <format>
 #include <fstream>
 #include <ranges>
@@ -18,22 +15,9 @@ namespace memoria
 namespace
 {
 
-constexpr uint64_t CHUNK_SIZE = 1 << 20;
+constexpr uint64_t CHUNK_SIZE = Tus::CHUNK_SIZE;
 constexpr auto     STATE_FILE = "uploads.txt";
 constexpr auto     MAX_WAIT   = std::chrono::minutes(5);
-
-auto parseU64(std::string_view s) -> std::optional<uint64_t>
-{
-    uint64_t v{};
-    const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    return ec == std::errc{} && end == s.data() + s.size() ? std::optional(v) : std::nullopt;
-}
-
-auto header(const HttpResponse& res, const std::string& name) -> std::string
-{
-    const auto it = res.headers.find(name);
-    return it == res.headers.end() ? std::string{} : it->second;
-}
 
 auto readRange(const std::filesystem::path& path, uint64_t offset, uint64_t n) -> std::optional<std::vector<uint8_t>>
 {
@@ -72,6 +56,7 @@ auto sha256(const std::filesystem::path& path, uint64_t size, const std::atomic<
 Uploader::Uploader(UploadOptions options, std::unique_ptr<Http> http)
 : options_(std::move(options))
 , http_(std::move(http))
+, tus_(options_.server, options_.config, *http_)
 {
 }
 
@@ -200,13 +185,9 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
         {
             return std::format("create: {}", res->status);
         }
-        f.url     = header(*res, "location");
+        f.url     = tus_.location(*res);
         f.refused = 0;
         f.sent    = 0;
-        if (f.url.starts_with('/'))
-        {
-            f.url = options_.server.substr(0, options_.server.find('/', options_.server.find("://") + 3)) + f.url;
-        }
         // Saved before the first byte goes, so a crash later in the pass resumes this upload instead of sending the file again.
         {
             std::lock_guard lock(mutex_);
@@ -254,30 +235,23 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
 
 auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>
 {
-    while (offset < size && !stopping_ && allowed())
+    const auto sent = tus_.append(path, f.url, offset, size, [this](uint64_t)
+                                  {
+                                      return !stopping_ && allowed();
+                                  });
+    if (!sent)
     {
-        const auto n    = std::min(size - offset, CHUNK_SIZE);
-        const auto data = readRange(path, offset, n);
-        if (!data)
-        {
-            return "cannot read the capture";
-        }
-        const auto res = request("PATCH", f.url, { { "Upload-Offset", std::to_string(offset) }, { "Content-Type", "application/offset+octet-stream" } }, *data);
-        if (!res)
-        {
-            return res.error();
-        }
-        if (res->status == 410)
-        {
-            f.url.clear(); // cut off or closed on the server: the whole file goes again as a new capture
-            return std::nullopt;
-        }
-        if (res->status != 204)
-        {
-            return std::format("append at {}: {}", offset, res->status);
-        }
-        offset += n;
-        f.sent = offset;
+        return sent.error();
+    }
+    f.sent = sent->offset;
+    if (sent->answer && sent->answer->status == 410)
+    {
+        f.url.clear(); // cut off or closed on the server: the whole file goes again as a new capture
+        return std::nullopt;
+    }
+    if (sent->answer)
+    {
+        return std::format("append at {}: {}", sent->offset, sent->answer->status);
     }
     return std::nullopt;
 }
@@ -313,34 +287,14 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
     }
 }
 
-// Read before each file and chunk: another client sharing the install may have paused, unlinked, or linked again.
 auto Uploader::allowed() -> bool
 {
-    std::error_code ec;
-    if (std::filesystem::exists(options_.config / "paused", ec) || ec)
-    {
-        return false;
-    }
-    const auto link = loadLink(options_.config / "token");
-    token_          = link ? link->token : std::string{};
-    return !token_.empty();
+    return tus_.allowed();
 }
 
 auto Uploader::request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
 {
-    headers.emplace_back("Tus-Resumable", "1.0.0");
-    headers.emplace_back("Authorization", "Bearer " + token_);
-    auto res = http_->request(method, url, headers, body);
-    if (res && res->status == 401)
-    {
-        if (removeLink(options_.config / "token", token_))
-        {
-            unauthorized_ = true;
-        }
-        token_.clear();
-        return std::unexpected("Mogsafe refused this install's token");
-    }
-    return res;
+    return tus_.request(method, url, std::move(headers), body);
 }
 
 // One line per file: name, url, closed, refused, and bytes the server holds, separated by tabs. Lines from before the last field read as nothing sent.
@@ -408,7 +362,7 @@ auto Uploader::saveError() const -> std::string
 
 auto Uploader::unauthorized() -> bool
 {
-    return unauthorized_.exchange(false);
+    return tus_.unauthorized();
 }
 
 auto Uploader::uploading() const -> bool
