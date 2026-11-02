@@ -61,6 +61,7 @@ struct ImportOptions
     std::function<void(std::string)> say;
     std::chrono::milliseconds        retry{ 5000 };
     std::chrono::seconds             quiet{ std::chrono::minutes(10) };
+    std::string                      mutex; // Windows: a named mutex held for the run, so clients sharing the install import one at a time
 };
 
 struct ImportProgress
@@ -85,7 +86,7 @@ public:
     // An import was asked for and not finished.
     static auto pending(const std::filesystem::path& state) -> bool;
 
-    auto start() -> void; // run() on its own thread, below normal priority
+    auto start(bool asked = true) -> void; // run() on its own thread, below normal priority; a resume (not asked) is silent when another client holds the run
     auto run() -> void;
 
     [[nodiscard]] auto finished() const -> bool;

@@ -1932,3 +1932,48 @@ TEST_CASE("the import reminder shows once per install, to one client")
         CHECK(shown == (round == 0 ? 1 : 0));
     }
 }
+
+#ifdef _WIN32
+TEST_CASE("a second client sharing the install does not import while the first does")
+{
+    Install     in;
+    FakeMogsafe first;
+    FakeMogsafe second;
+    captainFolder(in.captures, "s/Audithor", noise(3 << 20));
+    const auto mutex   = std::format("Local\\Memoria-import-test-{}", std::random_device{}());
+    auto       options = in.options();
+    options.mutex      = mutex;
+    auto  blocking     = std::make_unique<Blocking>(first, "PATCH");
+    auto& http         = *blocking;
+    auto  running      = std::make_unique<Importer>(options, std::move(blocking));
+    running->start();
+    REQUIRE(waitFor([&]
+                    {
+                        return http.waiting.load();
+                    }));
+
+    for (const bool asked : { true, false }) // /memoria import, then a resume at load
+    {
+        Install other;
+        auto    otherOptions = other.options();
+        otherOptions.mutex   = mutex;
+        Importer imp(otherOptions, std::make_unique<Forward>(second));
+        imp.start(asked);
+        REQUIRE(waitFor([&]
+                        {
+                            return imp.finished();
+                        }));
+        CHECK(other.saidAny("Another client sharing this install is importing.") == asked);
+    }
+    CHECK(second.requests == 0);
+
+    running.reset(); // the first client unloads, which frees the run for the next
+    Importer next(options, std::make_unique<Forward>(first));
+    next.start(false);
+    REQUIRE(waitFor([&]
+                    {
+                        return next.finished();
+                    }));
+    CHECK(fs::exists(in.uploaded / "s/Audithor"));
+}
+#endif
