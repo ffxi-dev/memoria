@@ -102,22 +102,6 @@ auto readIni(const std::filesystem::path& path) -> std::optional<std::map<std::s
 
 Plugin* instance_ = nullptr; // for the search hooks, which take a plain function
 
-auto size(uint64_t bytes) -> std::string
-{
-    constexpr std::array units{ "KB", "MB", "GB" };
-    if (bytes < 1024)
-    {
-        return std::format("{} B", bytes);
-    }
-    auto   value = bytes / 1024.0;
-    size_t unit  = 0;
-    for (; value >= 1024 && unit + 1 < units.size(); ++unit)
-    {
-        value /= 1024;
-    }
-    return std::format("{:.1f} {}", value, units[unit]);
-}
-
 auto count(uint64_t n) -> std::string
 {
     auto text = std::to_string(n);
@@ -189,6 +173,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     const std::filesystem::path install = core_->GetInstallPath();
     config_                             = install / "config" / "memoria";
     captures_                           = install / "captures" / "memoria";
+    captain_                            = install / "addons" / "captain";
     const auto seed                     = loadOrCreateSeed(config_ / "key");
     if (!seed)
     {
@@ -210,6 +195,10 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     {
         recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = captures_, .seed = seed_, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
         startUploads();
+        if (Importer::pending(captures_) && linked())
+        {
+            startImport(false); // an import asked for and not finished goes on, here or in the client holding its mutex
+        }
     }
     catch (const std::exception& error)
     {
@@ -243,7 +232,9 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
 
 auto Plugin::Release() -> void
 {
-    linker_ = {}; // stops and joins
+    linker_   = {}; // stops and joins
+    reminder_ = {};
+    importer_.reset(); // cancels its request and joins
     stopLive();
     closing_.clear(); // joins
     client::search::remove();
@@ -276,6 +267,7 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
             loggedIn_       = true;
             loggedInAs_     = who.characterId;
             remind();
+            offerImport();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
             if (live_)
             {
@@ -375,6 +367,19 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
     if (arrived)
     {
         say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
+        if (!importer_ && Importer::pending(captures_))
+        {
+            startImport(false);
+        }
+        offerImport();
+    }
+    if (importer_ && importer_->unauthorized())
+    {
+        unlink("Vault no longer accepts this install");
+    }
+    if (importer_ && importer_->finished())
+    {
+        importer_.reset();
     }
     std::erase_if(closing_, [](const auto& l)
                   {
@@ -446,6 +451,59 @@ auto Plugin::remind() -> void
     }
     std::ofstream(path, std::ios::trunc) << today;
     say(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
+}
+
+// Once per install, ever: while linked and captain captures wait, at login or link.
+auto Plugin::offerImport() -> void
+{
+    std::error_code ec;
+    if (reminding_ || !linked() || std::filesystem::exists(config_ / "import-reminded", ec))
+    {
+        return;
+    }
+    reminding_ = true;
+    reminder_  = std::jthread([this]
+                              {
+                                 // Clients logging in together race to create the reminded file; only the winner speaks.
+                                 if (remindImport(config_, captain_ / "captures"))
+                                 {
+                                     post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
+                                 }
+                                 reminding_ = false;
+                              });
+}
+
+// Clients sharing an install import through the one whose importer holds the named mutex.
+auto Plugin::startImport(bool asked) -> void
+{
+    ImportOptions options{
+        .captures = captain_ / "captures",
+        .uploaded = captain_ / "captures-uploaded",
+        .state    = captures_,
+        .server   = server_,
+        .config   = config_,
+        .mutex    = std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((captain_ / "captures").wstring())),
+    };
+    options.say = [this](std::string text)
+    {
+        post(std::move(text));
+    };
+    importer_ = std::make_unique<Importer>(std::move(options), std::make_unique<WinHttp>("Memoria/" MEMORIA_VERSION_TEXT));
+    importer_->start(asked);
+}
+
+auto Plugin::importLine() const -> std::string
+{
+    const auto p = importer_->progress();
+    if (p.index == 0)
+    {
+        return "Import: looking for captain captures";
+    }
+    if (p.size == 0)
+    {
+        return std::format("Import: {}/{} {}, preparing", p.index, p.count, p.character);
+    }
+    return std::format("Import: {}/{} {}, {}/{} sent", p.index, p.count, p.character, sizeText(p.sent), sizeText(p.size));
 }
 
 // Asks for a code, then polls until the player approves it on the link page.
@@ -541,7 +599,7 @@ auto Plugin::status() -> void
         const auto        seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
         const std::string name(character_.characterName.data());
         const std::string world(character_.worldName.data());
-        say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), name, world.empty() ? "" : " on " + world, duration(seconds), count(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), size(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
+        say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), name, world.empty() ? "" : " on " + world, duration(seconds), count(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), sizeText(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
     }
     const auto version = client::lobby::version();
     auto       client  = "Client " + (version.empty() ? paint(Color::Grey, "unknown before the first login") : version);
@@ -578,6 +636,10 @@ auto Plugin::status() -> void
     {
         say("Live: " + live_->status());
     }
+    if (importer_)
+    {
+        say(importLine());
+    }
     const auto link = linked();
     if (!link || std::filesystem::exists(config_ / "paused"))
     {
@@ -607,7 +669,7 @@ auto Plugin::status() -> void
     }
     else if (behind > 0)
     {
-        say(std::format("Uploads: catching up, {} to send", size(behind)) + account);
+        say(std::format("Uploads: catching up, {} to send", sizeText(behind)) + account);
     }
     else
     {
@@ -673,6 +735,22 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
         recorder_->sessionStop(clock_.nowMs());
         say("session closed");
     }
+    else if (sub == "import")
+    {
+        if (importer_)
+        {
+            say(importLine());
+        }
+        else if (!linked())
+        {
+            say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
+        }
+        else
+        {
+            createNew(config_ / "import-reminded");
+            startImport(true);
+        }
+    }
     else if (sub == "link")
     {
         say(paint(Color::Grey, "Asking Vault for a link code..."));
@@ -731,7 +809,7 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     }
     else
     {
-        say("/memoria status | link | unlink | live [off] | upload on|off | key | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | live [off] | upload on|off | import | key | note <text> | session start <file.xicap> | session stop");
     }
     return true;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/captain.h"
 #include "core/clock.h"
 #include "core/link.h"
 #include "core/recorder.h"
@@ -9,6 +10,7 @@
 #include <Ashita.h>
 
 #include <array>
+#include <atomic>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -78,12 +80,16 @@ private:
     auto unlink(const std::string& why) -> void;
     auto linked() const -> std::optional<Linked>; // read each time: clients sharing the install share its token
     auto remind() -> void;
+    auto offerImport() -> void;
+    auto startImport(bool asked) -> void;
+    auto importLine() const -> std::string;
     auto hello() -> std::string;
     auto stopLive() -> void;
 
     IAshitaCore*                       core_{ nullptr };
     std::filesystem::path              config_;
     std::filesystem::path              captures_;
+    std::filesystem::path              captain_; // <Ashita>/addons/captain
     xicap::SecretSeed                  seed_{};
     std::string                        server_ = "https://mogsafe.sruon.dev";
     std::mutex                         inboxMutex_;
@@ -96,6 +102,8 @@ private:
     std::unique_ptr<Live>              live_; // after recorder_, whose feed it reads
     std::vector<std::unique_ptr<Live>> closing_;
     HANDLE                             uploadMutex_{ nullptr };
+    std::unique_ptr<Importer>          importer_;
+    std::atomic<bool>                  reminding_{ false };
     std::string                        startError_;
     std::string                        searchError_;
     std::string                        characterError_; // why the content id and world are missing
@@ -103,7 +111,8 @@ private:
     bool                               loggedIn_{ false };
     uint32_t                           loggedInAs_{ 0 };
     std::optional<ChunkKey>            lastChunk_[2]; // per direction
-    std::jthread                       linker_;       // last: destroyed first, before what its thread uses
+    std::jthread                       reminder_;
+    std::jthread                       linker_; // last: destroyed first, before what its thread uses
 };
 
 } // namespace memoria
