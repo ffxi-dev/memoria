@@ -4,7 +4,7 @@ These rules apply to every contributor, human or agent. `CLAUDE.md` imports this
 
 ## Source of truth
 
-`ffxi-dev/vault`'s `openspec/changes/add-memoria/` is the working specification. Code, specs, design, and tasks agree at every commit: a change in behaviour updates the spec, `design.md`, or `tasks.md` there in a matching vault commit. Check a task only when it is implemented and verified by a test or a recorded run.
+A change inside Memoria starts as an OpenSpec change in this repository's `openspec/`; a change that spans bricks starts in `ffxi-dev/vault`'s `openspec/`, where `add-memoria` holds Memoria's first specification. Code, specs, design, and tasks agree at every commit: a change in behaviour updates its spec, `design.md`, or `tasks.md` in the same commit, or in a matching vault commit when the change lives there. Check a task only when it is implemented and verified by a test or a recorded run.
 
 ## Layout
 

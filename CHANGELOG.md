@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+**Captain imports (new)**
+- `/memoria import` uploads earlier captain captures from `addons/captain/captures/` to Vault, then moves each one Vault holds to `addons/captain/captures-uploaded/`.
+- Memoria says once per install, at a login or link, when such captures wait.
+- An import goes on after a crash or restart, and pauses with `/memoria upload off`.
+
 ## 0.5.4
 
 **Status line**

@@ -96,4 +96,15 @@ None. The owner settled them on 2026-11-02:
 
 ## Implementation Notes
 
-None yet.
+Where the code differs from the decisions above, and why:
+
+- **The import mutex is taken on the importer's thread, not the game thread.** A Windows mutex belongs to the thread that took it: one taken by the game thread stays held after Memoria unloads, since the game thread lives on, and only that thread can release it. The importer's thread takes it, releases it when the run ends, and Windows hands it on if the client dies. So "another client is importing" reaches chat on the next frame, and a resume at load or link says nothing when another client holds the run. A core test covers it on Windows.
+- **With a saved upload URL, `HEAD` comes before staging.** A log whose close was accepted before a crash then meets `404` and a `409` without being compressed again. If the staged file is gone while Mogsafe holds some of its bytes, the importer starts a new upload instead of compressing again, since another compression may not match those bytes.
+- **Unlinked means the token file is gone, not "not allowed".** Reading the paused file and then the token raced with `/memoria upload on`, which ended a paused import as unlinked; a test caught it.
+- **Backoff** also covers `HEAD` `404`/`410`, and starts again from 5 s after an append that sent bytes.
+- **The reminder counts only logs not changed in the last 10 minutes**, so it never points at a capture the import would skip.
+- **A `full.log` that cannot be read** is reported ("cannot read its full.log; skipped") and the run goes on. A staging failure ends the run with its error, without a summary.
+- **The failed move test** puts a file where `captures-uploaded` goes, so the move fails on any file system, Wine included; a file held open in the folder takes the same report path but is not tested.
+- The plugin's byte formatter moved to the core as `sizeText`, for the import's chat lines.
+
+Recorded runs (tasks 3.x, 4.2) are still to do; capture ids go here.

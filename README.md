@@ -10,6 +10,12 @@ Memoria records every packet on retail, uploads it to Mogsafe as it goes, and st
 
 `/memoria live` opens Lens on the capture as it records, for anyone with the link. It needs `/memoria link` first. Memoria asks Mogsafe for a link, opens it in your browser, and sends packets over a WebSocket only while someone watches. Viewers see what the capture holds, so chat stays stubbed. `/memoria live` again reopens the link; `/memoria live off` ends it, as do `/memoria unlink`, `/memoria upload off`, and unloading. A link lasts at most 12 hours. The requirements are in `ffxi-dev/vault`, `openspec/specs/live-viewing/`, and the protocol in `openspec/changes/archive/2026-10-31-add-memoria-live/design.md`.
 
+## Captain imports
+
+`/memoria import` uploads the captures captain's PacketLogger left in `addons/captain/captures/`, any folder there holding `manifest.txt` and `PacketLogger/full.log`, to Mogsafe under the linked account. It needs `/memoria link` first, and runs in the background: chat shows each capture's result, and `/memoria status` shows progress. It sends only `full.log`, compressed, and `manifest.txt`. A log changed in the last 10 minutes waits for a later import. Once Mogsafe holds a log, whether this import sent it or it was there already, Memoria moves its folder to the same path under `addons/captain/captures-uploaded/`. A folder Mogsafe refuses stays where it is. An import cut short by a crash, a restart, or a lost connection goes on by itself at the next start or link; `/memoria upload off` pauses it.
+
+While linked and captures wait, Memoria says once, at a login or link, to run `/memoria import`. It never says it again on that install.
+
 ## Build
 
 From an MSVC x86 developer shell, with `ASHITA4_SDK_PATH` pointing at Ashita's `plugins/sdk`:
