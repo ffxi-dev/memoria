@@ -7,6 +7,9 @@
 - Memoria says once per install, at a login or link, when such captures wait.
 - An import goes on after a crash or restart, and pauses with `/memoria upload off`.
 
+**Uploads**
+- When Memoria cannot save upload progress, for example on a full disk, it sends nothing until it can, so a crash never sends a capture twice.
+
 ## 0.5.4
 
 **Status line**

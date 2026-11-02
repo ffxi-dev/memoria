@@ -188,12 +188,19 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
         f.url     = tus_.location(*res);
         f.refused = 0;
         f.sent    = 0;
-        // Saved before the first byte goes, so a crash later in the pass resumes this upload instead of sending the file again.
         {
             std::lock_guard lock(mutex_);
             files_[path.filename().string()] = f;
         }
-        save();
+        dirty_ = true;
+    }
+    // No byte goes until the state on disk holds every URL in memory, or a crash would send the file again as a new upload.
+    if (dirty_)
+    {
+        if (const auto error = save())
+        {
+            return error;
+        }
     }
 
     const auto res = request("HEAD", f.url, {});
@@ -325,30 +332,16 @@ auto Uploader::load() -> void
 
 auto Uploader::save() -> std::optional<std::string>
 {
-    const auto                 tmp = options_.dir / std::format("{}.tmp", STATE_FILE);
-    std::optional<std::string> error;
+    std::string text;
     {
-        std::ofstream   out(tmp, std::ios::trunc);
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            out << std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused, f.sent);
-        }
-        out.close();
-        if (!out)
-        {
-            error = std::format("cannot write {}", tmp.string());
+            text += std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused, f.sent);
         }
     }
-    std::error_code ec;
-    if (!error)
-    {
-        std::filesystem::rename(tmp, options_.dir / STATE_FILE, ec);
-    }
-    if (ec)
-    {
-        error = std::format("cannot save {}: {}", STATE_FILE, ec.message());
-    }
+    const auto error = replaceFile(options_.dir / STATE_FILE, text);
+    dirty_           = error.has_value();
     std::lock_guard lock(mutex_);
     saveError_ = error.value_or("");
     return error;

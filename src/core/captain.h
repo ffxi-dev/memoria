@@ -119,7 +119,7 @@ private:
     auto wait(std::chrono::milliseconds time) -> void;
     auto say(const std::string& text) -> void;
     auto load() -> void;
-    auto save() -> void;
+    auto save() -> std::optional<std::string>; // why imports.txt was not replaced, if it was not
 
     ImportOptions                options_;
     std::unique_ptr<Http>        http_;
