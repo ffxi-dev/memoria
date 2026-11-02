@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <format>
 #include <fstream>
 #include <utility>
 #include <vector>
@@ -22,6 +23,27 @@ auto header(const HttpResponse& res, const std::string& name) -> std::string
 {
     const auto it = res.headers.find(name);
     return it == res.headers.end() ? std::string{} : it->second;
+}
+
+auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>
+{
+    const auto tmp = std::filesystem::path(path).concat(".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.close();
+        if (!out)
+        {
+            return std::format("cannot write {}", tmp.string());
+        }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec)
+    {
+        return std::format("cannot save {}: {}", path.filename().string(), ec.message());
+    }
+    return std::nullopt;
 }
 
 Tus::Tus(std::string server, std::filesystem::path config, Http& http)

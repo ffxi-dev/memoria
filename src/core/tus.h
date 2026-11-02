@@ -53,4 +53,7 @@ private:
 auto header(const HttpResponse& res, const std::string& name) -> std::string;
 auto parseU64(std::string_view s) -> std::optional<uint64_t>;
 
+// Writes text to path's .tmp and renames it over path; why not, if the write, close, or rename failed.
+auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>;
+
 } // namespace memoria

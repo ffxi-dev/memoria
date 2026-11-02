@@ -265,7 +265,11 @@ auto Importer::run() -> void
     std::error_code ec;
     fs::create_directories(options_.state, ec);
     load();
-    save(); // its existence marks the run as asked for until it ends
+    if (const auto error = save()) // its existence marks the run as asked for until it ends
+    {
+        say(std::format("Captain import stopped: {}.", *error));
+        return;
+    }
 
     auto found = findCaptain(options_.captures, options_.quiet);
     count_     = found.size();
@@ -383,7 +387,12 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             {
                 e.url              = tus_.location(*res);
                 entries_[c.folder] = e;
-                save(); // before the first byte, so a crash resumes this upload
+                // Saved before the first byte, so a crash resumes this upload. On failure imports.txt stays for the next start or link.
+                if (const auto error = save())
+                {
+                    say(prefix + *error + ". Import stopped; it goes on at the next start or link.");
+                    return Outcome::Stopped;
+                }
             }
             else if (res && res->status == 409)
             {
@@ -625,21 +634,17 @@ auto Importer::load() -> void
     }
 }
 
-auto Importer::save() -> void
+auto Importer::save() -> std::optional<std::string>
 {
-    const auto tmp = options_.state / std::format("{}.tmp", STATE_FILE);
+    std::string text;
+    for (const auto& [folder, e] : entries_)
     {
-        std::ofstream out(tmp, std::ios::trunc);
-        for (const auto& [folder, e] : entries_)
+        if (!e.url.empty())
         {
-            if (!e.url.empty())
-            {
-                out << std::format("{}\t{}\t{}\t{}\n", folder, e.crc, e.size, e.url);
-            }
+            text += std::format("{}\t{}\t{}\t{}\n", folder, e.crc, e.size, e.url);
         }
     }
-    std::error_code ec;
-    std::filesystem::rename(tmp, options_.state / STATE_FILE, ec);
+    return replaceFile(options_.state / STATE_FILE, text);
 }
 
 auto Importer::finished() const -> bool

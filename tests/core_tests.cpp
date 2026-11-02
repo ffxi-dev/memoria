@@ -606,6 +606,7 @@ public:
     uint64_t                                received{};        // bytes accepted by appends
     int                                     crashAtPatch = -1; // the game dies during this PATCH, before any answer
     std::function<void()>                   onPatch;
+    std::function<void()>                   onCreate;
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
@@ -654,6 +655,10 @@ public:
             }
             const auto path = std::format("/v1/uploads/{}", ++creates);
             uploads[path]   = { .meta = meta };
+            if (onCreate)
+            {
+                onCreate();
+            }
             return HttpResponse{ .status = 201, .headers = { { "location", path } } };
         }
         const auto path    = url.substr(std::string("https://mogsafe.test").size());
@@ -838,18 +843,35 @@ TEST_CASE("a crash during the first pass resumes the upload it created")
     }
 }
 
-TEST_CASE("a progress file that cannot be saved is an error in status")
+TEST_CASE("no byte goes until the upload's URL is saved, so a restart after a failed save sends nothing twice")
 {
-    const auto  dir = tempDir();
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
     FakeMogsafe server;
     auto        up = uploader(dir, server);
-    append(dir / "a.xicap", std::string(500, 'x'));
+    append(file, std::string(500, 'x'));
     fs::create_directory(dir / "uploads.txt.tmp");
     CHECK(up->pass().has_value());
     CHECK(!up->saveError().empty());
-    fs::remove(dir / "uploads.txt.tmp");
-    CHECK(!up->pass());
-    CHECK(up->saveError().empty());
+    CHECK(up->pass().has_value()); // the URL in memory does not skip the save
+    CHECK(server.creates == 1);
+    CHECK(server.received == 0);
+    SECTION("the save works again")
+    {
+        fs::remove(dir / "uploads.txt.tmp");
+        CHECK(!up->pass());
+        CHECK(up->saveError().empty());
+        CHECK(server.creates == 1);
+    }
+    SECTION("a restart")
+    {
+        up.reset();
+        fs::remove(dir / "uploads.txt.tmp");
+        CHECK(!uploader(dir, server)->pass());
+        CHECK(server.creates == 2); // the first upload holds nothing
+    }
+    CHECK(server.received == 500);
+    CHECK(server.uploads.rbegin()->second.data == readAll(file));
     fs::remove_all(dir);
 }
 
@@ -1760,6 +1782,40 @@ TEST_CASE("an import resumes from each point a crash can leave it at")
         CHECK(fs::exists(in.uploaded / "s/Audithor"));
         CHECK(fs::is_empty(in.state));
     }
+}
+
+TEST_CASE("an import whose state cannot be saved sends nothing and goes on at the next start")
+{
+    Install    in;
+    const auto log = noise(3 << 20);
+    captainFolder(in.captures, "s/Audithor", log);
+    fs::create_directories(in.state / "imports.txt.tmp");
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain import stopped: cannot write "));
+    CHECK(server.requests == 0);
+    fs::remove(in.state / "imports.txt.tmp");
+
+    server.onCreate = [&]
+    {
+        fs::create_directory(in.state / "imports.txt.tmp");
+    };
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 1/1 s/Audithor: cannot write "));
+    CHECK(server.creates == 1);
+    CHECK(server.received == 0);
+    CHECK(Importer::pending(in.state));
+    CHECK(fs::exists(in.captures / "s/Audithor"));
+
+    server.onCreate = nullptr;
+    fs::remove(in.state / "imports.txt.tmp");
+    in.importer(server)->run(); // the plugin resumes at the next start
+    CHECK(server.creates == 2);
+    const auto& u = server.uploads.rbegin()->second;
+    CHECK(server.received == u.data.size());
+    CHECK(unzstd(u.data) == log);
+    CHECK(fs::exists(in.uploaded / "s/Audithor"));
+    CHECK(!Importer::pending(in.state));
 }
 
 TEST_CASE("an uploaded folder moves to the same path under captures-uploaded")

@@ -85,6 +85,7 @@ private:
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
     std::string                 saveError_;
+    bool                        dirty_{}; // upload thread only: memory holds what the state file lacks
     std::atomic<bool>           loaded_{ false };
 
     std::thread             thread_;
