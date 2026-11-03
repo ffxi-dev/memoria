@@ -266,10 +266,19 @@ auto Session::record(bool clientToServer, uint32_t size, const uint8_t* data, co
         provenance |= xicap::PacketFlag::Modified;
     }
     // Ashita hands each packet as a copy, so a new chunk shows as a new chunk pointer, size, or head (its sequence number).
+    // Windower hands no chunk: there a new chunk shows as a new sync counter, bytes 2-3, which every packet of a chunk shares.
+    std::optional<ChunkKey> key;
     if (dataChunk && sizeChunk > 0)
     {
-        ChunkKey key{ reinterpret_cast<uintptr_t>(dataChunk), sizeChunk, {} };
-        std::memcpy(key.head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key.head.size()));
+        key = ChunkKey{ reinterpret_cast<uintptr_t>(dataChunk), sizeChunk, {} };
+        std::memcpy(key->head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key->head.size()));
+    }
+    else if (size >= 4)
+    {
+        key = ChunkKey{ .head = { data[2], data[3] } };
+    }
+    if (key)
+    {
         auto& last = lastChunk_[clientToServer ? 1 : 0];
         if (last != key)
         {
