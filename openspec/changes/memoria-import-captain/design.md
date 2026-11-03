@@ -4,6 +4,7 @@
 
 - Captain writes each capture to `<Ashita>/addons/captain/captures/<session>/<character>/`: `manifest.txt` from `/cap start` and, from its PacketLogger, `PacketLogger/full.log` plus per-opcode logs. Since captain bundled Memoria, PacketLogger sits in `addons/extras/`, which captain does not load, so new sessions hold `memoria.xicap` and no `full.log`. Captain never lists `captures/`; its addons write their own data under `captures/<addon>/`.
 - Mogsafe's `/v1/uploads/` already takes captain imports from an install token. `bearer` turns the token into `clerk:<user id>` and the install's key; `created` checks the import's metadata (`importMeta`) and answers `409` with `Mogsafe-Capture` when a log with the same CRC-32 and size is converting or complete; the signing-key check in `accept` runs only for xicap closes, and conversion signs with Mogsafe's own key. A log may be plain, raw deflate (`encoding=deflate`), or zstd, which Mogsafe spots by its magic. With `crc32` and `size` set, the close needs no hash and conversion checks the plain log against them. An import idle for 24 hours is deleted.
+- Captain's SearchLog wrote the search server's plaintext messages to `<character>/SearchLog/search.log`, beside `PacketLogger/full.log`, in 52 of the owner's folders. Since vault's `import-search-traffic`, a captain upload may carry it ahead of `full.log`: `search_bytes` says where `full.log` starts, `search_crc32` and `search_size` describe the plain search log, and each part may be zstd on its own. A create whose `full.log` Mogsafe archived without a search log, from the same account, answers `201` with `Mogsafe-Replaces` instead of `409`, and the capture gains its search log under the same id.
 - Memoria's `Uploader` (`src/core/uploader.cpp`) already speaks this tus dialect for `.xicap` files: 1 MiB appends, the upload URL saved before the first byte, token and pause files read before each chunk, `401` deletes the token. Clients sharing an install share `config/memoria/` and `captures/memoria/`, and a named mutex picks the one that uploads.
 
 ## Goals / Non-Goals
@@ -33,19 +34,21 @@ A crash at each point:
 | Crash after | Next import |
 |---|---|
 | CRC pass, before create | CRC pass again |
-| create, before first byte | URL in `imports.txt`; `HEAD` gives offset 0 |
+| search log staged, before create | stage kept or made again; CRC pass again |
+| create, before first byte | URL in `imports.txt`; `HEAD` gives offset 0; the upload's stage is made from the search stage and `full.log` |
+| create, with the search stage gone before the upload's stage is made | a new create: another compression may not match the `search_bytes` Mogsafe holds |
 | some appends | resumes from `HEAD`'s offset |
 | close accepted, before move | `HEAD` and close again answer 200, or `HEAD` 404 and a new create gets `409`; either way the folder moves, no bytes sent |
 | move | nothing left to do |
 
 ### Upload steps per capture
 
-1. Read `full.log` once for its CRC-32 (IEEE) and size; read `manifest.txt`, a few hundred bytes.
-2. `POST /v1/uploads/` with `Upload-Defer-Length: 1` and `Upload-Metadata`: `format captain`, `manifest`, `character`, `crc32` (8 hex digits), `size`, `folder`. No `zip`. `201` saves the URL; `409` with `Mogsafe-Capture` is already in Vault; any other `4xx` but `401` is a refusal with Mogsafe's text.
-3. Compress `full.log` with zstd (level 3, xicap's zstd, one thread) to `<Ashita>/captures/memoria/imports/<crc32>-<size>.zst`, written to a `.tmp` name and renamed when whole, so a crash leaves either a whole file or none.
+1. Read `full.log` once for its CRC-32 (IEEE) and size; read `manifest.txt`, a few hundred bytes. When the folder holds a non-empty `SearchLog/search.log`, read it for its CRC-32 and size, and compress it whole, as in step 3, to `<crc32>-<size>.search.zst` (named by `full.log`), unless that stage exists.
+2. `POST /v1/uploads/` with `Upload-Defer-Length: 1` and `Upload-Metadata`: `format captain`, `manifest`, `character`, `crc32` (8 hex digits), `size`, `folder`, and with a search log `search_bytes` (the search stage's length), `search_crc32`, and `search_size`. No `zip`, no `encoding`: Mogsafe spots each part's zstd frame. `201` saves the URL, and `Mogsafe-Replaces` names a capture this upload gives its search log; `409` with `Mogsafe-Capture` is already in Vault; any other `4xx` but `401` is a refusal with Mogsafe's text.
+3. Compress `full.log` with zstd (level 3, xicap's zstd, one thread) to `<Ashita>/captures/memoria/imports/<crc32>-<size>.zst`, after the search stage's bytes when there is one, written to a `.tmp` name and renamed when whole, so a crash leaves either a whole file or none. The upload is this one file, so resuming across the two parts is resuming in one file.
 4. Send the staged file from `HEAD`'s offset in 1 MiB appends. `HEAD` `404` or `410`, or append `410`: forget the URL and create again (step 2), keeping the staged file. Append `422`: refusal.
 5. `POST <url>/close` with `{}`. `200`: done. `4xx` but `409`, `423`: refusal. `409`, `423`, `5xx`, and transport failures: retry.
-6. Delete the staged file and move the folder.
+6. Delete the staged files and move the folder.
 
 Retries back off from 5 s, doubling to 5 minutes, as the `Uploader` does, and never give up while the run lasts. Rejected: sending the plain log, several times the bytes of hex text; recompressing on resume and skipping bytes as the page does with deflate, since zstd's output is not promised to match across versions and a Memoria update between two runs would send a log that fails Mogsafe's CRC check. Staging costs disk space of a fraction of the log, for one capture at a time.
 
@@ -71,7 +74,7 @@ A named mutex `Local\Memoria-import-<hash of the captures path>` is taken for th
 ### Chat
 
 - Start: "Uploading 4 captain captures (3.1 GB) in the background."
-- Each capture: "Captain 2/4 2026-8-4_23_54/Audithor: uploaded." or "already in Vault (<capture id>).", "refused: <reason>.", "still being written; skipped.", "in Vault, but its folder could not move: <error>."
+- Each capture: "Captain 2/4 2026-8-4_23_54/Audithor: uploaded." or "uploaded with its search log.", "uploaded with its search log, replacing <capture id>.", "already in Vault (<capture id>).", "refused: <reason>.", "still being written; skipped.", "in Vault, but its folder could not move: <error>."
 - End: "Captain import done: 2 uploaded, 1 already in Vault, 1 refused. Uploaded folders are in addons/captain/captures-uploaded."
 - `/memoria status` adds `Import: 2/4 Audithor, 340/900 MB sent` while a run lasts, and `/memoria import` during a run prints the same line.
 
@@ -85,7 +88,7 @@ A named mutex `Local\Memoria-import-<hash of the captures path>` is taken for th
 
 ## Migration Plan
 
-Ship in a Memoria release; nothing on the server changes. Rolling back to an older Memoria leaves `imports.txt` and staged files unused and moved folders where they are; the abandoned upload is deleted by Mogsafe's sweep after 24 hours.
+Ship in a Memoria release once Mogsafe takes search logs (vault's `import-search-traffic`), so no folder moves aside without its search log; nothing else on the server changes. Rolling back to an older Memoria leaves `imports.txt` and staged files unused and moved folders where they are; the abandoned upload is deleted by Mogsafe's sweep after 24 hours.
 
 ## Open Questions
 
@@ -106,5 +109,7 @@ Where the code differs from the decisions above, and why:
 - **A `full.log` that cannot be read** is reported ("cannot read its full.log; skipped") and the run goes on. A staging failure ends the run with its error, without a summary.
 - **The failed move test** puts a file where `captures-uploaded` goes, so the move fails on any file system, Wine included; a file held open in the folder takes the same report path but is not tested.
 - The plugin's byte formatter moved to the core as `sizeText`, for the import's chat lines.
+- **The search log is staged before the create**, since the create gives its length, and the upload's stage starts with it. A missing search stage with an upload created and nothing staged starts a new upload. `Mogsafe-Replaces` is read from the create only, so an upload resumed after a restart says "uploaded with its search log." without the capture it replaced.
+- **A `search.log` that cannot be read** skips the folder ("cannot read its search.log; skipped"), as for `full.log`: sending `full.log` alone would leave the capture without it.
 
 Recorded runs (tasks 3.x, 4.2) are still to do; capture ids go here.

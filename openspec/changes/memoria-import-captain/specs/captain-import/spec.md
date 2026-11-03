@@ -48,7 +48,7 @@ At a login or a completed `/memoria link`, while the install is linked and at le
 - **THEN** Memoria says to run `/memoria link` first and Mogsafe receives nothing
 
 ### Requirement: Each capture uploads as a captain import of the linked account
-`/memoria import` SHALL send each waiting folder's `full.log` with its `manifest.txt`, its character folder's name, and the CRC-32 and size of the plain log, through Mogsafe's resumable upload marked as a captain import, with the install's token. No other file in the folder SHALL be sent.
+`/memoria import` SHALL send each waiting folder's `full.log` with its `manifest.txt`, its character folder's name, and the CRC-32 and size of the plain log, through Mogsafe's resumable upload marked as a captain import, with the install's token. When the folder holds a non-empty `SearchLog/search.log`, Memoria SHALL send it compressed ahead of `full.log` in the same upload, with its compressed length and the CRC-32 and size of the plain search log. No other file in the folder SHALL be sent.
 
 #### Scenario: One capture
 - **WHEN** a linked player runs `/memoria import` with one captain capture waiting
@@ -56,6 +56,14 @@ At a login or a completed `/memoria link`, while the install is linked and at le
 
 #### Scenario: Other files in the folder
 - **WHEN** a character folder also holds `memoria.xicap` and `PacketLogger/incoming/0x00A.log`
+- **THEN** only `full.log` and `manifest.txt` are sent
+
+#### Scenario: A folder with a search log
+- **WHEN** a character folder holds `SearchLog/search.log` beside `PacketLogger/full.log`
+- **THEN** one upload carries the search log, then `full.log`, and Mogsafe lists one capture
+
+#### Scenario: An empty search log
+- **WHEN** a character folder's `SearchLog/search.log` is empty
 - **THEN** only `full.log` and `manifest.txt` are sent
 
 ### Requirement: Importing never holds up the game or recording
@@ -87,16 +95,24 @@ An upload cut off by a network failure, crash, or restart SHALL resume from the 
 - **WHEN** the player closes the game halfway through a capture's upload and starts it again the next day
 - **THEN** Memoria resumes that upload from Mogsafe's offset without being asked, then sends the rest
 
+#### Scenario: Closed inside the search log
+- **WHEN** the game closes after part of a folder's search log was sent
+- **THEN** Memoria resumes from Mogsafe's offset, sends the rest of the search log and then `full.log`, and no byte twice
+
 #### Scenario: Paused
 - **WHEN** the player runs `/memoria upload off` during an import
 - **THEN** the import sends nothing more until `/memoria upload on`
 
 ### Requirement: A log already in Vault counts as uploaded
-When Mogsafe answers that a log is already in Vault, Memoria SHALL report the capture as already in Vault, naming the capture Mogsafe gave, and treat its folder as uploaded.
+When Mogsafe answers that a log is already in Vault, Memoria SHALL report the capture as already in Vault, naming the capture Mogsafe gave, and treat its folder as uploaded. When Mogsafe instead takes the upload to give an archived capture its search log, Memoria SHALL send it and report the capture it replaced.
 
 #### Scenario: Imported before on the web page
 - **WHEN** the player imported a folder through Mogsafe's `/import` page last week and now runs `/memoria import`
 - **THEN** Memoria sends no bytes of that log, says it is already in Vault, and moves the folder
+
+#### Scenario: Imported before without its search log
+- **WHEN** the player's folder holds a search log and its `full.log` is in Vault as a capture without one
+- **THEN** Memoria sends both logs, says it replaced that capture, and moves the folder
 
 ### Requirement: Refused captures stay where they are
 A capture Mogsafe refuses SHALL stay in captain's captures folder and SHALL be reported with Mogsafe's reason; the import SHALL go on with the next one. A refused token SHALL stop the import and leave the install unlinked, as it does for capture uploads.

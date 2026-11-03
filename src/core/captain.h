@@ -21,14 +21,15 @@
 namespace memoria
 {
 
-// A folder captain's PacketLogger wrote: manifest.txt and PacketLogger/full.log.
+// A folder captain's PacketLogger wrote: manifest.txt and PacketLogger/full.log, and SearchLog/search.log when SearchLog ran.
 struct CaptainCapture
 {
     std::filesystem::path dir;
-    std::string           folder;    // relative to captain's captures folder, with forward slashes
-    std::string           character; // the folder's name
-    uint64_t              size{};    // of full.log
-    bool                  growing{}; // full.log changed within the quiet time: PacketLogger may still be writing it
+    std::string           folder;       // relative to captain's captures folder, with forward slashes
+    std::string           character;    // the folder's name
+    uint64_t              size{};       // of full.log
+    uint64_t              searchSize{}; // of SearchLog/search.log; 0 when there is none, which sends none
+    bool                  growing{};    // full.log changed within the quiet time: PacketLogger may still be writing it
 };
 
 // Every captain capture under root, at any depth, in path order. A match's own subfolders are not searched.
@@ -114,7 +115,7 @@ private:
 
     auto upload(const CaptainCapture& c, const std::string& prefix) -> Outcome;
     auto moved(const CaptainCapture& c, const std::string& prefix, const std::string& done, Outcome outcome) -> Outcome;
-    auto stage(const std::filesystem::path& log, const std::filesystem::path& out) -> std::optional<std::string>;
+    auto stage(const std::filesystem::path& log, const std::filesystem::path& out, const std::filesystem::path& head = {}) -> std::optional<std::string>;
     auto ready() -> bool;
     auto wait(std::chrono::milliseconds time) -> void;
     auto say(const std::string& text) -> void;
