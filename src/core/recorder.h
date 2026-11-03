@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -25,6 +26,9 @@ struct RecorderOptions
     std::chrono::milliseconds flushEvery{ 5000 };
     std::chrono::milliseconds drainEvery{ 50 };
     size_t                    queueBytes = 64 * 1024 * 1024;
+    // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then
+    // closes, and the next packet starts a new one that names it, as after a write error.
+    std::function<bool(const std::filesystem::path& capture)> ended;
 };
 
 struct RecorderStatus
@@ -87,6 +91,7 @@ private:
     auto close() -> void;
     auto fail(const std::exception& error) -> void;
     auto broken(const std::exception& error) -> void;
+    auto rollover() -> void;
     auto saveState(bool open) -> void;
 
     RecorderOptions options_;
