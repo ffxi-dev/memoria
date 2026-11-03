@@ -208,6 +208,10 @@ auto Recorder::run() -> void
                           session.flush();
                       });
             lastFlush_ = now;
+            if (writer_ && options_.ended && options_.ended(status().capture))
+            {
+                rollover();
+            }
         }
         if (stopping)
         {
@@ -231,6 +235,7 @@ auto Recorder::handle(const Event& event) -> void
                 }
                 else
                 {
+                    close();
                     open(event.timestamp, *event.login);
                 }
                 break;
@@ -282,9 +287,9 @@ auto Recorder::config(const Login& who, xicap::StartContext start, const xicap::
     return config;
 }
 
+// Called with no capture open. A session open from before goes on.
 auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 {
-    close();
     if (previous_ == xicap::CaptureId{})
     {
         std::ifstream state(stateFile(options_.dir, who.character));
@@ -446,6 +451,25 @@ auto Recorder::broken(const std::exception& error) -> void
     std::lock_guard lock(statusMutex_);
     status_.capture.clear();
     status_.session.clear();
+}
+
+// The server ended the open capture: close it here, keep the login and session, and let the next packet start a capture
+// that names this one. Mogsafe never gets this capture's last bytes; they stay in its file.
+auto Recorder::rollover() -> void
+{
+    try
+    {
+        writer_->close();
+    }
+    catch (const std::exception& error)
+    {
+        fail(error);
+    }
+    saveState(false);
+    writer_.reset();
+    reopenAt_ = {};
+    std::lock_guard lock(statusMutex_);
+    status_.capture.clear();
 }
 
 auto Recorder::saveState(bool open) -> void

@@ -154,7 +154,7 @@ auto Uploader::pass() -> std::optional<std::string>
 
 auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional<std::string>
 {
-    if (f.closed)
+    if (f.closed || f.ended)
     {
         return std::nullopt;
     }
@@ -208,13 +208,21 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
     {
         return res.error();
     }
+    if (res->status == 410)
+    {
+        end(f, *res);
+        return std::nullopt;
+    }
     if (res->status == 404)
     {
-        // Archived after a close whose answer was lost, or gone: a close with the same hash tells which.
-        close(path, f, size);
-        if (!f.closed)
+        // Archived after a close whose answer was lost, or never kept: a close with the same hash tells which.
+        if (const auto error = close(path, f, size))
         {
-            f.url.clear();
+            return error;
+        }
+        if (!f.closed && !f.ended)
+        {
+            f.url.clear(); // Mogsafe holds none of it, so the whole file goes again
         }
         return std::nullopt;
     }
@@ -253,7 +261,7 @@ auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset,
     f.sent = sent->offset;
     if (sent->answer && sent->answer->status == 410)
     {
-        f.url.clear(); // cut off or closed on the server: the whole file goes again as a new capture
+        end(f, *sent->answer);
         return std::nullopt;
     }
     if (sent->answer)
@@ -285,6 +293,11 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
         case 409: // no footer yet, or bytes missing: wait for the file to change
             f.refused = size;
             return std::nullopt;
+        case 404: // Mogsafe never kept it; the caller decides
+            return std::nullopt;
+        case 410:
+            end(f, *res);
+            return std::nullopt;
         case 422: // refused for good: keep the file, stop sending it
             f.refused = size;
             f.error   = res->body;
@@ -292,6 +305,19 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
         default:
             return std::format("close: {}", res->status);
     }
+}
+
+// Mogsafe answered 410. A complete capture whose close answer was lost is closed; any other ended upload is dropped,
+// and its file never sent again: a recording still running goes on in a new file and upload.
+auto Uploader::end(File& f, const HttpResponse& res) -> void
+{
+    if (header(res, "mogsafe-ended") == "complete")
+    {
+        f.closed = true;
+        return;
+    }
+    f.ended = true;
+    f.url.clear();
 }
 
 auto Uploader::allowed() -> bool
@@ -304,7 +330,7 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     return tus_.request(method, url, std::move(headers), body);
 }
 
-// One line per file: name, url, closed, refused, and bytes the server holds, separated by tabs. Lines from before the last field read as nothing sent.
+// One line per file: name, url, closed (1, 0, or ended), refused, and bytes the server holds, separated by tabs. Lines from before the last field read as nothing sent.
 auto Uploader::saved() const -> std::map<std::string, File>
 {
     std::map<std::string, File> files;
@@ -317,7 +343,7 @@ auto Uploader::saved() const -> std::map<std::string, File>
         if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, closed, '\t') && std::getline(fields, refused, '\t'))
         {
             std::getline(fields, sent);
-            files[name] = { .url = url, .closed = closed == "1", .refused = parseU64(refused).value_or(0), .sent = parseU64(sent).value_or(0) };
+            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended", .refused = parseU64(refused).value_or(0), .sent = parseU64(sent).value_or(0) };
         }
     }
     return files;
@@ -337,7 +363,10 @@ auto Uploader::save() -> std::optional<std::string>
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            text += std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? 1 : 0, f.refused, f.sent);
+            text += std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.ended ? "ended"
+                                                                                              : "0",
+                                f.refused,
+                                f.sent);
         }
     }
     const auto error = replaceFile(options_.dir / STATE_FILE, text);
@@ -356,6 +385,21 @@ auto Uploader::saveError() const -> std::string
 auto Uploader::unauthorized() -> bool
 {
     return tus_.unauthorized();
+}
+
+auto Uploader::ended(const std::string& name) const -> bool
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (uploading_ && loaded_)
+        {
+            const auto it = files_.find(name);
+            return it != files_.end() && it->second.ended;
+        }
+    }
+    const auto files = saved(); // another client sharing the folder sends it
+    const auto it    = files.find(name);
+    return it != files.end() && it->second.ended;
 }
 
 auto Uploader::uploading() const -> bool
@@ -389,7 +433,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         }
         const auto& f    = files[entry.path().filename().string()];
         const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed ? size : f.sent, .size = size, .refused = !f.closed && f.refused == size && !f.error.empty(), .error = f.error });
+        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || f.ended ? size : f.sent, .size = size, .refused = !f.closed && f.refused == size && !f.error.empty(), .error = f.error });
     }
     return out;
 }

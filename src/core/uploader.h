@@ -51,16 +51,18 @@ public:
     auto start() -> void;
     auto pass() -> std::optional<std::string>; // the first error, if any
 
-    [[nodiscard]] auto status() const -> std::vector<UploadStatus>; // every capture in the folder, whichever client sends it
-    [[nodiscard]] auto uploading() const -> bool;                   // false while another client sharing the folder sends its captures
-    [[nodiscard]] auto saveError() const -> std::string;            // why the last save of upload progress failed, if it did
-    [[nodiscard]] auto unauthorized() -> bool;                      // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto status() const -> std::vector<UploadStatus>;  // every capture in the folder, whichever client sends it
+    [[nodiscard]] auto uploading() const -> bool;                    // false while another client sharing the folder sends its captures
+    [[nodiscard]] auto saveError() const -> std::string;             // why the last save of upload progress failed, if it did
+    [[nodiscard]] auto unauthorized() -> bool;                       // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto ended(const std::string& name) const -> bool; // Mogsafe ended this file's upload before it closed: its bytes never go again
 
 private:
     struct File
     {
         std::string                           url;
         bool                                  closed{};
+        bool                                  ended{};   // Mogsafe answered 410: cut off or refused
         uint64_t                              refused{}; // size at the last refused close
         uint64_t                              size{};
         uint64_t                              sent{};
@@ -72,6 +74,7 @@ private:
     auto step(const std::filesystem::path& path, File& f) -> std::optional<std::string>;
     auto send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
     auto close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>;
+    auto end(File& f, const HttpResponse& res) -> void;
     auto allowed() -> bool;
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
     auto load() -> void;

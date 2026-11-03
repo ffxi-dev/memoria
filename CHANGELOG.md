@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**Uploads**
+- When Vault ends a recording that has been silent too long, Memoria never sends it again. If the game is still running, Memoria says so and goes on in a new recording.
+
 ## 0.6.0-rc.1
 
 **Captain imports (new)**

@@ -155,8 +155,21 @@ auto Session::start(std::optional<LateLogin> late) -> void
 
     try
     {
-        recorder_ = std::make_unique<Recorder>(RecorderOptions{ .dir = captures_, .seed = seed_, .captureAgent = "Memoria " MEMORIA_VERSION_TEXT });
         startUploads();
+        recorder_ = std::make_unique<Recorder>(RecorderOptions{
+            .dir          = captures_,
+            .seed         = seed_,
+            .captureAgent = "Memoria " MEMORIA_VERSION_TEXT,
+            .ended        = [this](const std::filesystem::path& capture)
+            {
+                if (!uploader_->ended(capture.filename().string()))
+                {
+                    return false;
+                }
+                post("The server ended the last recording; continuing in a new one.");
+                return true;
+            },
+        });
         if (Importer::pending(captures_) && linked())
         {
             startImport(false); // an import asked for and not finished goes on, here or in the client holding its mutex

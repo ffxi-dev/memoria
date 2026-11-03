@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 #include <picosha2.h>
+#include <xicap/constants.h>
 #include <xicap/reader.h>
 #include <zstd.h>
 
@@ -589,7 +590,7 @@ public:
     {
         std::vector<uint8_t>               data;
         bool                               closed{};
-        bool                               gone{};
+        bool                               cutOff{}; // ended by the sweep: every request answers 410
         std::map<std::string, std::string> meta;
     };
 
@@ -675,14 +676,18 @@ public:
         const auto path    = url.substr(std::string("https://mogsafe.test").size());
         const bool isClose = path.ends_with("/close");
         const auto it      = uploads.find(isClose ? path.substr(0, path.size() - 6) : path);
-        if (it == uploads.end() || it->second.gone)
+        if (it == uploads.end())
         {
-            return HttpResponse{ .status = method == "PATCH" ? 410 : 404 };
+            return HttpResponse{ .status = 404 };
         }
         auto& u = it->second;
+        if (u.cutOff || u.closed && !isClose)
+        {
+            return HttpResponse{ .status = 410, .headers = { { "mogsafe-ended", u.cutOff ? "cut_off" : "complete" } } };
+        }
         if (method == "HEAD")
         {
-            return u.closed ? HttpResponse{ .status = 404 } : HttpResponse{ .status = 200, .headers = { { "upload-offset", std::to_string(u.data.size()) } } };
+            return HttpResponse{ .status = 200, .headers = { { "upload-offset", std::to_string(u.data.size()) } } };
         }
         if (method == "PATCH")
         {
@@ -690,9 +695,9 @@ public:
             {
                 throw std::runtime_error("the game crashed");
             }
-            if (u.closed || get("Upload-Offset") != std::to_string(u.data.size()))
+            if (get("Upload-Offset") != std::to_string(u.data.size()))
             {
-                return HttpResponse{ .status = u.closed ? 410 : 409 };
+                return HttpResponse{ .status = 409 };
             }
             u.data.insert(u.data.end(), body.begin(), body.end());
             received += body.size();
@@ -886,7 +891,7 @@ TEST_CASE("no byte goes until the upload's URL is saved, so a restart after a fa
     fs::remove_all(dir);
 }
 
-TEST_CASE("an upload the server cut off starts over, and outages only delay")
+TEST_CASE("outages only delay, and an upload the server never kept starts over")
 {
     const auto  dir  = tempDir();
     const auto  file = dir / "a.xicap";
@@ -900,9 +905,9 @@ TEST_CASE("an upload the server cut off starts over, and outages only delay")
     CHECK(up->pass().has_value());
     CHECK(up->status()[0].error.find("refused") != std::string::npos);
 
-    server.down                         = false;
-    server.uploads.begin()->second.gone = true;
-    CHECK(!up->pass()); // 410: forgets the upload
+    server.down = false;
+    server.uploads.clear();
+    CHECK(!up->pass()); // 404, and a close answers 404: Mogsafe holds none of it
     CHECK(!up->pass()); // a new upload of the whole file
     CHECK(server.creates == 2);
     CHECK(server.uploads.rbegin()->second.data == readAll(file));
@@ -2155,3 +2160,114 @@ TEST_CASE("a second client sharing the install does not import while the first d
     CHECK(fs::exists(in.uploaded / "s/Audithor"));
 }
 #endif
+
+TEST_CASE("a file left by a killed client whose upload the server ended is kept and never sent again")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    append(file, std::string(500, 'x'));
+    CHECK(!uploader(dir, server)->pass());
+    append(file, std::string(100, 'x')); // written before the kill, never sent
+
+    server.uploads.begin()->second.cutOff = true;
+    auto up                               = uploader(dir, server);
+    CHECK(!up->pass()); // 410
+    CHECK(up->ended("a.xicap"));
+    CHECK(!up->pass());
+    CHECK(!uploader(dir, server)->pass()); // a restart remembers
+    CHECK(server.creates == 1);
+    CHECK(server.received == 500);
+    CHECK(fs::file_size(file) == 600);
+    const auto status = up->status();
+    REQUIRE(status.size() == 1);
+    CHECK(status[0].sent == status[0].size); // nothing left to send
+    CHECK(status[0].error.empty());
+    CHECK(uploader(dir, server)->ended("a.xicap")); // another client reads it from disk
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a lost close answer for a capture the server holds complete counts as closed")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    append(file, std::string(500, 'x') + "XCPF");
+    CHECK(!uploader(dir, server)->pass());
+    server.uploads.begin()->second.closed = true; // closed, its answer lost
+    auto up                               = uploader(dir, server);
+    CHECK(!up->pass());
+    CHECK(!up->ended("a.xicap"));
+    CHECK(up->status()[0].sent == 504);
+    CHECK(server.creates == 1);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a recording whose upload the server ended goes on in a new capture that names it, and sends nothing twice")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    auto        up   = uploader(dir, server);
+    int         told = 0;
+    auto        opts = options(dir);
+    opts.ended       = [&](const fs::path& capture)
+    {
+        if (!up->ended(capture.filename().string()))
+        {
+            return false;
+        }
+        ++told;
+        return true;
+    };
+    Recorder rec(opts);
+    rec.login(T0, who("Nouurs", 1));
+    rec.packet(gamePacket(T0 + 1));
+    fs::path first;
+    REQUIRE(waitFor([&]
+                    {
+                        first = rec.status().capture;
+                        std::error_code ec;
+                        return !first.empty() && fs::file_size(first, ec) >= xicap::HEADER_SIZE;
+                    }));
+    CHECK(!up->pass());
+    REQUIRE(server.creates == 1);
+    auto& cut = server.uploads.begin()->second;
+    REQUIRE(!cut.data.empty());
+
+    cut.cutOff     = true; // a network gap longer than the sweep's wait
+    const auto had = cut.data.size();
+    rec.packet(gamePacket(T0 + 2));
+    REQUIRE(waitFor([&]
+                    {
+                        return rec.status().packets == 2;
+                    }));
+    CHECK(!up->pass()); // 410
+    REQUIRE(waitFor([&]
+                    {
+                        return rec.status().capture.empty();
+                    }));
+    rec.packet(gamePacket(T0 + 3));
+    REQUIRE(waitFor([&]
+                    {
+                        return !rec.status().capture.empty();
+                    }));
+    const auto second = rec.status().capture;
+    rec.stop();
+    CHECK(!up->pass()); // sends the new capture
+    CHECK(!up->pass()); // closes it
+
+    CHECK(told == 1);
+    CHECK(second != first);
+    CHECK(server.creates == 2);
+    CHECK(cut.data.size() == had);
+    CHECK(server.uploads.rbegin()->second.data == readAll(second));
+    CHECK(server.uploads.rbegin()->second.closed);
+    const auto old = readCapture(first);
+    const auto now = readCapture(second);
+    CHECK(old.complete);
+    CHECK(old.packets == 2);
+    CHECK(now.packets == 1);
+    CHECK(now.previous == old.id);
+    CHECK(now.start == xicap::StartContext::MidSession);
+    fs::remove_all(dir);
+}
