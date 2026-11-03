@@ -12,6 +12,7 @@
 - [x] 2.3 Move an uploaded folder to `captures-uploaded/` at the same relative path, adding `-2` on a clash and removing emptied parents; verify core tests for the move, the clash, and a failed rename leaving the folder and reporting it
 - [x] 2.4 Crash recovery: verify core tests that start a new importer on the files left after each row of design.md's crash table and end with the folder moved and no log byte sent twice
 - [x] 2.5 Stop promptly: verify a core test that destroys the importer mid-append and mid-compression and returns within a second with the fake `Http` blocking
+- [x] 2.6 Search log (vault's `import-search-traffic`): stage a non-empty `SearchLog/search.log` with zstd before the create, send `search_bytes`, `search_crc32` and `search_size`, and stage the upload as that stage followed by `full.log`'s; verify core tests for the body and metadata, an empty search log not sent, a `201` with `Mogsafe-Replaces` reported, a `409` for a folder without one, resuming before the first byte, inside the search part and inside `full.log`'s, and a lost search stage starting a new upload
 
 ## 3. Plugin
 
@@ -26,6 +27,7 @@
 
 - [x] 4.1 README: `/memoria import`, the reminder, and where uploaded folders go; CHANGELOG entry; AGENTS.md says changes inside Memoria start in its own `openspec/`; verify the README's commands match the plugin's help line
 - [ ] 4.2 Recorded run against `mogsafe.sruon.dev` with a linked install: one new captain folder converts to a capture owned by the linked account, and a folder imported earlier through `/import` comes back as already in Vault and moves; record the capture ids in design.md's Implementation Notes
+- [ ] 4.3 In the same run, a folder whose `full.log` is archived without its search log replaces its capture and moves, and the capture holds search packets on channel 1; the first release waits for this
 
 ## Workflow follow-up
 

@@ -94,12 +94,15 @@ auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet) 
         }
         it.disable_recursion_pending();
         const auto changed = fs::last_write_time(log, ec);
+        const bool growing = ec || now - changed < quiet;
+        const auto search  = it->path() / "SearchLog" / "search.log";
         out.push_back({
-            .dir       = it->path(),
-            .folder    = it->path().lexically_relative(root).generic_string(),
-            .character = it->path().filename().string(),
-            .size      = fs::file_size(log, ec),
-            .growing   = ec || now - changed < quiet,
+            .dir        = it->path(),
+            .folder     = it->path().lexically_relative(root).generic_string(),
+            .character  = it->path().filename().string(),
+            .size       = fs::file_size(log, ec),
+            .searchSize = fs::is_regular_file(search, ec) ? fs::file_size(search, ec) : 0,
+            .growing    = growing,
         });
     }
     std::ranges::sort(out, {}, &CaptainCapture::folder);
@@ -282,7 +285,7 @@ auto Importer::run() -> void
         uint64_t total = 0;
         for (const auto& c : found)
         {
-            total += c.growing ? 0 : c.size;
+            total += c.growing ? 0 : c.size + c.searchSize;
         }
         say(std::format("Uploading {} captain capture{} ({}) in the background.", found.size(), found.size() == 1 ? "" : "s", sizeText(total)));
     }
@@ -356,13 +359,18 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
     std::ostringstream manifest;
     manifest << std::ifstream(c.dir / "manifest.txt", std::ios::binary).rdbuf(); // closed at once: Windows will not move a folder with a file open
 
-    const auto staged = options_.state / "imports" / std::format("{}-{}.zst", e.crc, e.size);
-    const auto forget = [&]
+    // A search log goes ahead of full.log in the same upload. It is staged alone before the create, which gives its length,
+    // then the upload's staged file is that stage followed by full.log's.
+    const auto searchLog    = c.dir / "SearchLog" / "search.log";
+    const auto staged       = options_.state / "imports" / std::format("{}-{}.zst", e.crc, e.size);
+    const auto searchStaged = options_.state / "imports" / std::format("{}-{}.search.zst", e.crc, e.size);
+    const auto forget       = [&]
     {
         entries_.erase(c.folder);
         save();
         std::error_code ec;
         fs::remove(staged, ec);
+        fs::remove(searchStaged, ec);
     };
     const auto refused = [&](const HttpResponse& res)
     {
@@ -370,7 +378,8 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         say(prefix + std::format("refused: {}.", trim(res.body).empty() ? std::to_string(res.status) : trim(res.body)));
         return Outcome::Refused;
     };
-    const auto metadata = std::format("format {},manifest {},character {},crc32 {},size {},folder {}", base64("captain"), base64(manifest.str()), base64(c.character), base64(e.crc), base64(std::to_string(e.size)), base64(c.folder));
+    const auto  metadata = std::format("format {},manifest {},character {},crc32 {},size {},folder {}", base64("captain"), base64(manifest.str()), base64(c.character), base64(e.crc), base64(std::to_string(e.size)), base64(c.folder));
+    std::string replaces; // the capture this upload gives its search log, as the create said
 
     auto backoff = options_.retry;
     while (ready())
@@ -382,9 +391,40 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         };
         if (e.url.empty())
         {
-            const auto res = tus_.request("POST", options_.server + "/v1/uploads/", { { "Upload-Defer-Length", "1" }, { "Upload-Metadata", metadata } });
+            std::string search;
+            if (c.searchSize > 0)
+            {
+                const auto crc = crc32File(searchLog, stopping_);
+                if (!crc)
+                {
+                    if (stopping_)
+                    {
+                        return Outcome::Stopped;
+                    }
+                    forget();
+                    say(prefix + "cannot read its search.log; skipped.");
+                    return Outcome::Skipped;
+                }
+                std::error_code ec;
+                if (!fs::exists(searchStaged, ec))
+                {
+                    fs::remove(staged, ec); // a stage of full.log without this search stage ahead of it
+                    if (const auto error = stage(searchLog, searchStaged))
+                    {
+                        if (stopping_)
+                        {
+                            return Outcome::Stopped;
+                        }
+                        say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
+                        return Outcome::Failed;
+                    }
+                }
+                search = std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(fs::file_size(searchStaged, ec))), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
+            }
+            const auto res = tus_.request("POST", options_.server + "/v1/uploads/", { { "Upload-Defer-Length", "1" }, { "Upload-Metadata", metadata + search } });
             if (res && res->status == 201)
             {
+                replaces           = header(*res, "mogsafe-replaces");
                 e.url              = tus_.location(*res);
                 entries_[c.folder] = e;
                 // Saved before the first byte, so a crash resumes this upload. On failure imports.txt stays for the next start or link.
@@ -430,13 +470,13 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         std::error_code ec;
         if (!fs::exists(staged, ec))
         {
-            if (*offset > 0)
+            // Another compression of either log may not match the bytes Mogsafe holds, or the search part's length it was given.
+            if (*offset > 0 || (c.searchSize > 0 && !fs::exists(searchStaged, ec)))
             {
-                // Another compression of the log may not match the bytes Mogsafe holds.
                 e.url.clear();
                 continue;
             }
-            if (const auto error = stage(log, staged))
+            if (const auto error = stage(log, staged, c.searchSize > 0 ? searchStaged : fs::path{}))
             {
                 if (stopping_)
                 {
@@ -489,7 +529,8 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         if (close && close->status == 200)
         {
             forget();
-            return moved(c, prefix, "uploaded.", Outcome::Uploaded);
+            const auto done = replaces.empty() ? c.searchSize > 0 ? "uploaded with its search log." : "uploaded." : std::format("uploaded with its search log, replacing {}.", replaces);
+            return moved(c, prefix, done, Outcome::Uploaded);
         }
         if (close && close->status >= 400 && close->status < 500 && close->status != 409 && close->status != 423)
         {
@@ -516,8 +557,8 @@ auto Importer::moved(const CaptainCapture& c, const std::string& prefix, const s
     return outcome;
 }
 
-// zstd level 3 on one thread, to a .tmp renamed when whole: a crash leaves a whole file or none.
-auto Importer::stage(const std::filesystem::path& log, const std::filesystem::path& out) -> std::optional<std::string>
+// zstd level 3 on one thread, after head's bytes if given, to a .tmp renamed when whole: a crash leaves a whole file or none.
+auto Importer::stage(const std::filesystem::path& log, const std::filesystem::path& out, const std::filesystem::path& head) -> std::optional<std::string>
 {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -540,6 +581,15 @@ auto Importer::stage(const std::filesystem::path& log, const std::filesystem::pa
         if (!in || !o)
         {
             return fail("cannot open it");
+        }
+        if (!head.empty())
+        {
+            std::ifstream h(head, std::ios::binary);
+            if (!h || !(o << h.rdbuf()))
+            {
+                o.close();
+                return fail("cannot copy " + head.string());
+            }
         }
         for (bool last = false; !last;)
         {

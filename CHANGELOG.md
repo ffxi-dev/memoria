@@ -3,7 +3,7 @@
 ## Unreleased
 
 **Captain imports (new)**
-- `/memoria import` uploads earlier captain captures from `addons/captain/captures/` to Vault, then moves each one Vault holds to `addons/captain/captures-uploaded/`.
+- `/memoria import` uploads earlier captain captures from `addons/captain/captures/` to Vault, then moves each one Vault holds to `addons/captain/captures-uploaded/`. A folder's `SearchLog/search.log` goes in the same upload, and a capture already in Vault without it gains it.
 - Memoria says once per install, at a login or link, when such captures wait.
 - An import goes on after a crash or restart, and pauses with `/memoria upload off`.
 

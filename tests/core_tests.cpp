@@ -594,8 +594,9 @@ public:
     };
 
     std::map<std::string, Upload>           uploads;
-    std::map<std::string, std::string>      imported; // capture id by "crc32:size"
-    std::map<std::string, std::vector<int>> forced;   // answers by method, given before anything else
+    std::map<std::string, std::string>      imported;    // capture id by "crc32:size"
+    std::set<std::string>                   replaceable; // imported captures an upload with a search log replaces
+    std::map<std::string, std::vector<int>> forced;      // answers by method, given before anything else
     std::set<std::thread::id>               threads;
     std::string                             token = "t0ken";
     bool                                    down{};
@@ -649,9 +650,14 @@ public:
             {
                 return HttpResponse{ .status = 400, .body = "manifest.txt has no StartTime\n" };
             }
+            std::string replaces;
             if (const auto it = imported.find(meta["crc32"] + ":" + meta["size"]); it != imported.end())
             {
-                return HttpResponse{ .status = 409, .headers = { { "mogsafe-capture", it->second } }, .body = "this log is already in Mogsafe as " + it->second };
+                if (!meta.contains("search_bytes") || !replaceable.contains(it->second))
+                {
+                    return HttpResponse{ .status = 409, .headers = { { "mogsafe-capture", it->second } }, .body = "this log is already in Mogsafe as " + it->second };
+                }
+                replaces = it->second;
             }
             const auto path = std::format("/v1/uploads/{}", ++creates);
             uploads[path]   = { .meta = meta };
@@ -659,7 +665,12 @@ public:
             {
                 onCreate();
             }
-            return HttpResponse{ .status = 201, .headers = { { "location", path } } };
+            HttpResponse res{ .status = 201, .headers = { { "location", path } } };
+            if (!replaces.empty())
+            {
+                res.headers.emplace("mogsafe-replaces", replaces);
+            }
+            return res;
         }
         const auto path    = url.substr(std::string("https://mogsafe.test").size());
         const bool isClose = path.ends_with("/close");
@@ -1782,6 +1793,117 @@ TEST_CASE("an import resumes from each point a crash can leave it at")
         CHECK(fs::exists(in.uploaded / "s/Audithor"));
         CHECK(fs::is_empty(in.state));
     }
+}
+
+namespace
+{
+
+auto searchFolder(const fs::path& dir, const std::string& search) -> void
+{
+    fs::create_directories(dir / "SearchLog");
+    std::ofstream(dir / "SearchLog" / "search.log", std::ios::binary) << search;
+}
+
+// The two zstd frames an upload with a search log holds: search.log's, then full.log's.
+auto searchParts(const FakeMogsafe::Upload& u) -> std::pair<std::string, std::string>
+{
+    const auto n = static_cast<size_t>(std::stoull(u.meta.at("search_bytes")));
+    if (n > u.data.size())
+    {
+        return {};
+    }
+    const auto mid = u.data.begin() + static_cast<std::ptrdiff_t>(n);
+    return { unzstd(std::vector<uint8_t>(u.data.begin(), mid)), unzstd(std::vector<uint8_t>(mid, u.data.end())) };
+}
+
+} // namespace
+
+TEST_CASE("a folder's search log goes ahead of its full.log in the same upload, and an empty one does not")
+{
+    Install    in;
+    const auto log    = noise(3000);
+    const auto search = std::string("[2026-10-21 18:44:13.740] Outgoing search packet 0x15\n") + noise(2000);
+    searchFolder(captainFolder(in.captures, "a/Hoa", log), search);
+    searchFolder(captainFolder(in.captures, "b/Ijs", log + "b"), "");
+    FakeMogsafe server;
+    in.importer(server)->run();
+
+    REQUIRE(server.creates == 2);
+    const auto& u = server.uploads.at("/v1/uploads/1");
+    CHECK(u.closed);
+    std::atomic<bool> stop{ false };
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "a/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_size") == std::to_string(search.size()));
+    CHECK(!u.meta.contains("search_encoding"));
+    CHECK(searchParts(u) == std::pair{ search, log });
+    CHECK(in.said.front() == std::format("Uploading 2 captain captures ({}) in the background.", sizeText(2 * log.size() + 1 + search.size())));
+    CHECK(in.saidAny("Captain 1/2 a/Hoa: uploaded with its search log."));
+
+    const auto& empty = server.uploads.at("/v1/uploads/2");
+    CHECK(!empty.meta.contains("search_bytes"));
+    CHECK(unzstd(empty.data) == log + "b");
+    CHECK(in.saidAny("Captain 2/2 b/Ijs: uploaded."));
+    CHECK(!fs::exists(in.state / "imports"));
+}
+
+TEST_CASE("a folder in Vault without its search log replaces its capture; without one it stays in Vault")
+{
+    Install    in;
+    const auto log = noise(3000);
+    searchFolder(captainFolder(in.captures, "a/Hoa", log), "search");
+    captainFolder(in.captures, "b/Ijs", log + "b");
+    FakeMogsafe       server;
+    std::atomic<bool> stop{ false };
+    const auto        key = [&](const std::string& rel)
+    {
+        return std::format("{:08x}:{}", crc32File(in.captures / rel / "PacketLogger" / "full.log", stop)->crc, fs::file_size(in.captures / rel / "PacketLogger" / "full.log"));
+    };
+    server.imported[key("a/Hoa")] = "cap7";
+    server.imported[key("b/Ijs")] = "cap8";
+    server.replaceable            = { "cap7", "cap8" };
+    in.importer(server)->run();
+    CHECK(server.creates == 1);
+    CHECK(searchParts(server.uploads.at("/v1/uploads/1")).first == "search");
+    CHECK(in.saidAny("Captain 1/2 a/Hoa: uploaded with its search log, replacing cap7."));
+    CHECK(in.saidAny("Captain 2/2 b/Ijs: already in Vault (cap8)."));
+    CHECK(fs::exists(in.uploaded / "a/Hoa/SearchLog/search.log"));
+    CHECK(fs::exists(in.uploaded / "b/Ijs"));
+}
+
+TEST_CASE("an import with a search log resumes across its two parts, and starts over when the search stage is gone")
+{
+    const auto log    = noise(3 << 20);
+    const auto search = noise((1 << 20) + 300'000); // past the first 1 MiB append
+    for (const int crashAt : { 0, 1, 2 })           // before the first byte, inside the search part, inside full.log's
+    {
+        Install in;
+        searchFolder(captainFolder(in.captures, "s/Hoa", log), search);
+        FakeMogsafe server;
+        server.crashAtPatch = crashAt;
+        CHECK_THROWS(in.importer(server)->run());
+        CHECK(Importer::pending(in.state));
+        server.crashAtPatch = -1;
+        in.importer(server)->run();
+        CHECK(server.creates == 1);
+        const auto& u = server.uploads.begin()->second;
+        CHECK(server.received == u.data.size()); // no byte twice
+        CHECK(searchParts(u) == std::pair{ search, log });
+        CHECK(fs::exists(in.uploaded / "s/Hoa"));
+        CHECK(!Importer::pending(in.state));
+    }
+
+    // Created, then the staged files are lost before the first byte: the search part's length may differ, so a new upload goes.
+    Install in;
+    searchFolder(captainFolder(in.captures, "s/Hoa", log), search);
+    FakeMogsafe server;
+    server.crashAtPatch = 0;
+    CHECK_THROWS(in.importer(server)->run());
+    fs::remove_all(in.state / "imports");
+    server.crashAtPatch = -1;
+    in.importer(server)->run();
+    CHECK(server.creates == 2);
+    CHECK(searchParts(server.uploads.at("/v1/uploads/2")) == std::pair{ search, log });
+    CHECK(fs::exists(in.uploaded / "s/Hoa"));
 }
 
 TEST_CASE("an import whose state cannot be saved sends nothing and goes on at the next start")
