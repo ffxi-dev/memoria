@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+**Linking**
+- The first `/memoria link` of a session prints the address of Vault's privacy policy, which the link page asks you to accept.
+
 **Uploads**
 - When Vault ends a recording that has been silent too long, Memoria never sends it again. If the game is still running, Memoria says so and goes on in a new recording.
 
