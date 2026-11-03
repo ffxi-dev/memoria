@@ -241,6 +241,30 @@ auto readCapture(const fs::path& path) -> Read
 
 } // namespace
 
+TEST_CASE("a recording is xicap format 4, signed to the end")
+{
+    const auto dir = tempDir();
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        rec.logout(T0 + 2);
+        rec.stop();
+    }
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 1);
+    {
+        xicap::Reader r(files[0]);
+        CHECK(r.versionMajor() == 4);
+        CHECK(r.versionMinor() == 0);
+    }
+    const auto read = readCapture(files[0]);
+    CHECK(read.packets == 1);
+    CHECK(read.complete);
+    CHECK(read.signedToEnd);
+    fs::remove_all(dir);
+}
+
 TEST_CASE("a relog on the same character continues the capture")
 {
     const auto dir = tempDir();

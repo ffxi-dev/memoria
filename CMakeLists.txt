@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(memoria VERSION 0.6.0 LANGUAGES C CXX)
-# A pre-release names its suffix here (tag v0.6.0-rc.2); a release leaves it empty.
-set(MEMORIA_PRERELEASE "rc.2")
+# A pre-release names its suffix here (tag v0.6.0-rc.3); a release leaves it empty.
+set(MEMORIA_PRERELEASE "rc.3")
 if(MEMORIA_PRERELEASE)
     set(MEMORIA_VERSION_TEXT "${PROJECT_VERSION}-${MEMORIA_PRERELEASE}")
 else()
@@ -22,7 +22,7 @@ set(XICAP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     xicap
     GIT_REPOSITORY https://github.com/ffxi-dev/xicap.git
-    GIT_TAG        v3.5.0
+    GIT_TAG        v4.0.0
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(xicap)

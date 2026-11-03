@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0-rc.3
+
+**Captures**
+- Memoria writes xicap format 4 (xicap 4.0): about half the size of format 3 on disk and in upload, with the same packets. Vault reads both formats, and keeps Memoria's signature when it repacks a capture for its archive.
+
 ## 0.6.0-rc.2
 
 **Linking**
