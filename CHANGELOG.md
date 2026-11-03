@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0-rc.2
 
 **Linking**
 - The first `/memoria link` of a session prints the address of Vault's privacy policy, which the link page asks you to accept.
