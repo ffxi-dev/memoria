@@ -43,9 +43,16 @@ jobs:
           env: ASHITA4_SDK_PATH
           run: |
             cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="$PWD/out"
-            cmake --build build --target memoria
+            cmake --build build --target memoria MemoriaProbe MemoriaProbeOld
       - uses: actions/upload-artifact@v4
         with:
           name: memoria
           path: out/Memoria.dll
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memoria-probe
+          path: |
+            out/MemoriaProbe.dll
+            out/MemoriaProbeOld.dll
           if-no-files-found: error

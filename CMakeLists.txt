@@ -99,6 +99,18 @@ if(MEMORIA_BUILD_PLUGIN)
     foreach(target memoria_core xicap)
         target_compile_options(${target} PRIVATE /EHa "$<$<CONFIG:Release>:/O2;/Ob2;/DNDEBUG>")
     endforeach()
+    # MemoriaProbe.dll logs what Windower 4 calls, from interface.h alone; MemoriaProbeOld.dll answers an older
+    # interface number, to see Windower refuse a plugin it was not built for.
+    foreach(probe MemoriaProbe MemoriaProbeOld)
+        add_library(${probe} MODULE src/windower/probe.cpp src/windower/probe.def src/windower/interface.h)
+        target_include_directories(${probe} PRIVATE src)
+        target_compile_options(${probe} PRIVATE /W4 /WX)
+        if(MEMORIA_OUTPUT_DIR)
+            set_target_properties(${probe} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${MEMORIA_OUTPUT_DIR})
+        endif()
+    endforeach()
+    target_compile_definitions(MemoriaProbeOld PRIVATE PROBE_INTERFACE_VERSION=0x40003)
+
     # C5298: a stray control character in the SDK's d3d8 dxfile.h.
     target_compile_options(memoria PRIVATE /wd5298)
     # Designated initializers leave fields out on purpose; they start at zero.
