@@ -24,7 +24,7 @@ The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. 
 ## Rules
 
 - The game thread never waits: packet hooks only copy into the queue. Compression, writing, signing, flushing, and uploading run on Memoria's own threads.
-- Captures follow xicap format 3's writer rules (`ffxi-dev/xicap` `FORMAT.md`), and are written only through xicap's library. Never write the format by hand here.
+- Captures follow xicap format 4's writer rules (`ffxi-dev/xicap` `FORMAT.md`) with the library's live preset, and are written only through xicap's library. Never write the format by hand here.
 - The install key is never sent, printed, or replaced. Upload credentials are never printed or logged.
 - `pilot` on the owner's PC runs five live clients. Test there only when the owner schedules it.
 
