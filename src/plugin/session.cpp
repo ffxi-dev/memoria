@@ -706,6 +706,11 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     }
     else if (sub == "link")
     {
+        if (!privacyShown_)
+        {
+            privacyShown_ = true;
+            say("The link page asks you to accept Vault's privacy policy: " + paint(Color::Cyan, server_ + "/privacy"));
+        }
         say(paint(Color::Grey, "Asking Vault for a link code..."));
         link();
     }
