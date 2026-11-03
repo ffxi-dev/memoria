@@ -9,7 +9,7 @@ A change inside Memoria starts as an OpenSpec change in this repository's `opens
 ## Layout
 
 - `src/core/`: the event queue, clock, install key, and recording. No Ashita headers: it builds and is tested on Linux and Windows.
-- `src/plugin/`: the Ashita v4 plugin, a thin layer that hands the game's events to the core. 32-bit Windows only.
+- `src/plugin/`: `session.*`, everything Memoria does in the client, with no framework header, and `ashita.*`, the Ashita v4 host that hands Ashita's callbacks to the session. 32-bit Windows only.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's helper, unchanged.
 
 ## Before every commit

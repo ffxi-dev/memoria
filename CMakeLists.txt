@@ -65,12 +65,14 @@ if(MEMORIA_BUILD_PLUGIN)
 
     add_library(memoria MODULE
         src/plugin/exports.def
+        src/plugin/ashita.cpp
+        src/plugin/ashita.h
         src/plugin/client.cpp
         src/plugin/client.h
         src/plugin/live.cpp
         src/plugin/live.h
-        src/plugin/memoria.cpp
-        src/plugin/memoria.h
+        src/plugin/session.cpp
+        src/plugin/session.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
     )
