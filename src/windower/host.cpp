@@ -111,7 +111,7 @@ public:
                 console_->Write(text.c_str());
             },
         });
-        // ponytail: no late login; Hook.dll exposes no player state, so a load mid-session waits for the next zone-in.
+        // No late login: Hook.dll exposes no player state, so a load mid-session waits for the next zone-in.
         session_->start(std::nullopt);
     }
 
