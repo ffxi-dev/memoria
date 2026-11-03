@@ -7,11 +7,13 @@
 #include "core/uploader.h"
 #include "plugin/live.h"
 
-#include <Ashita.h>
+#include <Windows.h>
 
 #include <array>
 #include <atomic>
+#include <filesystem>
 #include <format>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -38,25 +40,41 @@ inline auto paint(Color c, std::string_view text) -> std::string
     return std::format("\x1E{}{}\x1E\x01", static_cast<char>(c), text);
 }
 
-class Plugin final : public IPlugin
+// What a framework gives the session: where its files go, and how it talks to the player.
+struct Host
+{
+    std::filesystem::path                   config;   // the key, token, and settings
+    std::filesystem::path                   captures; // captures and upload state
+    std::filesystem::path                   captain;  // captain's addon folder, for /memoria import
+    std::function<void(const std::string&)> say;      // one chat line, on the game thread
+    std::function<void(const std::string&)> log;      // one line to the framework's log
+};
+
+// The character already in game when Memoria loads, if the host can tell.
+struct LateLogin
+{
+    uint32_t    characterId{};
+    std::string name;
+};
+
+// Everything Memoria does, whichever framework loaded it. Every call comes from the game thread.
+class Session final
 {
 public:
-    auto GetName() const -> const char* override;
-    auto GetAuthor() const -> const char* override;
-    auto GetDescription() const -> const char* override;
-    auto GetLink() const -> const char* override;
-    auto GetVersion() const -> double override;
-    auto GetPriority() const -> int32_t override;
-    auto GetFlags() const -> uint32_t override;
+    explicit Session(Host host);
+    ~Session(); // stops every thread and unhooks the client
 
-    auto Initialize(IAshitaCore* core, ILogManager* logger, uint32_t id) -> bool override;
-    auto Release() -> void override;
+    Session(const Session&)                    = delete;
+    auto operator=(const Session&) -> Session& = delete;
 
-    auto HandleCommand(int32_t mode, const char* command, bool injected) -> bool override;
-    auto HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
-    auto HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool override;
-    auto Direct3DInitialize(IDirect3DDevice8* device) -> bool override;
-    auto Direct3DBeginScene(bool isRenderingBackBuffer) -> void override;
+    auto start(std::optional<LateLogin> late) -> void;
+
+    auto incoming(uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
+    auto outgoing(uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
+    auto frame() -> void;
+
+    // args[0] is the command's name; line is the command as typed, for a path that holds spaces.
+    auto command(const std::vector<std::string>& args, std::string_view line) -> void;
 
     auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
 
@@ -86,16 +104,15 @@ private:
     auto hello() -> std::string;
     auto stopLive() -> void;
 
-    IAshitaCore*                       core_{ nullptr };
+    Host                               host_;
     std::filesystem::path              config_;
     std::filesystem::path              captures_;
-    std::filesystem::path              captain_; // <Ashita>/addons/captain
+    std::filesystem::path              captain_;
     xicap::SecretSeed                  seed_{};
     std::string                        server_ = "https://mogsafe.sruon.dev";
     std::mutex                         inboxMutex_;
     std::vector<std::string>           inbox_;
     std::optional<Linked>              arrived_; // from the link thread
-    ILogManager*                       log_{ nullptr };
     Clock                              clock_;
     std::unique_ptr<Recorder>          recorder_;
     std::unique_ptr<Uploader>          uploader_;

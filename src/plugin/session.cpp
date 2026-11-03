@@ -1,10 +1,9 @@
-#include "plugin/memoria.h"
+#include "plugin/session.h"
 
 #include "core/seed_file.h"
 #include "plugin/client.h"
 #include "plugin/winhttp.h"
 
-#include <Commands.h>
 #include <picosha2.h>
 #include <xicap/constants.h>
 
@@ -100,7 +99,7 @@ auto readIni(const std::filesystem::path& path) -> std::optional<std::map<std::s
     return values;
 }
 
-Plugin* instance_ = nullptr; // for the search hooks, which take a plain function
+Session* instance_ = nullptr; // for the search hooks, which take a plain function
 
 auto count(uint64_t n) -> std::string
 {
@@ -127,59 +126,22 @@ auto duration(uint64_t seconds) -> std::string
 
 } // namespace
 
-auto Plugin::GetName() const -> const char*
+Session::Session(Host host)
+: host_(std::move(host))
+, config_(host_.config)
+, captures_(host_.captures)
+, captain_(host_.captain)
 {
-    return "Memoria";
 }
 
-auto Plugin::GetAuthor() const -> const char*
+auto Session::start(std::optional<LateLogin> late) -> void
 {
-    return "sruon";
-}
-
-auto Plugin::GetDescription() const -> const char*
-{
-    return "Records every packet of a retail session to xicap and uploads it to Vault.";
-}
-
-auto Plugin::GetLink() const -> const char*
-{
-    return "https://github.com/ffxi-dev/memoria";
-}
-
-auto Plugin::GetVersion() const -> double
-{
-    return MEMORIA_VERSION;
-}
-
-// Last, so the blocked and modified flags see what every other plugin did.
-auto Plugin::GetPriority() const -> int32_t
-{
-    return INT32_MAX;
-}
-
-auto Plugin::GetFlags() const -> uint32_t
-{
-    using enum Ashita::PluginFlags;
-    return std::to_underlying(UsePackets) | std::to_underlying(UseCommands) | std::to_underlying(UseDirect3D);
-}
-
-auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t id) -> bool
-{
-    UNREFERENCED_PARAMETER(id);
-    core_ = core;
-    log_  = logger;
-
-    const std::filesystem::path install = core_->GetInstallPath();
-    config_                             = install / "config" / "memoria";
-    captures_                           = install / "captures" / "memoria";
-    captain_                            = install / "addons" / "captain";
-    const auto seed                     = loadOrCreateSeed(config_ / "key");
+    const auto seed = loadOrCreateSeed(config_ / "key");
     if (!seed)
     {
         startError_ = seed.error();
         say("not recording: " + startError_);
-        return true; // stay loaded so /memoria status can say why
+        return; // stay loaded so /memoria status can say why
     }
     seed_ = *seed;
     if (auto config = readIni(config_ / "upload.ini"); config && (*config)["server"].starts_with("https://"))
@@ -204,7 +166,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     {
         startError_ = error.what();
         say("not recording: " + startError_);
-        return true;
+        return;
     }
     instance_    = this;
     searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
@@ -213,24 +175,21 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
                                            });
 
     // Loaded while already in a zone: record from here, marked mid-session.
-    auto* party = core_->GetMemoryManager()->GetParty();
-    if (core_->GetMemoryManager()->GetPlayer()->GetLoginStatus() == 2 && party->GetMemberServerId(0) != 0)
+    if (late)
     {
-        Login late{ .network = network(), .midSession = true, .clientVersion = client::lobby::version() };
-        late.character.characterId = party->GetMemberServerId(0);
-        const char* name           = party->GetMemberName(0);
-        std::memcpy(late.character.characterName.data(), name, strnlen(name, late.character.characterName.size() - 1));
-        characterError_ = client::lobby::character(late.character);
-        character_      = late.character;
+        Login login{ .network = network(), .midSession = true, .clientVersion = client::lobby::version() };
+        login.character.characterId = late->characterId;
+        std::memcpy(login.character.characterName.data(), late->name.data(), (std::min)(late->name.size(), login.character.characterName.size() - 1));
+        characterError_ = client::lobby::character(login.character);
+        character_      = login.character;
         loggedIn_       = true;
-        loggedInAs_     = late.character.characterId;
-        recorder_->login(clock_.nowMs(), std::move(late));
+        loggedInAs_     = login.character.characterId;
+        recorder_->login(clock_.nowMs(), std::move(login));
     }
-    log_->Logf(std::to_underlying(Ashita::LogLevel::Info), "Memoria", "Memoria %s recording to %s", MEMORIA_VERSION_TEXT, captures_.string().c_str());
-    return true;
+    host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, captures_.string()));
 }
 
-auto Plugin::Release() -> void
+Session::~Session()
 {
     linker_   = {}; // stops and joins
     reminder_ = {};
@@ -250,11 +209,11 @@ auto Plugin::Release() -> void
     }
 }
 
-auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
+auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
 {
     if (!recorder_)
     {
-        return false;
+        return;
     }
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
     if (id == xicap::FFXIPacket::LOGIN_ZONE)
@@ -281,20 +240,17 @@ auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* dat
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
     }
-    return false;
 }
 
-auto Plugin::HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
+auto Session::outgoing(uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
 {
-    UNREFERENCED_PARAMETER(id);
     if (recorder_)
     {
         record(true, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     }
-    return false;
 }
 
-auto Plugin::record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
+auto Session::record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
 {
     uint16_t provenance = 0;
     if (injected)
@@ -330,7 +286,7 @@ auto Plugin::record(bool clientToServer, uint32_t size, const uint8_t* data, con
 }
 
 // The opcode is byte 0x0B, the request type LSB's search server switches on.
-auto Plugin::recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void
+auto Session::recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void
 {
     recorder_->packet({
         .timestamp      = clock_.nowMs(),
@@ -341,16 +297,8 @@ auto Plugin::recordSearch(bool clientToServer, const uint8_t* data, uint32_t siz
     });
 }
 
-// Ashita refuses a plugin that asks for Direct3D callbacks and turns the device down.
-auto Plugin::Direct3DInitialize(IDirect3DDevice8* device) -> bool
+auto Session::frame() -> void
 {
-    UNREFERENCED_PARAMETER(device);
-    return true;
-}
-
-auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
-{
-    UNREFERENCED_PARAMETER(isRenderingBackBuffer);
     client::search::tick();
 
     std::vector<std::string> inbox;
@@ -395,7 +343,7 @@ auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
     }
 }
 
-auto Plugin::network() -> xicap::Network
+auto Session::network() -> xicap::Network
 {
     const auto ip = zoneServer();
     if (ip == 0)
@@ -406,7 +354,7 @@ auto Plugin::network() -> xicap::Network
 }
 
 // Runs until the plugin unloads; the token and paused files decide each pass whether it sends.
-auto Plugin::startUploads() -> void
+auto Session::startUploads() -> void
 {
     UploadOptions options{
         .dir    = captures_,
@@ -427,19 +375,19 @@ auto Plugin::startUploads() -> void
     uploader_->start();
 }
 
-auto Plugin::say(const std::string& text) -> void
+auto Session::say(const std::string& text) -> void
 {
-    core_->GetChatManager()->Writef(1, false, "\x1E\x51[\x1E\x06Memoria\x1E\x51]\x1E\x01 %s", text.c_str());
+    host_.say(text);
 }
 
-auto Plugin::post(std::string text) -> void
+auto Session::post(std::string text) -> void
 {
     std::lock_guard lock(inboxMutex_);
     inbox_.push_back(std::move(text));
 }
 
 // Once a day while unlinked: the date of the last reminder is kept across restarts.
-auto Plugin::remind() -> void
+auto Session::remind() -> void
 {
     const auto  path  = config_ / "reminded";
     const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
@@ -454,7 +402,7 @@ auto Plugin::remind() -> void
 }
 
 // Once per install, ever: while linked and captain captures wait, at login or link.
-auto Plugin::offerImport() -> void
+auto Session::offerImport() -> void
 {
     std::error_code ec;
     if (reminding_ || !linked() || std::filesystem::exists(config_ / "import-reminded", ec))
@@ -474,7 +422,7 @@ auto Plugin::offerImport() -> void
 }
 
 // Clients sharing an install import through the one whose importer holds the named mutex.
-auto Plugin::startImport(bool asked) -> void
+auto Session::startImport(bool asked) -> void
 {
     ImportOptions options{
         .captures = captain_ / "captures",
@@ -492,7 +440,7 @@ auto Plugin::startImport(bool asked) -> void
     importer_->start(asked);
 }
 
-auto Plugin::importLine() const -> std::string
+auto Session::importLine() const -> std::string
 {
     const auto p = importer_->progress();
     if (p.index == 0)
@@ -507,7 +455,7 @@ auto Plugin::importLine() const -> std::string
 }
 
 // Asks for a code, then polls until the player approves it on the link page.
-auto Plugin::link() -> void
+auto Session::link() -> void
 {
     linker_ = std::jthread([this](std::stop_token stop)
                            {
@@ -558,24 +506,24 @@ auto Plugin::link() -> void
                            });
 }
 
-auto Plugin::linked() const -> std::optional<Linked>
+auto Session::linked() const -> std::optional<Linked>
 {
     return loadLink(config_ / "token");
 }
 
-auto Plugin::unlink(const std::string& why) -> void
+auto Session::unlink(const std::string& why) -> void
 {
     stopLive();
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
 }
 
-auto Plugin::hello() -> std::string
+auto Session::hello() -> std::string
 {
     return liveHello(character_.characterName.data(), character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
 }
 
 // Ends the link without waiting: the live thread closes the connection, and a later frame joins it.
-auto Plugin::stopLive() -> void
+auto Session::stopLive() -> void
 {
     if (live_)
     {
@@ -584,7 +532,7 @@ auto Plugin::stopLive() -> void
     }
 }
 
-auto Plugin::status() -> void
+auto Session::status() -> void
 {
     const auto s = recorder_->status();
     if (s.capture.empty())
@@ -685,20 +633,12 @@ auto Plugin::status() -> void
     }
 }
 
-auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> bool
+auto Session::command(const std::vector<std::string>& args, std::string_view line) -> void
 {
-    UNREFERENCED_PARAMETER(mode);
-    UNREFERENCED_PARAMETER(injected);
-    std::vector<std::string> args;
-    Ashita::Commands::GetCommandArgs(command, &args);
-    if (args.empty() || args[0] != "/memoria")
-    {
-        return false;
-    }
     if (!recorder_)
     {
         say("not recording: " + startError_);
-        return true;
+        return;
     }
     const auto sub = args.size() > 1 ? args[1] : "status";
     if (sub == "status")
@@ -718,14 +658,14 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     else if (sub == "session" && args.size() > 2 && args[2] == "start")
     {
         // The rest of the line as typed: a path can hold spaces.
-        std::string_view path(command);
+        std::string_view path(line);
         path.remove_prefix(path.find("start") + 5);
         path.remove_prefix((std::min)(path.find_first_not_of(" \""), path.size()));
         path = path.substr(0, path.find_last_not_of(" \"") + 1);
         if (path.empty())
         {
             say("/memoria session start <file.xicap>");
-            return true;
+            return;
         }
         recorder_->sessionStart(clock_.nowMs(), std::u8string(path.begin(), path.end()));
         say(std::format("session to {}", path));
@@ -811,23 +751,6 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
     {
         say("/memoria status | link | unlink | live [off] | upload on|off | import | key | note <text> | session start <file.xicap> | session stop");
     }
-    return true;
 }
 
 } // namespace memoria
-
-extern "C" IPlugin* __stdcall expCreatePlugin(const char* args)
-{
-    UNREFERENCED_PARAMETER(args);
-    return new memoria::Plugin();
-}
-
-extern "C" void __stdcall expDestroyPlugin(void* instance)
-{
-    delete static_cast<memoria::Plugin*>(instance);
-}
-
-extern "C" double __stdcall expGetInterfaceVersion()
-{
-    return ASHITA_INTERFACE_VERSION;
-}
