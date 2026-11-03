@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0-rc.1
 
 **Captain imports (new)**
 - `/memoria import` uploads earlier captain captures from `addons/captain/captures/` to Vault, then moves each one Vault holds to `addons/captain/captures-uploaded/`. A folder's `SearchLog/search.log` goes in the same upload, and a capture already in Vault without it gains it.
@@ -11,6 +11,8 @@
 - When Memoria cannot save upload progress, for example on a full disk, it sends nothing until it can, so a crash never sends a capture twice.
 
 ## 0.5.4
+
+Never tagged: these changes first ship in 0.6.0-rc.1.
 
 **Status line**
 - `/memoria status` now answers in three lines: what is recording, on which client, and whether Vault holds every byte so far.

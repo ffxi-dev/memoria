@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.5.4 LANGUAGES C CXX)
+project(memoria VERSION 0.6.0 LANGUAGES C CXX)
+# A pre-release names its suffix here (tag v0.6.0-rc.1); a release leaves it empty.
+set(MEMORIA_PRERELEASE "rc.1")
+if(MEMORIA_PRERELEASE)
+    set(MEMORIA_VERSION_TEXT "${PROJECT_VERSION}-${MEMORIA_PRERELEASE}")
+else()
+    set(MEMORIA_VERSION_TEXT "${PROJECT_VERSION}")
+endif()
 
 # The core builds and is tested anywhere; the plugin needs 32-bit MSVC and the Ashita SDK.
 option(MEMORIA_BUILD_PLUGIN "Build the Ashita plugin (needs ASHITA4_SDK_PATH)" ${WIN32})
@@ -85,7 +92,7 @@ if(MEMORIA_BUILD_PLUGIN)
         ashita_sdk_set_linker_disable_debug_linking(memoria)
     endif()
     target_link_libraries(memoria PRIVATE memoria_core winhttp shell32 ole32)
-    target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${PROJECT_VERSION}")
+    target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${MEMORIA_VERSION_TEXT}")
     # The SDK helper clears the global C++ flags, so the core and xicap need their exception model and Release optimisation back.
     foreach(target memoria_core xicap)
         target_compile_options(${target} PRIVATE /EHa "$<$<CONFIG:Release>:/O2;/Ob2;/DNDEBUG>")
