@@ -2183,6 +2183,31 @@ TEST_CASE("a second client sharing the install does not import while the first d
 }
 #endif
 
+TEST_CASE("a capture Mogsafe refused stays refused, with its reason, after a restart and in another client")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    append(file, std::string(500, 'x') + "XCPF");
+    auto up = uploader(dir, server);
+    CHECK(!up->pass());              // sends
+    server.forced["POST"] = { 422 }; // the close: refused for good
+    CHECK(!up->pass());
+    REQUIRE(up->status()[0].refused);
+    up.reset();
+    auto again = uploader(dir, server);
+    CHECK(!again->pass());
+    auto status = again->status();
+    REQUIRE(status.size() == 1);
+    CHECK(status[0].refused);
+    CHECK(status[0].error == "forced");
+    auto other = uploader(dir, server); // a client that is not uploading reads the state file
+    status     = other->status();
+    CHECK(status[0].refused);
+    CHECK(status[0].error == "forced");
+    fs::remove_all(dir);
+}
+
 TEST_CASE("a file left by a killed client whose upload the server ended is kept and never sent again")
 {
     const auto  dir  = tempDir();
