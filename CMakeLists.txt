@@ -78,8 +78,11 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/ashita.h
         src/plugin/client.cpp
         src/plugin/client.h
+        src/plugin/commands.cpp
         src/plugin/live.cpp
         src/plugin/live.h
+        src/plugin/packets.cpp
+        src/plugin/packets.h
         src/plugin/session.cpp
         src/plugin/session.h
         src/plugin/text.cpp

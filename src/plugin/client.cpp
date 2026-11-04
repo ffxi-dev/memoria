@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <optional>
 #include <tuple>
@@ -62,6 +63,37 @@ auto find(const char* pattern) -> uintptr_t
     }
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
     return Ashita::Memory::FindPattern(base, nt->OptionalHeader.SizeOfImage, pattern, 0, 0);
+}
+
+auto network() -> xicap::Network
+{
+    // Square Enix's retail zone servers, 124.150.152.0/21.
+    constexpr uint32_t RETAIL_FIRST = 0x7C969800;
+    constexpr uint32_t RETAIL_LAST  = 0x7C969FFF;
+
+    // The zone server's IPv4 address (credits: atom0s, via captain).
+    static const uintptr_t sig = find("8B0D????????8D04808B8481????????C3");
+    if (sig == 0)
+    {
+        return xicap::Network::Unknown;
+    }
+    try
+    {
+        const auto ip = std::byteswap(read32(read32(read32(sig + 2))));
+        if (ip == 0)
+        {
+            return xicap::Network::Unknown;
+        }
+        if (ip >= RETAIL_FIRST && ip <= RETAIL_LAST)
+        {
+            return xicap::Network::Retail;
+        }
+        return xicap::Network::Private;
+    }
+    catch (...) // /EHa: a bad read is an access violation
+    {
+        return xicap::Network::Unknown;
+    }
 }
 
 namespace search

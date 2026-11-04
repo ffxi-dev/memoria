@@ -1,6 +1,7 @@
 #include "plugin/live.h"
 
-#include "plugin/session.h"
+#include "core/link.h"
+#include "plugin/text.h"
 #include "plugin/winhttp.h"
 
 #include <Windows.h>
@@ -203,7 +204,7 @@ auto Live::run(const std::stop_token& stop) -> void
     post_(paint(Color::Green, "Live.") + " Anyone with the link can watch until " + paint(Color::Cyan, "/memoria live off") + ". Nothing is sent while nobody watches.");
     post_(link->url);
 
-    const InternetHandle session(WinHttpOpen(L"Memoria/" MEMORIA_VERSION_TEXT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+    const auto session = openSession();
     if (session)
     {
         WinHttpSetTimeouts(session.get(), 10'000, 10'000, 10'000, 10'000);
@@ -226,15 +227,28 @@ auto Live::run(const std::stop_token& stop) -> void
             }
             if (code == REPLACED || code == ENDED)
             {
-                post_(code == REPLACED ? paint(Color::Yellow, "Live moved to another client.") : paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.");
+                if (code == REPLACED)
+                {
+                    post_(paint(Color::Yellow, "Live moved to another client."));
+                }
+                else
+                {
+                    post_(paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.");
+                }
                 break;
             }
             s.error = "Mogsafe closed the connection";
         }
         else if (s.status == 401 || s.status == 404)
         {
-            post_(s.status == 401 ? paint(Color::Yellow, "Live off: Vault no longer accepts this install.") + " Run " + paint(Color::Cyan, "/memoria link") + "."
-                                  : paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.");
+            if (s.status == 401)
+            {
+                post_(paint(Color::Yellow, "Live off: Vault no longer accepts this install.") + " Run " + paint(Color::Cyan, "/memoria link") + ".");
+            }
+            else
+            {
+                post_(paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.");
+            }
             break;
         }
         {

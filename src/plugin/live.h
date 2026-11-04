@@ -26,7 +26,9 @@ public:
     ~Live(); // joins: stop() first to end the link without waiting
 
     Live(const Live&)                    = delete;
+    Live(Live&&)                         = delete;
     auto operator=(const Live&) -> Live& = delete;
+    auto operator=(Live&&) -> Live&      = delete;
 
     auto stop() -> void; // closes with 1000 "off", which ends the link, reconnecting once to send it if the socket is down
     auto reopen() -> void;
@@ -69,7 +71,7 @@ private:
     std::atomic<int>      viewers_{ 0 };
     std::atomic<uint64_t> dropped_{ 0 };
     std::atomic<bool>     finished_{ false };
-    WinHttp               http_{ "Memoria/" MEMORIA_VERSION_TEXT };
+    WinHttp               http_;
     std::jthread          thread_; // last: started once the rest is ready
 };
 

@@ -2,12 +2,12 @@
 
 #include "core/file.h"
 #include "plugin/client.h"
+#include "plugin/packets.h"
 #include "plugin/text.h"
 #include "plugin/winhttp.h"
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -15,7 +15,6 @@
 #include <format>
 #include <fstream>
 #include <functional>
-#include <map>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -27,137 +26,45 @@ namespace memoria
 namespace
 {
 
-// GP_SERV_COMMAND_LOGIN (0x00A) and GP_SERV_COMMAND_LOGOUT (0x00B), after atom0s's XiPackets. Offsets count the packet's
-// 4-byte header.
-constexpr uint16_t LOGIN           = 0x00A;
-constexpr uint16_t LOGOUT          = 0x00B;
-constexpr size_t   LOGIN_UNIQUE_NO = 4;
-constexpr size_t   LOGIN_NAME      = 132;
-constexpr size_t   LOGIN_NAME_SIZE = 16;
-constexpr size_t   LOGOUT_STATE    = 4;
-
-// Square Enix's retail zone servers, 124.150.152.0/21.
-constexpr uint32_t RETAIL_FIRST = 0x7C969800;
-constexpr uint32_t RETAIL_LAST  = 0x7C969FFF;
-
-// GP_SERV_COMMAND_LOGOUT's LogoutState. Zone changes, the Mog House, and a cancelled logout keep the character in game.
-auto leavesGame(uint8_t logoutState) -> bool
+// upload.ini's "server = https://..." line, which points Memoria at another Mogsafe.
+auto serverIn(const std::filesystem::path& ini) -> std::optional<std::string>
 {
-    constexpr uint8_t ZONECHANGE = 2;
-    constexpr uint8_t MYROOM     = 3;
-    constexpr uint8_t CANCEL     = 4;
-    return logoutState != 0 && logoutState != ZONECHANGE && logoutState != MYROOM && logoutState != CANCEL;
-}
-
-// The zone server's IPv4 address in host order (credits: atom0s, via captain).
-auto zoneServer() -> uint32_t
-{
-    static const uintptr_t sig = client::find("8B0D????????8D04808B8481????????C3");
-    if (sig == 0)
-    {
-        return 0;
-    }
-    try
-    {
-        const auto ptr = *reinterpret_cast<const uint32_t*>(sig + 2);
-        const auto ret = *reinterpret_cast<const uint32_t*>(ptr);
-        return std::byteswap(*reinterpret_cast<const uint32_t*>(ret));
-    }
-    catch (...) // /EHa: a bad read is an access violation
-    {
-        return 0;
-    }
-}
-
-auto characterOf(const uint8_t* data, uint32_t size) -> xicap::Character
-{
-    xicap::Character c;
-    if (size >= LOGIN_NAME + LOGIN_NAME_SIZE)
-    {
-        std::memcpy(&c.characterId, data + LOGIN_UNIQUE_NO, sizeof(c.characterId));
-        const auto* name = reinterpret_cast<const char*>(data + LOGIN_NAME);
-        c.name.assign(name, strnlen(name, LOGIN_NAME_SIZE));
-    }
-    return c;
-}
-
-// "key = value" lines; # and ; start comments.
-auto readIni(const std::filesystem::path& path) -> std::optional<std::map<std::string, std::string>>
-{
-    std::ifstream in(path);
-    if (!in)
-    {
-        return std::nullopt;
-    }
     const auto trim = [](std::string_view s)
     {
         const auto first = s.find_first_not_of(" \t\r");
-        return first == std::string_view::npos ? std::string{} : std::string(s.substr(first, s.find_last_not_of(" \t\r") - first + 1));
+        return first == std::string_view::npos ? std::string{} : std::string(s.substr(first, s.find_last_not_of(" \t\r/") - first + 1));
     };
-    std::map<std::string, std::string> values;
+    std::ifstream in(ini);
     for (std::string line; std::getline(in, line);)
     {
         const auto eq = line.find('=');
-        if (eq != std::string::npos && !line.starts_with('#') && !line.starts_with(';'))
+        if (eq != std::string::npos && trim(line.substr(0, eq)) == "server" && trim(line.substr(eq + 1)).starts_with("https://"))
         {
-            values[trim(std::string_view(line).substr(0, eq))] = trim(std::string_view(line).substr(eq + 1));
+            return trim(line.substr(eq + 1));
         }
     }
-    return values;
+    return std::nullopt;
 }
 
 Session* instance_ = nullptr; // for the search hooks, which take a plain function
-
-auto count(uint64_t n) -> std::string
-{
-    auto text = std::to_string(n);
-    for (auto at = static_cast<std::ptrdiff_t>(text.size()) - 3; at > 0; at -= 3)
-    {
-        text.insert(static_cast<size_t>(at), ",");
-    }
-    return text;
-}
-
-auto duration(uint64_t seconds) -> std::string
-{
-    if (seconds < 60)
-    {
-        return std::format("{} s", seconds);
-    }
-    if (seconds < 3600)
-    {
-        return std::format("{} min", seconds / 60);
-    }
-    return std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
-}
 
 } // namespace
 
 Session::Session(Host host)
 : host_(std::move(host))
-, config_(host_.config)
-, captures_(host_.captures)
-, captain_(host_.captain)
 {
 }
 
 auto Session::start(std::optional<LateLogin> late) -> void
 {
-    if (auto config = readIni(config_ / "upload.ini"); config && (*config)["server"].starts_with("https://"))
-    {
-        server_ = (*config)["server"];
-        while (server_.ends_with('/'))
-        {
-            server_.pop_back();
-        }
-    }
+    server_ = serverIn(host_.config / "upload.ini").value_or(server_);
 
     try
     {
         startUploads();
         recorder_ = std::make_unique<Recorder>(RecorderOptions{
-            .dir          = captures_,
-            .captureAgent = "Memoria " MEMORIA_VERSION_TEXT,
+            .dir          = host_.captures,
+            .captureAgent = CAPTURE_AGENT,
             .policy       = [this]
             {
                 return policyFor(saveChat_);
@@ -176,7 +83,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
                 post(paint(Color::Red, "Cannot write the capture: " + why + ".") + " Nothing records until it can; Memoria tries again each minute.");
             },
         });
-        if (Importer::pending(captures_) && linked())
+        if (Importer::pending(host_.captures) && linked())
         {
             startImport(false); // an import asked for and not finished goes on, here or in the client holding its mutex
         }
@@ -197,14 +104,14 @@ auto Session::start(std::optional<LateLogin> late) -> void
     // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
-        Login login{ .character = { .characterId = late->characterId, .name = late->name }, .network = network(), .midSession = true, .clientVersion = client::lobby::version() };
+        Login login{ .character = { .characterId = late->characterId, .name = late->name }, .network = client::network(), .midSession = true, .clientVersion = client::lobby::version() };
         characterError_ = client::lobby::character(login);
         character_      = login.character;
         loggedIn_       = true;
         loggedInAs_     = login.character.characterId;
         recorder_->login(clock_.nowMs(), std::move(login));
     }
-    host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, captures_.string()));
+    host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, host_.captures.string()));
 }
 
 Session::~Session()
@@ -242,9 +149,9 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
         return;
     }
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
-    if (id == LOGIN)
+    if (id == packets::LOGIN)
     {
-        Login who{ .character = characterOf(data, size), .network = network(), .clientVersion = client::lobby::version() };
+        Login who{ .character = packets::character(data, size), .network = client::network(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
             characterError_ = client::lobby::character(who);
@@ -261,7 +168,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
         }
     }
     record(false, size, data, modified, sizeChunk, dataChunk, injected, blocked);
-    if (id == LOGOUT && size > LOGOUT_STATE && leavesGame(data[LOGOUT_STATE]))
+    if (id == packets::LOGOUT && size > packets::LOGOUT_STATE && packets::leavesGame(data[packets::LOGOUT_STATE]))
     {
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
@@ -342,7 +249,7 @@ auto Session::frame() -> void
     {
         say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
         refreshChat();
-        if (!importer_ && Importer::pending(captures_))
+        if (!importer_ && Importer::pending(host_.captures))
         {
             startImport(false);
         }
@@ -370,23 +277,13 @@ auto Session::frame() -> void
     }
 }
 
-auto Session::network() -> xicap::Network
-{
-    const auto ip = zoneServer();
-    if (ip == 0)
-    {
-        return xicap::Network::Unknown;
-    }
-    return ip >= RETAIL_FIRST && ip <= RETAIL_LAST ? xicap::Network::Retail : xicap::Network::Private;
-}
-
 // Runs until the plugin unloads; the token and paused files decide each pass whether it sends.
 auto Session::startUploads() -> void
 {
     UploadOptions options{
-        .dir    = captures_,
+        .dir    = host_.captures,
         .server = server_,
-        .config = config_,
+        .config = host_.config,
     };
     // Clients sharing an install share its captures folder; the one whose upload thread holds this mutex uploads, and Windows hands it on when that client exits.
     if (!uploadMutex_)
@@ -398,7 +295,7 @@ auto Session::startUploads() -> void
         const auto r = ::WaitForSingleObject(mutex, 0);
         return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
     };
-    uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>("Memoria/" MEMORIA_VERSION_TEXT));
+    uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>());
     uploader_->start();
 }
 
@@ -431,7 +328,7 @@ auto Session::greet() -> void
 // Once a day while unlinked: the date of the last reminder is kept across restarts.
 auto Session::remind() -> void
 {
-    const auto  path  = config_ / "reminded";
+    const auto  path  = host_.config / "reminded";
     const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
     std::string last;
     std::getline(std::ifstream(path), last);
@@ -446,9 +343,8 @@ auto Session::remind() -> void
 // Once per install, ever: while linked and captain captures wait.
 auto Session::offerImport() -> void
 {
-    std::error_code ec;
     // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && !std::filesystem::exists(config_ / "import-reminded", ec) && remindImport(config_, captain_ / "captures"))
+    if (linked() && remindImport(host_.config, host_.captain / "captures"))
     {
         post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }
@@ -458,33 +354,19 @@ auto Session::offerImport() -> void
 auto Session::startImport(bool asked) -> void
 {
     ImportOptions options{
-        .captures = captain_ / "captures",
-        .uploaded = captain_ / "captures-uploaded",
-        .state    = captures_,
+        .captures = host_.captain / "captures",
+        .uploaded = host_.captain / "captures-uploaded",
+        .state    = host_.captures,
         .server   = server_,
-        .config   = config_,
-        .mutex    = std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((captain_ / "captures").wstring())),
+        .config   = host_.config,
+        .mutex    = std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring())),
     };
     options.say = [this](std::string text)
     {
         post(std::move(text));
     };
-    importer_ = std::make_unique<Importer>(std::move(options), std::make_unique<WinHttp>("Memoria/" MEMORIA_VERSION_TEXT));
+    importer_ = std::make_unique<Importer>(std::move(options), std::make_unique<WinHttp>());
     importer_->start(asked);
-}
-
-auto Session::importLine() const -> std::string
-{
-    const auto p = importer_->progress();
-    if (p.index == 0)
-    {
-        return "Import: looking for captain captures";
-    }
-    if (p.size == 0)
-    {
-        return std::format("Import: {}/{} {}, preparing", p.index, p.count, p.character);
-    }
-    return std::format("Import: {}/{} {}, {}/{} sent", p.index, p.count, p.character, sizeText(p.sent), sizeText(p.size));
 }
 
 // Asks for a code, then polls until the player approves it on the link page.
@@ -492,7 +374,7 @@ auto Session::link() -> void
 {
     linker_ = std::jthread([this](std::stop_token stop)
                            {
-                               WinHttp http("Memoria/" MEMORIA_VERSION_TEXT);
+                               WinHttp http;
                                // Replacing or destroying linker_ joins this thread on the game thread: end a request in flight at once.
                                const std::stop_callback cancel(stop, [&http]
                                                                {
@@ -541,9 +423,9 @@ auto Session::link() -> void
                                    }
                                    if (*result)
                                    {
-                                       if (!saveLink(config_ / "token", **result))
+                                       if (!saveLink(host_.config / "token", **result))
                                        {
-                                           post(paint(Color::Red, "Not linked: cannot save the link in " + config_.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
+                                           post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
                                            return;
                                        }
                                        std::lock_guard inbox(inboxMutex_);
@@ -557,7 +439,7 @@ auto Session::link() -> void
 
 auto Session::linked() const -> std::optional<Linked>
 {
-    return loadLink(config_ / "token");
+    return loadLink(host_.config / "token");
 }
 
 auto Session::unlink(const std::string& why) -> void
@@ -568,7 +450,7 @@ auto Session::unlink(const std::string& why) -> void
 
 auto Session::hello() -> std::string
 {
-    return liveHello(character_.name, character_.world, client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
+    return liveHello(character_.name, character_.world, client::lobby::version(), CAPTURE_AGENT);
 }
 
 // A linked install saves chat when its account chose to. The request runs on its own thread; while one is in flight,
@@ -581,7 +463,7 @@ auto Session::refreshChat() -> void
     }
     chatFetch_ = std::jthread([this](const std::stop_token& stop)
                               {
-                                  WinHttp            http("Memoria/" MEMORIA_VERSION_TEXT);
+                                  WinHttp            http;
                                   std::stop_callback cancel(stop, [&]
                                                             {
                                                                 http.cancel();
@@ -605,273 +487,6 @@ auto Session::stopLive() -> void
     {
         live_->stop();
         closing_.push_back(std::move(live_));
-    }
-}
-
-auto Session::status() -> void
-{
-    say(paint(Color::Grey, "Memoria " MEMORIA_VERSION_TEXT));
-    const auto s = recorder_->status();
-    if (s.capture.empty())
-    {
-        say(paint(Color::Grey, "Waiting for a login."));
-    }
-    else
-    {
-        std::error_code ec;
-        const auto      onDisk  = std::filesystem::file_size(s.capture, ec);
-        const auto      raw     = s.bytes;
-        const auto      seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
-        const auto&     name    = character_.name;
-        const auto&     world   = character_.world;
-        say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), name, world.empty() ? "" : " on " + world, duration(seconds), count(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), sizeText(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
-    }
-    const auto version = client::lobby::version();
-    auto       client  = "Client " + (version.empty() ? paint(Color::Grey, "unknown before the first login") : version);
-    if (searchError_.empty())
-    {
-        client += std::format(" · {} search packets", count(s.search));
-    }
-    client += saveChat_ ? " · " + paint(Color::Yellow, "chat saved") + " (set on Vault)" : " · chat cut";
-    if (s.dropped > 0)
-    {
-        client += " · " + paint(Color::Yellow, std::format("{} packets dropped", count(s.dropped)));
-    }
-    say(client);
-    if (!s.session.empty())
-    {
-        say("Session: " + s.session.filename().string());
-    }
-    if (!s.sessionError.empty())
-    {
-        say(paint(Color::Red, "Session stopped: " + s.sessionError));
-    }
-    if (!searchError_.empty())
-    {
-        say(paint(Color::Red, "Search not recorded: " + searchError_));
-    }
-    if (!characterError_.empty() && loggedIn_)
-    {
-        say(paint(Color::Grey, "World unknown: " + characterError_));
-    }
-    if (!s.error.empty())
-    {
-        say(paint(Color::Red, "Cannot write the capture: " + s.error));
-    }
-    if (live_)
-    {
-        say("Live: " + live_->status());
-    }
-    if (importer_)
-    {
-        say(importLine());
-    }
-    const auto link = linked();
-    if (!link || std::filesystem::exists(config_ / "paused"))
-    {
-        say("Uploads: " + paint(Color::Yellow, link ? "paused: /memoria upload on" : "not linked: /memoria link"));
-        return;
-    }
-    // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
-    const auto  files  = uploader_->status();
-    uint64_t    behind = 0;
-    uint64_t    kept   = 0; // in recordings Mogsafe cut off: on this PC only
-    int         cut    = 0;
-    const auto* failed = static_cast<const UploadStatus*>(nullptr);
-    for (const auto& u : files)
-    {
-        if (u.refused)
-        {
-            continue;
-        }
-        if (u.ended)
-        {
-            kept += u.size > u.sent ? u.size - u.sent : 0;
-            cut += u.size > u.sent ? 1 : 0;
-            continue;
-        }
-        behind += u.size > u.sent ? u.size - u.sent : 0;
-        if (!u.error.empty() && failed == nullptr)
-        {
-            failed = &u;
-        }
-    }
-    const auto account = paint(Color::Grey, " · linked to " + link->account);
-    if (failed != nullptr)
-    {
-        say("Uploads: " + paint(Color::Red, "cannot reach Mogsafe (" + failed->error + "), retrying") + account);
-    }
-    else if (behind > 0)
-    {
-        say(std::format("Uploads: catching up, {} to send", sizeText(behind)) + account);
-    }
-    else
-    {
-        say("Uploads: " + paint(Color::Green, "all sent") + account);
-    }
-    if (kept > 0)
-    {
-        say(paint(Color::Yellow, std::format("Not in Vault: {} of {} {} the server ended early.", sizeText(kept), cut, cut == 1 ? "recording" : "recordings")) + " It stays on this PC.");
-    }
-    if (const auto error = uploader_->saveError(); !error.empty())
-    {
-        say(paint(Color::Red, "Cannot save upload progress: " + error));
-    }
-    for (const auto& u : files | std::views::filter(&UploadStatus::refused))
-    {
-        say(paint(Color::Red, std::format("Mogsafe refused {}: {}", u.name, u.error)));
-    }
-}
-
-auto Session::command(const std::vector<std::string>& args, std::string_view line) -> void
-{
-    if (!recorder_)
-    {
-        say("not recording: " + startError_);
-        return;
-    }
-    const auto sub = args.size() > 1 ? args[1] : "status";
-    if (sub == "status")
-    {
-        status();
-    }
-    else if (sub == "note" && args.size() > 2)
-    {
-        recorder_->note(clock_.nowMs(), utf8FromShiftJis(args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>()));
-        say("noted");
-    }
-    else if (sub == "session" && args.size() > 2 && args[2] == "start")
-    {
-        // The rest of the line as typed: a path can hold spaces.
-        std::string_view path(line);
-        path.remove_prefix(path.find("start") + 5);
-        path.remove_prefix((std::min)(path.find_first_not_of(" \""), path.size()));
-        path = path.substr(0, path.find_last_not_of(" \"") + 1);
-        if (path.empty())
-        {
-            say("/memoria session start <file.xicap>");
-            return;
-        }
-        // Linked, Vault keeps the session as a range of the recording, from captain's notes: no second file. Unlinked, the file is the only copy.
-        if (linked())
-        {
-            sessionInVault_ = clock_.nowMs();
-            say("session recorded in Vault, as part of this recording");
-            return;
-        }
-        recorder_->sessionStart(clock_.nowMs(), std::u8string(path.begin(), path.end()));
-        say(std::format("session to {}", path));
-    }
-    else if (sub == "session" && args.size() > 2 && args[2] == "stop")
-    {
-        if (const auto from = std::exchange(sessionInVault_, std::nullopt))
-        {
-            const auto capture = recorder_->status().capture;
-            const auto id      = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
-            say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
-                           : "Session in Vault: " + paint(Color::Cyan, captureLink(server_, id, *from, clock_.nowMs())));
-            return;
-        }
-        recorder_->sessionStop(clock_.nowMs());
-        say("session closed");
-    }
-    else if (sub == "import")
-    {
-        if (importer_)
-        {
-            say(importLine());
-        }
-        else if (!linked())
-        {
-            say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
-        }
-        else
-        {
-            createNew(config_ / "import-reminded");
-            startImport(true);
-        }
-    }
-    else if (sub == "link")
-    {
-        if (!privacyShown_)
-        {
-            privacyShown_ = true;
-            say("The link page asks you to accept Vault's privacy policy: " + paint(Color::Cyan, server_ + "/privacy"));
-        }
-        say(paint(Color::Grey, "Asking Vault for a link code..."));
-        link();
-    }
-    else if (sub == "live" && args.size() > 2 && args[2] == "off")
-    {
-        if (live_)
-        {
-            stopLive();
-            say(paint(Color::Yellow, "Live off.") + " The link has ended.");
-        }
-        else
-        {
-            say("Not live.");
-        }
-    }
-    else if (const auto link = linked(); sub == "live" && !link)
-    {
-        say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
-    }
-    else if (sub == "live" && std::filesystem::exists(config_ / "paused"))
-    {
-        say(paint(Color::Yellow, "Uploads are paused.") + " Run " + paint(Color::Cyan, "/memoria upload on") + " first.");
-    }
-    else if (sub == "live" && live_)
-    {
-        live_->reopen();
-        say("Opening the live link again.");
-    }
-    else if (sub == "live")
-    {
-        live_ = std::make_unique<Live>(server_, config_, link->token, recorder_->live(), hello(), [this](std::string text)
-                                       {
-                                           post(std::move(text));
-                                       });
-        say(paint(Color::Grey, "Asking Vault for a live link..."));
-    }
-    else if (sub == "unlink" && linked())
-    {
-        std::error_code ec;
-        if (!std::filesystem::remove(config_ / "token", ec) && ec)
-        {
-            say(paint(Color::Red, "Still linked: cannot delete " + (config_ / "token").string() + ": " + ec.message()));
-            return;
-        }
-        saveChat_ = false; // an unlinked install never saves chat
-        unlink("Unlinked");
-    }
-    else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
-    {
-        const auto      paused = config_ / "paused";
-        std::error_code ec;
-        if (args[2] == "off")
-        {
-            if (!std::ofstream{ paused })
-            {
-                say(paint(Color::Red, "Uploads still on: cannot create " + paused.string()));
-                return;
-            }
-            stopLive();
-            say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
-        }
-        else
-        {
-            if (!std::filesystem::remove(paused, ec) && ec)
-            {
-                say(paint(Color::Red, "Uploads still paused: cannot delete " + paused.string() + ": " + ec.message()));
-                return;
-            }
-            say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
-        }
-    }
-    else
-    {
-        say("/memoria status | link | unlink | live [off] | upload on|off | import | note <text> | session start <file.xicap> | session stop");
     }
 }
 
