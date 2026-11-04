@@ -9,6 +9,9 @@
 **Live**
 - `/memoria live` sends its link to Vault in a header, not in the address, so it stays out of proxy and request logs. It needs Mogsafe with the matching change.
 
+**Install**
+- Memoria creates its signing key and upload token so that only the Windows user running the game can open them; before, they took the Ashita folder's permissions, which often let every user of the PC read them. A key or token saved before keeps its old permissions. Linking now writes the token whole and swaps it in, so other clients never read half a token.
+
 ## 0.6.0-rc.3
 
 **Captures**
