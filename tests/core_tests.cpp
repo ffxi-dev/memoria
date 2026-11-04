@@ -2874,3 +2874,53 @@ TEST_CASE("a full disk is said once, ends the session with a reason, and counts 
     fs::remove_all(dir);
 }
 #endif
+
+#ifdef __linux__
+TEST_CASE("a capture whose close fails is still named by the next one, after a restart")
+{
+    const auto       dir  = tempDir();
+    auto             opts = options(dir);
+    xicap::CaptureId cut{};
+    opts.flushEvery = std::chrono::hours(1); // only the close writes
+    {
+        Recorder rec(opts);
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        rec.logout(T0 + 2); // ends the frame: the start reaches disk
+        rec.login(T0 + 3, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 4));
+        fs::path path;
+        REQUIRE(waitFor([&]
+                        {
+                            path = rec.status().capture;
+                            std::error_code ec;
+                            return !path.empty() && fs::file_size(path, ec) > xicap::HEADER_SIZE;
+                        }));
+        cut            = readCapture(path).id;
+        const int full = ::open("/dev/full", O_WRONLY);
+        REQUIRE(full >= 0);
+        for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
+        {
+            std::error_code ec;
+            if (fs::read_symlink(fd.path(), ec) == fs::canonical(path))
+            {
+                ::dup2(full, std::stoi(fd.path().filename().string()));
+            }
+        }
+        ::close(full);
+        rec.stop(); // the footer never lands
+        CHECK(!rec.status().error.empty());
+    }
+    {
+        Recorder rec(options(dir));
+        rec.login(T0 + 60'000, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 60'001));
+        rec.stop();
+    }
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 2);
+    const auto first = readCapture(files[0]).id == cut ? readCapture(files[1]) : readCapture(files[0]);
+    CHECK(first.previous == cut);
+    fs::remove_all(dir);
+}
+#endif

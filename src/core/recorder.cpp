@@ -1,6 +1,7 @@
 #include "core/recorder.h"
 
 #include "core/seed_file.h"
+#include "core/tus.h"
 
 #include <picosha2.h>
 
@@ -12,6 +13,7 @@
 #include <fstream>
 #include <random>
 #include <span>
+#include <tuple>
 #include <utility>
 
 namespace memoria
@@ -432,16 +434,7 @@ auto Recorder::close() -> void
     {
         return;
     }
-    try
-    {
-        writer_->close();
-    }
-    catch (const std::exception& error)
-    {
-        fail(error);
-    }
-    saveState(false);
-    writer_.reset();
+    finish();
     login_.reset();
     std::lock_guard lock(statusMutex_);
     status_.capture.clear();
@@ -478,6 +471,16 @@ auto Recorder::broken(const std::exception& error) -> void
 // that names this one. Mogsafe never gets this capture's last bytes; they stay in its file.
 auto Recorder::rollover() -> void
 {
+    finish();
+    reopenAt_ = {};
+    std::lock_guard lock(statusMutex_);
+    status_.capture.clear();
+}
+
+// Writes the footer and drops the writer. A footer that failed leaves the capture cut off, so the state stays open and the next capture names it.
+auto Recorder::finish() -> void
+{
+    bool closed = true;
     try
     {
         writer_->close();
@@ -485,19 +488,18 @@ auto Recorder::rollover() -> void
     catch (const std::exception& error)
     {
         fail(error);
+        closed = false;
     }
-    saveState(false);
+    saveState(!closed);
     writer_.reset();
-    reopenAt_ = {};
-    std::lock_guard lock(statusMutex_);
-    status_.capture.clear();
 }
 
+// Replaced whole: a crash mid-write leaves the old state, never an empty one.
 auto Recorder::saveState(bool open) -> void
 {
     if (login_)
     {
-        std::ofstream(stateFile(options_.dir, login_->character), std::ios::trunc) << picosha2::bytes_to_hex_string(previous_) << ' ' << (open ? "open" : "closed") << '\n';
+        std::ignore = replaceFile(stateFile(options_.dir, login_->character), std::format("{} {}\n", picosha2::bytes_to_hex_string(previous_), open ? "open" : "closed"));
     }
 }
 
