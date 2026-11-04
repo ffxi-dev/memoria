@@ -12,6 +12,9 @@
 **Install**
 - Memoria creates its signing key and upload token so that only the Windows user running the game can open them; before, they took the Ashita folder's permissions, which often let every user of the PC read them. A key or token saved before keeps its old permissions. Linking now writes the token whole and swaps it in, so other clients never read half a token.
 
+**Chat**
+- When your account turns on Save chat on Vault's Memoria page, your captures keep all chat, other players' included; off, the default, chat is cut as before. A change applies from the next capture. `/memoria status` says which.
+
 ## 0.6.0-rc.3
 
 **Captures**

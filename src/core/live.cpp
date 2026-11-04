@@ -59,9 +59,9 @@ auto liveViewers(std::string_view message) -> std::optional<int>
     return json["viewers"].get<int>();
 }
 
-auto liveFrame(const xicap::OutPacket& packet) -> std::vector<uint8_t>
+auto liveFrame(const xicap::OutPacket& packet, const xicap::ExclusionPolicy& policy) -> std::vector<uint8_t>
 {
-    const auto  stored = xicap::applyPolicy(xicap::defaultExclusionPolicy(), packet); // the policy Recorder gives its writers
+    const auto  stored = xicap::applyPolicy(policy, packet);
     const auto* data   = reinterpret_cast<const uint8_t*>(stored.data.data());
 
     std::vector<uint8_t> frame;
@@ -80,7 +80,7 @@ LiveFeed::LiveFeed(size_t maxBytes)
 {
 }
 
-auto LiveFeed::push(const xicap::OutPacket& packet) -> void
+auto LiveFeed::push(const xicap::OutPacket& packet, const xicap::ExclusionPolicy& policy) -> void
 {
     if (!open_)
     {
@@ -89,7 +89,7 @@ auto LiveFeed::push(const xicap::OutPacket& packet) -> void
     std::vector<uint8_t> frame;
     try
     {
-        frame = liveFrame(packet);
+        frame = liveFrame(packet, policy);
     }
     catch (const std::exception&) // a packet the policy refuses is a gap for viewers, never an error in the capture
     {

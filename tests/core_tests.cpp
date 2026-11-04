@@ -1,4 +1,5 @@
 #include "core/captain.h"
+#include "core/chat.h"
 #include "core/clock.h"
 #include "core/ed25519.h"
 #include "core/event_queue.h"
@@ -2690,6 +2691,101 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     CHECK(now.previous == old.id);
     CHECK(now.start == xicap::StartContext::MidSession);
     fs::remove_all(dir);
+}
+
+TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
+{
+    struct Chat final : Http
+    {
+        std::string auth;
+        int         status = 200;
+        std::string body   = R"({"save_chat":true})";
+
+        auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            CHECK(method == "GET");
+            CHECK(url == "https://mogsafe.test/v1/install/save-chat");
+            auth = headers.at(0).second;
+            return HttpResponse{ .status = status, .body = body };
+        }
+    } mogsafe;
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == true);
+    CHECK(mogsafe.auth == "Bearer t0ken");
+    mogsafe.body = R"({"save_chat":false})";
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == false);
+    for (const auto* bad : { R"({"save_chat":"yes"})", R"({})", "not json" })
+    {
+        mogsafe.body = bad;
+        CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+    }
+    mogsafe.body   = R"({"save_chat":true})";
+    mogsafe.status = 401;
+    CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+}
+
+TEST_CASE("each capture takes the chat choice it opens with")
+{
+    const auto        dir  = tempDir();
+    auto              opts = options(dir);
+    std::atomic<bool> saveChat{ false };
+    opts.policy = [&]
+    {
+        return policyFor(saveChat);
+    };
+    {
+        Recorder rec(opts);
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        REQUIRE(waitFor([&]
+                        {
+                            return !rec.status().capture.empty();
+                        }));
+        saveChat = true; // the open capture keeps its policy
+        rec.packet(gamePacket(T0 + 2));
+        rec.login(T0 + 10'000, who("Audithor", 2));
+        rec.packet(gamePacket(T0 + 10'001));
+        rec.stop();
+    }
+    std::set<std::string> policies;
+    for (const auto& path : captures(dir))
+    {
+        policies.insert(xicap::Reader(path).policy().name);
+    }
+    CHECK(policies == std::set<std::string>{ "xicap-default", "save-chat" });
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a capture that saves chat keeps it whole, in the file and the live frames; otherwise it is cut")
+{
+    for (const bool saveChat : { false, true })
+    {
+        const auto dir  = tempDir();
+        auto       opts = options(dir);
+        opts.policy     = [saveChat]
+        {
+            return policyFor(saveChat);
+        };
+        {
+            Recorder rec(opts);
+            rec.login(T0, who("Nouurs", 1));
+            rec.packet(gamePacket(T0 + 1, 0x017)); // chat, to the client
+            rec.stop();
+        }
+        size_t chat = 0;
+        {
+            xicap::Reader     r(captures(dir)[0]);
+            xicap::ReadPacket p{};
+            while (r.next(p))
+            {
+                chat = p.opcode == 0x017 ? p.data.size() : chat;
+            }
+        }
+        CHECK(chat == (saveChat ? 16 : 4));
+        const auto e     = gamePacket(T0 + 1, 0x017);
+        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }) }, policyFor(saveChat));
+        CHECK(frame.size() == 16 + (saveChat ? 16 : 4));
+        fs::remove_all(dir);
+    }
 }
 
 // Faults a player's PC can throw at a recording: each test says what Memoria must keep.

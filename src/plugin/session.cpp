@@ -160,7 +160,11 @@ auto Session::start(std::optional<LateLogin> late) -> void
             .dir          = captures_,
             .seed         = seed_,
             .captureAgent = "Memoria " MEMORIA_VERSION_TEXT,
-            .ended        = [this](const std::filesystem::path& capture)
+            .policy       = [this]
+            {
+                return policyFor(saveChat_);
+            },
+            .ended = [this](const std::filesystem::path& capture)
             {
                 if (!uploader_->ended(capture.filename().string()))
                 {
@@ -185,6 +189,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
         say("not recording: " + startError_);
         return;
     }
+    refreshChat();
     instance_    = this;
     searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
                                            {
@@ -208,8 +213,9 @@ auto Session::start(std::optional<LateLogin> late) -> void
 
 Session::~Session()
 {
-    linker_   = {}; // stops and joins
-    reminder_ = {};
+    linker_    = {}; // stops and joins
+    chatFetch_ = {};
+    reminder_  = {};
     importer_.reset(); // cancels its request and joins
     stopLive();
     closing_.clear(); // joins
@@ -249,6 +255,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
             character_      = who;
             loggedIn_       = true;
             loggedInAs_     = who.characterId;
+            refreshChat(); // a change made on Mogsafe applies from the capture after this one
             greet();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
             if (live_)
@@ -338,6 +345,7 @@ auto Session::frame() -> void
     if (arrived)
     {
         say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
+        refreshChat();
         if (!importer_ && Importer::pending(captures_))
         {
             startImport(false);
@@ -568,6 +576,33 @@ auto Session::hello() -> std::string
     return liveHello(character_.characterName.data(), character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
 }
 
+// A linked install saves chat when its account chose to. The request runs on its own thread; while one is in flight,
+// another waits for the next call.
+auto Session::refreshChat() -> void
+{
+    if (fetchingChat_.exchange(true))
+    {
+        return;
+    }
+    chatFetch_ = std::jthread([this](const std::stop_token& stop)
+                              {
+                                  WinHttp            http("Memoria/" MEMORIA_VERSION_TEXT);
+                                  std::stop_callback cancel(stop, [&]
+                                                            {
+                                                                http.cancel();
+                                                            });
+                                  if (const auto link = linked(); !link) // read here: the caller may be a packet hook
+                                  {
+                                      saveChat_ = false;
+                                  }
+                                  else if (const auto saved = fetchSaveChat(http, server_, link->token))
+                                  {
+                                      saveChat_ = *saved;
+                                  }
+                                  fetchingChat_ = false;
+                              });
+}
+
 // Ends the link without waiting: the live thread closes the connection, and a later frame joins it.
 auto Session::stopLive() -> void
 {
@@ -602,6 +637,7 @@ auto Session::status() -> void
     {
         client += std::format(" · {} search packets", count(s.search));
     }
+    client += saveChat_ ? " · " + paint(Color::Yellow, "chat saved") + " (set on Vault)" : " · chat cut";
     if (s.dropped > 0)
     {
         client += " · " + paint(Color::Yellow, std::format("{} packets dropped", count(s.dropped)));
@@ -816,6 +852,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
             say(paint(Color::Red, "Still linked: cannot delete " + (config_ / "token").string() + ": " + ec.message()));
             return;
         }
+        saveChat_ = false; // an unlinked install never saves chat
         unlink("Unlinked");
     }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))

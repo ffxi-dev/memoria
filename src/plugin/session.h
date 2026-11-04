@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/captain.h"
+#include "core/chat.h"
 #include "core/clock.h"
 #include "core/link.h"
 #include "core/recorder.h"
@@ -104,6 +105,7 @@ private:
     auto importLine() const -> std::string;
     auto hello() -> std::string;
     auto stopLive() -> void;
+    auto refreshChat() -> void; // asks Mogsafe whether the linked account saves chat, off the game thread
 
     Host                               host_;
     std::filesystem::path              config_;
@@ -130,7 +132,10 @@ private:
     bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
     std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
     uint32_t                           loggedInAs_{ 0 };
-    std::optional<ChunkKey>            lastChunk_[2]; // per direction
+    std::optional<ChunkKey>            lastChunk_[2];      // per direction
+    std::atomic<bool>                  saveChat_{ false }; // for the next capture: the linked account's choice
+    std::atomic<bool>                  fetchingChat_{ false };
+    std::jthread                       chatFetch_;
     std::jthread                       reminder_;
     std::jthread                       linker_; // last: destroyed first, before what its thread uses
 };

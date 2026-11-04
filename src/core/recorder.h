@@ -26,6 +26,8 @@ struct RecorderOptions
     std::chrono::milliseconds flushEvery{ 5000 };
     std::chrono::milliseconds drainEvery{ 50 };
     size_t                    queueBytes = 64 * 1024 * 1024;
+    // Asked on the writer thread as each capture opens: the policy for it, its session file, and its live frames. Empty: the default.
+    std::function<xicap::ExclusionPolicy()> policy;
     // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then
     // closes, and the next packet starts a new one that names it, as after a write error.
     std::function<bool(const std::filesystem::path& capture)> ended;
@@ -112,6 +114,7 @@ private:
     std::optional<Login>                  login_; // kept after a write error, to reopen
     std::chrono::steady_clock::time_point reopenAt_{};
     xicap::CaptureId                      previous_{};
+    xicap::ExclusionPolicy                policy_ = xicap::defaultExclusionPolicy(); // the open capture's
     std::chrono::steady_clock::time_point lastFlush_{};
     bool                                  failing_{}; // the player was told; cleared once a capture writes again
 
