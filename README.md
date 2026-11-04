@@ -1,44 +1,76 @@
 # Memoria
 
-An Ashita v4 plugin for the retail FFXI client. It records every packet of every session to an xicap capture and uploads it to Vault's archive, Mogsafe, as it records. Nothing to start or stop: once loaded, it records.
+Memoria is an [Ashita v4](https://ashitaxi.com) plugin for the retail Final Fantasy XI client. Once loaded, it records every packet of every session to an [xicap](https://github.com/ffxi-dev/xicap) capture under `<Ashita>/captures/memoria/`. When you link it to an account on [Mogsafe](https://mogsafe.sruon.dev), Vault's capture archive, it also uploads each capture as it records. There is nothing to start or stop.
 
-It replaces the earlier Memoria plugin (`Ashita4-Memoria`) and captain's PacketLogger.
+## Install
 
-Memoria records every packet on retail, uploads it to Mogsafe as it goes, and streams it live to Lens. The plan is in `ffxi-dev/vault`, `openspec/changes/add-memoria/`.
+Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/releases), put it in `<Ashita>/plugins/`, and run `/load memoria` in game, or add it to your Ashita boot script.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `/memoria` or `/memoria status` | Shows what is recording, the client version, and how far uploads have got. |
+| `/memoria link` | Links this install to your Mogsafe account. Memoria opens the link page and shows a code to enter there. |
+| `/memoria unlink` | Stops uploading. Captures stay on this PC. |
+| `/memoria upload off` and `on` | Pauses and resumes uploads. |
+| `/memoria live` | Streams the capture to a web page as it records. `/memoria live off` ends it. |
+| `/memoria import` | Uploads the captures captain's PacketLogger left behind. |
+| `/memoria note <text>` | Adds a note to the capture at this moment. |
+| `/memoria session start <file>` and `stop` | Marks a stretch of play. See below. |
+
+Several clients can share one Ashita folder. They share its link and pause, and one of them uploads for all. While unlinked, Memoria reminds you once a day at login that your captures stay on this PC.
+
+## Recording
+
+A capture starts at the first login and runs until another character logs in or Memoria unloads; logging out and back in on the same character continues it. If Memoria loads while you are already in game, it records from there and marks the capture as starting mid-session. Search server traffic is recorded as well.
+
+Chat text is zeroed in place, so chat packets keep their length. A linked account that turns on **Save chat** on Mogsafe's Memoria page keeps all chat instead, other players' included. A change applies from the next capture, and `/memoria status` says which applies. An unlinked install never saves chat.
+
+`/memoria session start <file>` and `/memoria session stop` mark a stretch of play, as captain's `/cap` does. Linked, the session is a range of the recording on Mogsafe, and `stop` prints its link. Unlinked, Memoria writes the session to `<file>` as a second capture; it never replaces an existing file.
+
+## Uploads
+
+Memoria sends each capture to Mogsafe as it grows and resumes after a crash, a restart or a lost connection without sending a byte twice. It closes a capture's upload once the capture is complete. At unload it waits at most three seconds for the last bytes.
+
+Mogsafe ends a recording that has sent nothing for five minutes. The part it never got goes up later as a capture of its own that names the first.
+
+To use another Mogsafe server, put `server = https://...` in `<Ashita>/config/memoria/upload.ini`.
 
 ## Live
 
-`/memoria live` opens Lens on the capture as it records, for anyone with the link. It needs `/memoria link` first. Memoria asks Mogsafe for a link, opens it in your browser, and sends packets over a WebSocket only while someone watches. Viewers see what the capture holds, so chat stays stubbed. `/memoria live` again reopens the link; `/memoria live off` ends it, as do `/memoria unlink` and `/memoria upload off` in any client sharing the install, and unloading; while uploads are paused, `/memoria live` waits for `/memoria upload on`. A link lasts at most 12 hours. The requirements are in `ffxi-dev/vault`, `openspec/specs/live-viewing/`, and the protocol in `openspec/changes/archive/2026-10-31-add-memoria-live/design.md`.
-
-## Chat
-
-A linked install saves chat when its account turns on **Save chat** on Mogsafe's Memoria page (`/link`); imports follow the same choice. Memoria asks Mogsafe at load, at each login and when it links, and a change applies from the next capture. Off, the default, captures carry xicap's default exclusion policy, which cuts chat; on, they carry none and keep all chat, other players' included. An unlinked install never saves chat. `/memoria status` says which.
+`/memoria live` needs a linked install. Mogsafe gives Memoria a link that anyone can open while it lasts, at most 12 hours, and Memoria opens it in your browser. Packets go out only while someone watches, and viewers see what the capture holds, so chat stays zeroed unless you save it. `/memoria live` again reopens the page. `/memoria live off`, `/memoria unlink`, `/memoria upload off` and unloading all end the link.
 
 ## Captain imports
 
-`/memoria import` uploads the captures captain's PacketLogger left in `addons/captain/captures/`, any folder there holding `manifest.txt` and `PacketLogger/full.log`, to Mogsafe under the linked account. It needs `/memoria link` first, and runs in the background: chat shows each capture's result, and `/memoria status` shows progress. It sends only `full.log` and `manifest.txt`, and `SearchLog/search.log` when captain's SearchLog wrote one, compressed. A folder Vault holds without its search log gains it under the same capture. A log changed in the last 10 minutes waits for a later import. Once Mogsafe holds a log, whether this import sent it or it was there already, Memoria moves its folder to the same path under `addons/captain/captures-uploaded/`. A folder Mogsafe refuses stays where it is. An import cut short by a crash, a restart, or a lost connection goes on by itself at the next start or link; `/memoria upload off` pauses it.
+`/memoria import` uploads the captures captain's PacketLogger left in `addons/captain/captures/` to Mogsafe under your account. Each folder that holds `manifest.txt` and `PacketLogger/full.log` is one capture. Memoria compresses and sends `full.log` with the manifest, and `SearchLog/search.log` when there is one; a capture already on Mogsafe without its search log gains it. A log changed in the last 10 minutes waits for a later import.
 
-While linked and captures wait, Memoria says once, at a login or link, to run `/memoria import`. It never says it again on that install.
+The import runs in the background: chat shows each capture's result, and `/memoria status` shows progress. Once Mogsafe holds a log, Memoria moves its folder to the same path under `addons/captain/captures-uploaded/`. A folder Mogsafe refuses stays where it is. An import cut short goes on by itself at the next start or link, and `/memoria upload off` pauses it.
+
+While such captures wait, Memoria reminds you once per install, at a login or link.
 
 ## Build
 
-From an MSVC x86 developer shell, with `ASHITA4_SDK_PATH` pointing at Ashita's `plugins/sdk`:
+The plugin needs 32-bit MSVC or clang-cl and the Ashita v4 SDK. From an MSVC x86 developer shell, with `ASHITA4_SDK_PATH` pointing at Ashita's `plugins/sdk`:
 
 ```
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMEMORIA_OUTPUT_DIR=<Ashita>/plugins
 cmake --build build --target memoria
 ```
 
-Then `/load memoria` in game.
-
-CI builds the same DLL on Linux with clang-cl, in the `vault-msvc` image from `ffxi-dev/vault`'s `msvc/` folder.
-
-The core's tests build anywhere:
+The core (recording, uploads, linking, imports) has no Ashita code, and its tests build on Windows and Linux:
 
 ```
 cmake -S . -B build -G Ninja -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
 cmake --build build --target memoria_core_tests && ctest --test-dir build
 ```
+
+## Layout
+
+- `src/core/`: the event queue, clock, recorder, uploader, linking, live feed and captain importer. No Ashita headers.
+- `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe.
+- `tests/`: the core's tests, one file per module, with shared fakes in `support.h`.
+- `cmake/FindAshitaSDK.cmake`: the Ashita team's CMake helper, unchanged.
 
 ## Licence
 

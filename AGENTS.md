@@ -1,6 +1,6 @@
 # Memoria repository rules
 
-These rules apply to every contributor, human or agent. `CLAUDE.md` imports this file.
+These rules apply to every contributor, human or agent.
 
 ## Source of truth
 
@@ -8,8 +8,9 @@ A change starts as an OpenSpec change in `openspec/`. Code, specs, design, and t
 
 ## Layout
 
-- `src/core/`: the event queue, clock, recording, linking, and uploads. No Ashita headers: it builds and is tested on Linux and Windows.
-- `src/plugin/`: `session.*`, everything Memoria does in the client, with no framework header, and `ashita.*`, the Ashita v4 host that hands Ashita's callbacks to the session. 32-bit Windows only.
+- `src/core/`: the event queue, clock, recorder, uploader (`uploader.*`, with `uploads.txt` in `upload_state.*`), linking, live feed, and captain importer (`captain.*` finds folders, `importer.*` uploads them). No Ashita headers: it builds and is tested on Linux and Windows.
+- `src/plugin/`: `session.*`, everything Memoria does in the client, with no framework header; `commands.cpp`, the `/memoria` commands and status; `packets.*` and `client.*`, what Memoria reads from packets and from FFXiMain.dll; and `ashita.*`, the Ashita v4 host that hands Ashita's callbacks to the session. 32-bit Windows only.
+- `tests/`: one file per core module, with shared fakes in `support.h`.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's helper, unchanged.
 
 ## Before every commit
