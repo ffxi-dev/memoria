@@ -91,6 +91,7 @@ private:
     auto onSession(Op op) -> void;
     auto sessionFailed(const std::exception& error) -> void;
     auto close() -> void;
+    auto finish() -> void;
     auto fail(const std::exception& error) -> void;
     auto broken(const std::exception& error) -> void;
     auto rollover() -> void;
