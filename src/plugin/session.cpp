@@ -769,6 +769,10 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     {
         say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
     }
+    else if (sub == "live" && std::filesystem::exists(config_ / "paused"))
+    {
+        say(paint(Color::Yellow, "Uploads are paused.") + " Run " + paint(Color::Cyan, "/memoria upload on") + " first.");
+    }
     else if (sub == "live" && live_)
     {
         live_->reopen();
@@ -776,7 +780,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     }
     else if (sub == "live")
     {
-        live_ = std::make_unique<Live>(server_, link->token, recorder_->live(), hello(), [this](std::string text)
+        live_ = std::make_unique<Live>(server_, config_, link->token, recorder_->live(), hello(), [this](std::string text)
                                        {
                                            post(std::move(text));
                                        });

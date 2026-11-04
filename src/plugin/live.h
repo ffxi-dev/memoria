@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -20,7 +21,8 @@ auto browse(const std::string& url) -> void;
 class Live
 {
 public:
-    Live(std::string server, std::string installToken, LiveFeed& feed, std::string hello, std::function<void(std::string)> post);
+    // config holds the token and paused files: a pause or unlink in any client sharing the install ends the link.
+    Live(std::string server, std::filesystem::path config, std::string installToken, LiveFeed& feed, std::string hello, std::function<void(std::string)> post);
     ~Live(); // joins: stop() first to end the link without waiting
 
     Live(const Live&)                    = delete;
@@ -47,6 +49,7 @@ private:
     auto helloNow() const -> std::string;
 
     std::string                      server_;
+    std::filesystem::path            config_;
     std::string                      installToken_;
     LiveFeed&                        feed_;
     uint64_t                         owner_; // of the feed
