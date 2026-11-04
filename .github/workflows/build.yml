@@ -44,7 +44,7 @@ jobs:
           run: |
             cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="$PWD/out"
             cmake --build build --target memoria
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: memoria
           path: out/Memoria.dll
