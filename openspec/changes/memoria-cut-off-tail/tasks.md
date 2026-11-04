@@ -7,4 +7,4 @@
 
 ## 2. xicap
 
-- [ ] 2.1 A public call that writes the frames of a capture starting with the first frame not wholly within its first `from` bytes as a new capture continuing it: a new capture id, the source's id as previous, start context mid-session, the source's header metadata, signed with the given seed, the live frame policy, the scene the first frame needs carried as Mogsafe's cuts carry it, and frames cut off at the end left out
+- [ ] 2.1 xicap's `continueFrom(source, fromByte, out, seed, policy)`: the frames of a capture from the first frame not wholly within its first `fromByte` bytes, as a new capture continuing it (a new capture id, the source's id as previous, start context mid-session, the source's header metadata, signed with `seed`), frames cut off at the end left out; no packets carried from before `fromByte`
