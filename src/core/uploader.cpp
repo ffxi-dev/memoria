@@ -19,6 +19,18 @@ constexpr uint64_t CHUNK_SIZE = Tus::CHUNK_SIZE;
 constexpr auto     STATE_FILE = "uploads.txt";
 constexpr auto     MAX_WAIT   = std::chrono::minutes(5);
 
+// A refusal's body as one line of the state file.
+auto oneLine(std::string text) -> std::string
+{
+    std::ranges::replace_if(text, [](char c)
+                            {
+                                return c == '\t' || c == '\r' || c == '\n';
+                            },
+                            ' ');
+    const auto last = text.find_last_not_of(' ');
+    return last == std::string::npos ? std::string{} : text.substr(0, last + 1);
+}
+
 auto readRange(const std::filesystem::path& path, uint64_t offset, uint64_t n) -> std::optional<std::vector<uint8_t>>
 {
     std::ifstream        in(path, std::ios::binary);
@@ -138,9 +150,9 @@ auto Uploader::pass() -> std::optional<std::string>
             f.error = *error;
             first   = first.value_or(name + ": " + *error);
         }
-        else if (f.refused != f.size)
+        else
         {
-            f.error.clear(); // a refusal stays until the file changes
+            f.error.clear();
         }
         std::lock_guard lock(mutex_);
         files_[name] = f;
@@ -187,7 +199,8 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
         }
         f.url     = tus_.location(*res);
         f.refused = 0;
-        f.sent    = 0;
+        f.reason.clear();
+        f.sent = 0;
         {
             std::lock_guard lock(mutex_);
             files_[path.filename().string()] = f;
@@ -300,7 +313,7 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
             return std::nullopt;
         case 422: // refused for good: keep the file, stop sending it
             f.refused = size;
-            f.error   = res->body;
+            f.reason  = oneLine(res->body);
             return std::nullopt;
         default:
             return std::format("close: {}", res->status);
@@ -330,7 +343,7 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     return tus_.request(method, url, std::move(headers), body);
 }
 
-// One line per file: name, url, closed (1, 0, or ended), refused, and bytes the server holds, separated by tabs. Lines from before the last field read as nothing sent.
+// One line per file: name, url, closed (1, 0, or ended), refused, bytes the server holds, and why Mogsafe refused it, separated by tabs.
 auto Uploader::saved() const -> std::map<std::string, File>
 {
     std::map<std::string, File> files;
@@ -339,11 +352,12 @@ auto Uploader::saved() const -> std::map<std::string, File>
     while (std::getline(in, line))
     {
         std::istringstream fields(line);
-        std::string        name, url, closed, refused, sent;
+        std::string        name, url, closed, refused, sent, reason;
         if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, closed, '\t') && std::getline(fields, refused, '\t'))
         {
-            std::getline(fields, sent);
-            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended", .refused = parseU64(refused).value_or(0), .sent = parseU64(sent).value_or(0) };
+            std::getline(fields, sent, '\t');
+            std::getline(fields, reason);
+            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended", .refused = parseU64(refused).value_or(0), .reason = reason, .sent = parseU64(sent).value_or(0) };
         }
     }
     return files;
@@ -363,10 +377,11 @@ auto Uploader::save() -> std::optional<std::string>
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            text += std::format("{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.ended ? "ended"
-                                                                                              : "0",
+            text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.ended ? "ended"
+                                                                                                  : "0",
                                 f.refused,
-                                f.sent);
+                                f.sent,
+                                f.reason);
         }
     }
     const auto error = replaceFile(options_.dir / STATE_FILE, text);
@@ -431,9 +446,10 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         {
             continue;
         }
-        const auto& f    = files[entry.path().filename().string()];
-        const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || f.ended ? size : f.sent, .size = size, .refused = !f.closed && f.refused == size && !f.error.empty(), .error = f.error });
+        const auto& f       = files[entry.path().filename().string()];
+        const auto  size    = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
+        const bool  refused = !f.closed && f.refused == size && !f.reason.empty();
+        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || f.ended ? size : f.sent, .size = size, .refused = refused, .error = refused ? f.reason : f.error });
     }
     return out;
 }

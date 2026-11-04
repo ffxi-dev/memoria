@@ -64,6 +64,7 @@ private:
         bool                                  closed{};
         bool                                  ended{};   // Mogsafe answered 410: cut off or refused
         uint64_t                              refused{}; // size at the last refused close
+        std::string                           reason;    // why Mogsafe refused it for good, kept in the state file
         uint64_t                              size{};
         uint64_t                              sent{};
         std::chrono::steady_clock::time_point seen{}; // when size last changed
