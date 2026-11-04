@@ -25,6 +25,7 @@ auto append(std::vector<uint8_t>& out, T value) -> void
 } // namespace
 
 auto startLive(Http& http, const std::string& server, const std::string& installToken) -> std::expected<LiveLink, std::string>
+try
 {
     const auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
     if (!res)
@@ -37,6 +38,10 @@ auto startLive(Http& http, const std::string& server, const std::string& install
         return std::unexpected(std::format("Mogsafe answered {}", res->status));
     }
     return LiveLink{ .token = body.value("token", ""), .url = body.value("url", "") };
+}
+catch (const nlohmann::json::exception&) // a field of the wrong type
+{
+    return std::unexpected("Mogsafe sent a malformed answer");
 }
 
 auto liveHello(std::string_view character, std::string_view world, std::string_view clientVersion, std::string_view agent) -> std::string
