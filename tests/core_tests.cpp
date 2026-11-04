@@ -3061,9 +3061,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
         Recorder rec(opts);
         rec.login(T0, who("Nouurs", 1));
         rec.packet(gamePacket(T0 + 1));
-        rec.logout(T0 + 2); // ends the frame: the start reaches disk
-        rec.login(T0 + 3, who("Nouurs", 1));
-        rec.packet(gamePacket(T0 + 4));
+        rec.packet(gamePacket(T0 + 6'000)); // over the live preset's 5 s a frame: the first frame reaches disk
         fs::path path;
         REQUIRE(waitFor([&]
                         {
