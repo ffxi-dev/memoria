@@ -49,8 +49,10 @@ auto readUploads(const std::filesystem::path& path) -> UploadFiles
         std::string        refused;
         std::string        sent;
         std::string        reason;
-        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, state, '\t') && std::getline(fields, refused, '\t') && std::getline(fields, sent, '\t'))
+        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, state, '\t') && std::getline(fields, refused, '\t'))
         {
+            // 0.5 wrote neither of the last two.
+            std::getline(fields, sent, '\t');
             std::getline(fields, reason);
             files[name] = {
                 .url     = url,
