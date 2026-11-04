@@ -884,6 +884,21 @@ TEST_CASE("a client that is not uploading reports what the uploading one sent")
     CHECK(status[0].size == 600);
 }
 
+TEST_CASE("a recording's Mogsafe id is the end of its upload's URL, in every client sharing the install")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    auto        sender = uploader(dir, server);
+    auto        other  = uploader(dir, server);
+    CHECK(sender->recordingId("a.xicap").empty()); // no upload yet
+    append(dir / "a.xicap", std::string(500, 'x'));
+    CHECK(!sender->pass());
+    CHECK(sender->recordingId("a.xicap") == "1");
+    CHECK(other->recordingId("a.xicap") == "1"); // read from uploads.txt
+    CHECK(sender->recordingId("b.xicap").empty());
+    fs::remove_all(dir);
+}
+
 TEST_CASE("a restart resumes the same upload")
 {
     const auto  dir  = tempDir();
