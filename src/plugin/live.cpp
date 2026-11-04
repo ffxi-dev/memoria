@@ -36,7 +36,7 @@ struct Socket
     std::string    error;
 };
 
-auto upgrade(HINTERNET session, const std::string& url, const std::string& token) -> Socket
+auto upgrade(HINTERNET session, const std::string& url, const std::string& headers) -> Socket
 {
     Socket s;
     auto   open = openRequest(session, "GET", url);
@@ -45,10 +45,10 @@ auto upgrade(HINTERNET session, const std::string& url, const std::string& token
         s.error = open.error();
         return s;
     }
-    s.connection        = std::move(open->connection);
-    const auto& req     = open->request;
-    const auto  headers = wide("Authorization: Bearer " + token);
-    if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), headers.c_str(), DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+    s.connection         = std::move(open->connection);
+    const auto& req      = open->request;
+    const auto  wheaders = wide(headers);
+    if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), wheaders.c_str(), DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(req.get(), nullptr))
     {
         s.error = std::format("WinHTTP error {}", GetLastError());
@@ -87,10 +87,10 @@ auto sendText(HINTERNET ws, std::string_view text) -> bool
 }
 
 // Connects only to end the link, for a player who turned live off while the socket was down.
-auto sendOff(HINTERNET session, const std::string& url, const std::string& token) -> void
+auto sendOff(HINTERNET session, const std::string& url, const std::string& headers) -> void
 {
     WinHttpSetTimeouts(session, 3'000, 3'000, 3'000, 3'000);
-    const auto s = upgrade(session, url, token);
+    const auto s = upgrade(session, url, headers);
     if (!s.ws)
     {
         return;
@@ -208,11 +208,13 @@ auto Live::run(const std::stop_token& stop) -> void
     {
         WinHttpSetTimeouts(session.get(), 10'000, 10'000, 10'000, 10'000);
     }
-    const auto url     = server_ + "/v1/live/send?token=" + link->token;
+    const auto url = server_ + "/v1/live/send";
+    // The link in a header, not the URL, which proxies and Cloudflare may log.
+    const auto headers = "Authorization: Bearer " + installToken_ + "\r\nMogsafe-Live-Link: " + link->token;
     auto       backoff = std::chrono::milliseconds(1s);
     while (!stop.stop_requested())
     {
-        auto s = upgrade(session.get(), url, installToken_);
+        auto s = upgrade(session.get(), url, headers);
         if (s.ws)
         {
             state_          = State::Connected;
@@ -245,7 +247,7 @@ auto Live::run(const std::stop_token& stop) -> void
     }
     if (stop.stop_requested() && !offSent_)
     {
-        sendOff(session.get(), url, installToken_);
+        sendOff(session.get(), url, headers);
     }
     finished_ = true;
 }
