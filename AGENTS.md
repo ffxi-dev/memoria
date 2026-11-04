@@ -20,7 +20,7 @@ cmake -S . -B build -G Ninja -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
 cmake --build build --target memoria_core_tests && ctest --test-dir build --output-on-failure
 ```
 
-The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. CI runs both on GitHub's runners: `test.yml` runs the core's tests on Linux and as 32-bit Windows programs, and `build.yml` builds the DLL with MSVC. Code must build with both MSVC and clang-cl. Run clang-format (v23, as CI does) on every C++ file you change. Commit in small steps; the message says why.
+The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. CI runs both on GitHub's runners: `test.yml` runs the core's tests on Linux and as 32-bit Windows programs, and `build.yml` builds the DLL with MSVC. Code must build with MSVC. Run clang-format (v23, as CI does) on every C++ file you change. Commit in small steps; the message says why.
 
 ## Rules
 

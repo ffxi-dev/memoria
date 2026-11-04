@@ -10,8 +10,8 @@ Lets Memoria send a player's old captain captures to Mogsafe, under the account 
 A captain capture waiting to upload SHALL be any folder, at any depth under `<Ashita>/addons/captain/captures/`, that holds `manifest.txt` and `PacketLogger/full.log`. A folder whose `full.log` changed in the last 10 minutes SHALL be left for later, since captain may still be writing it.
 
 #### Scenario: Nested folders
-- **WHEN** captain's captures folder holds `Mining/test_2026-8-4/Bob/manifest.txt` and `Mining/test_2026-8-4/Bob/PacketLogger/full.log`
-- **THEN** Memoria counts one capture waiting, for Bob
+- **WHEN** captain's captures folder holds `Mining/test_2026-8-4/Mirabeth/manifest.txt` and `Mining/test_2026-8-4/Mirabeth/PacketLogger/full.log`
+- **THEN** Memoria counts one capture waiting, for Mirabeth
 
 #### Scenario: A session made with Memoria
 - **WHEN** a character folder holds `manifest.txt` and `memoria.xicap` but no `PacketLogger/full.log`
@@ -129,8 +129,8 @@ A capture Mogsafe refuses SHALL stay in captain's captures folder and SHALL be r
 Once Mogsafe holds a capture's log, Memoria SHALL move its folder to the same relative path under `<Ashita>/addons/captain/captures-uploaded/`, remove parent folders this leaves empty, and never consider it again. Memoria SHALL never read that folder, and SHALL never delete a capture.
 
 #### Scenario: After upload
-- **WHEN** `2026-8-4_23_54/Bob` finishes uploading
-- **THEN** it is at `addons/captain/captures-uploaded/2026-8-4_23_54/Bob` and later imports and reminders do not count it
+- **WHEN** `2026-8-4_23_54/Mirabeth` finishes uploading
+- **THEN** it is at `addons/captain/captures-uploaded/2026-8-4_23_54/Mirabeth` and later imports and reminders do not count it
 
 #### Scenario: Crash between upload and move
 - **WHEN** the game crashes after Mogsafe accepted a log but before its folder moved

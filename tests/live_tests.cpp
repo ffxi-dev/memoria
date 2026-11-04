@@ -77,7 +77,7 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
         Recorder   rec(options(dir));
         const auto owner = rec.live().claim();
         rec.live().open(owner, true);
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1, 0x017)); // chat to the client
         auto said           = gamePacket(T0 + 2, 0x0B5);
         said.clientToServer = true;
@@ -230,6 +230,6 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
     CHECK(liveViewers(R"({"viewers":2})") == 2);
     CHECK(!liveViewers(R"({"sender":true})"));
     CHECK(!liveViewers("not json"));
-    CHECK(nlohmann::json::parse(liveHello("Alice", "Asura", "30261006_0", "Memoria 0.6.0")) ==
-          nlohmann::json::parse(R"({"hello":{"character":"Alice","world":"Asura","client_version":"30261006_0","agent":"Memoria 0.6.0"}})"));
+    CHECK(nlohmann::json::parse(liveHello("Kalnor", "Asura", "30261006_0", "Memoria 0.6.0")) ==
+          nlohmann::json::parse(R"({"hello":{"character":"Kalnor","world":"Asura","client_version":"30261006_0","agent":"Memoria 0.6.0"}})"));
 }

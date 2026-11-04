@@ -51,7 +51,7 @@ While such captures wait, Memoria reminds you once per install, at a login or li
 
 ## Build
 
-The plugin needs 32-bit MSVC or clang-cl and the Ashita v4 SDK. From an MSVC x86 developer shell, with `ASHITA4_SDK_PATH` pointing at Ashita's `plugins/sdk`:
+The plugin needs 32-bit MSVC and the Ashita v4 SDK. From an MSVC x86 developer shell, with `ASHITA4_SDK_PATH` pointing at Ashita's `plugins/sdk`:
 
 ```
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMEMORIA_OUTPUT_DIR=<Ashita>/plugins
@@ -76,4 +76,4 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 ## Licence
 
 Copyright (C) 2026 sruon. Memoria is free software under the GNU General Public License, version 3; see `LICENSE`.
-`cmake/FindAshitaSDK.cmake` is the Ashita team's, under GPL version 3 or later.
+`cmake/FindAshitaSDK.cmake` is the Ashita team's, under GPL version 3 or later. `THIRD_PARTY_NOTICES.md` lists the code from other projects that `Memoria.dll` includes, with their licences.

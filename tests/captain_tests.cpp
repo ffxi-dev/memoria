@@ -101,20 +101,20 @@ struct Install
 TEST_CASE("captain captures are found at any depth, and not inside one")
 {
     Install in;
-    captainFolder(in.captures, "Mining/test_2026-8-4/Bob", "log");
-    captainFolder(in.captures, "2026-8-4_23_54/Bob", "log");
-    captainFolder(in.captures, "2026-8-4_23_54/Bob/inner/Nested", "log"); // inside a match: not searched
-    fs::create_directories(in.captures / "2026-8-5/Bob");                 // a session made with Memoria
-    std::ofstream(in.captures / "2026-8-5/Bob/manifest.txt") << MANIFEST;
-    std::ofstream(in.captures / "2026-8-5/Bob/memoria.xicap") << "x";
+    captainFolder(in.captures, "Mining/test_2026-8-4/Mirabeth", "log");
+    captainFolder(in.captures, "2026-8-4_23_54/Mirabeth", "log");
+    captainFolder(in.captures, "2026-8-4_23_54/Mirabeth/inner/Nested", "log"); // inside a match: not searched
+    fs::create_directories(in.captures / "2026-8-5/Mirabeth");                 // a session made with Memoria
+    std::ofstream(in.captures / "2026-8-5/Mirabeth/manifest.txt") << MANIFEST;
+    std::ofstream(in.captures / "2026-8-5/Mirabeth/memoria.xicap") << "x";
     fs::create_directories(in.captures / "tracker"); // an addon's own data
     std::ofstream(in.captures / "tracker/data.json") << "{}";
 
     const auto found = findCaptain(in.captures);
     REQUIRE(found.size() == 2);
-    CHECK(found[0].folder == "2026-8-4_23_54/Bob");
-    CHECK(found[1].folder == "Mining/test_2026-8-4/Bob");
-    CHECK(found[1].character == "Bob");
+    CHECK(found[0].folder == "2026-8-4_23_54/Mirabeth");
+    CHECK(found[1].folder == "Mining/test_2026-8-4/Mirabeth");
+    CHECK(found[1].character == "Mirabeth");
     CHECK(found[1].size == 3);
     CHECK(!found[1].growing);
     CHECK(findCaptain(in.dir / "no such folder").empty());
@@ -123,8 +123,8 @@ TEST_CASE("captain captures are found at any depth, and not inside one")
 TEST_CASE("a full.log changed in the last 10 minutes is left for later")
 {
     Install in;
-    captainFolder(in.captures, "a/Bob", "log", MANIFEST, std::chrono::minutes(2));
-    captainFolder(in.captures, "b/Bob", "log", MANIFEST, std::chrono::minutes(11));
+    captainFolder(in.captures, "a/Mirabeth", "log", MANIFEST, std::chrono::minutes(2));
+    captainFolder(in.captures, "b/Mirabeth", "log", MANIFEST, std::chrono::minutes(11));
     const auto found = findCaptain(in.captures);
     REQUIRE(found.size() == 2);
     CHECK(found[0].growing);
@@ -132,9 +132,9 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
 
     FakeMogsafe server;
     in.importer(server)->run();
-    CHECK(in.saidAny("Captain 1/2 a/Bob: still being written; skipped."));
-    CHECK(fs::exists(in.captures / "a/Bob"));
-    CHECK(fs::exists(in.uploaded / "b/Bob"));
+    CHECK(in.saidAny("Captain 1/2 a/Mirabeth: still being written; skipped."));
+    CHECK(fs::exists(in.captures / "a/Mirabeth"));
+    CHECK(fs::exists(in.uploaded / "b/Mirabeth"));
     CHECK(server.creates == 1);
 }
 
@@ -164,7 +164,7 @@ TEST_CASE("a captain import sends full.log compressed with its manifest, then mo
 {
     Install    in;
     const auto log = std::string(5000, 'p') + noise(3000);
-    const auto dir = captainFolder(in.captures, "2026-8-4_23_54/Bob", log);
+    const auto dir = captainFolder(in.captures, "2026-8-4_23_54/Mirabeth", log);
     std::ofstream(dir / "memoria.xicap") << "not sent";
     fs::create_directories(dir / "PacketLogger" / "incoming");
     std::ofstream(dir / "PacketLogger" / "incoming" / "0x00A.log") << "not sent";
@@ -177,19 +177,19 @@ TEST_CASE("a captain import sends full.log compressed with its manifest, then mo
     CHECK(unzstd(u.data) == log);
     CHECK(u.meta["format"] == "captain");
     CHECK(u.meta["manifest"] == MANIFEST);
-    CHECK(u.meta["character"] == "Bob");
-    CHECK(u.meta["folder"] == "2026-8-4_23_54/Bob");
+    CHECK(u.meta["character"] == "Mirabeth");
+    CHECK(u.meta["folder"] == "2026-8-4_23_54/Mirabeth");
     CHECK(u.meta["size"] == "8000");
     CHECK(u.meta["crc32"].size() == 8);
     CHECK(!u.meta.contains("zip"));
 
     CHECK(!fs::exists(in.captures / "2026-8-4_23_54")); // emptied parent removed
     CHECK(fs::exists(in.captures));
-    CHECK(fs::exists(in.uploaded / "2026-8-4_23_54/Bob/PacketLogger/incoming/0x00A.log"));
+    CHECK(fs::exists(in.uploaded / "2026-8-4_23_54/Mirabeth/PacketLogger/incoming/0x00A.log"));
     CHECK(!Importer::pending(in.state));
     CHECK(!fs::exists(in.state / "imports"));
     CHECK(in.said.front() == "Uploading 1 captain capture (7.8 KB) in the background.");
-    CHECK(in.saidAny("Captain 1/1 2026-8-4_23_54/Bob: uploaded."));
+    CHECK(in.saidAny("Captain 1/1 2026-8-4_23_54/Mirabeth: uploaded."));
     CHECK(in.said.back() == "Captain import done: 1 uploaded, 0 already in Vault, 0 refused. Uploaded folders are in addons/captain/captures-uploaded.");
 
     // Moved folders are never looked at again.
@@ -203,34 +203,34 @@ TEST_CASE("a log already in Vault sends no bytes and moves")
 {
     Install    in;
     const auto log = std::string("[2026-08-04] x\n");
-    captainFolder(in.captures, "s/Bob", log);
+    captainFolder(in.captures, "s/Mirabeth", log);
     FakeMogsafe       server;
     std::atomic<bool> stop{ false };
-    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Bob/PacketLogger/full.log", stop)->crc, log.size())] = "cap7";
+    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop)->crc, log.size())] = "cap7";
     in.importer(server)->run();
     CHECK(server.creates == 0);
     CHECK(server.received == 0);
-    CHECK(fs::exists(in.uploaded / "s/Bob"));
-    CHECK(in.saidAny("Captain 1/1 s/Bob: already in Vault (cap7)."));
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
+    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: already in Vault (cap7)."));
 }
 
 TEST_CASE("a refused capture stays where it is and the next one goes")
 {
     Install in;
-    captainFolder(in.captures, "a/Bob", "log a", "Character = Bob\n"); // no StartTime
-    captainFolder(in.captures, "b/Bob", "log b");
+    captainFolder(in.captures, "a/Mirabeth", "log a", "Character = Mirabeth\n"); // no StartTime
+    captainFolder(in.captures, "b/Mirabeth", "log b");
     FakeMogsafe server;
     in.importer(server)->run();
-    CHECK(in.saidAny("Captain 1/2 a/Bob: refused: manifest.txt has no StartTime."));
-    CHECK(fs::exists(in.captures / "a/Bob"));
-    CHECK(fs::exists(in.uploaded / "b/Bob"));
+    CHECK(in.saidAny("Captain 1/2 a/Mirabeth: refused: manifest.txt has no StartTime."));
+    CHECK(fs::exists(in.captures / "a/Mirabeth"));
+    CHECK(fs::exists(in.uploaded / "b/Mirabeth"));
 
     // A first append Mogsafe refuses (422) is a refusal too.
-    captainFolder(in.captures, "d/Bob", "log d");
+    captainFolder(in.captures, "d/Mirabeth", "log d");
     server.forced["PATCH"] = { 422 };
     in.importer(server)->run();
-    CHECK(in.saidAny("Captain 2/2 d/Bob: refused: forced."));
-    CHECK(fs::exists(in.captures / "d/Bob"));
+    CHECK(in.saidAny("Captain 2/2 d/Mirabeth: refused: forced."));
+    CHECK(fs::exists(in.captures / "d/Mirabeth"));
     CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already in Vault, 2 refused."));
 }
 
@@ -240,13 +240,13 @@ TEST_CASE("an upload Mogsafe lost, at HEAD or at an append, starts over")
     {
         Install    in;
         const auto log = noise(3000);
-        captainFolder(in.captures, "s/Bob", log);
+        captainFolder(in.captures, "s/Mirabeth", log);
         FakeMogsafe server;
         server.forced[method] = { status };
         in.importer(server)->run();
         CHECK(server.creates == 2);
         CHECK(unzstd(server.uploads.rbegin()->second.data) == log);
-        CHECK(fs::exists(in.uploaded / "s/Bob"));
+        CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
     }
 }
 
@@ -254,7 +254,7 @@ TEST_CASE("server errors back off, and the import never gives up")
 {
     Install    in;
     const auto log = noise(3000);
-    captainFolder(in.captures, "s/Bob", log);
+    captainFolder(in.captures, "s/Mirabeth", log);
     FakeMogsafe server;
     server.forced["POST"] = { 503, 500, 502 }; // creates
     server.forced["HEAD"] = { 502 };
@@ -262,13 +262,13 @@ TEST_CASE("server errors back off, and the import never gives up")
     in.importer(server, std::chrono::milliseconds(20))->run();
     CHECK(std::chrono::steady_clock::now() - before >= std::chrono::milliseconds(20 + 40 + 80 + 160));
     CHECK(unzstd(server.uploads.begin()->second.data) == log);
-    CHECK(fs::exists(in.uploaded / "s/Bob"));
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 
 TEST_CASE("a refused token stops the import, unlinks, and the import resumes after a new link")
 {
     Install in;
-    captainFolder(in.captures, "s/Bob", "log");
+    captainFolder(in.captures, "s/Mirabeth", "log");
     FakeMogsafe server;
     server.token = "revoked";
     auto imp     = in.importer(server);
@@ -276,32 +276,32 @@ TEST_CASE("a refused token stops the import, unlinks, and the import resumes aft
     CHECK(imp->unauthorized());
     CHECK(!fs::exists(in.config / "token"));
     CHECK(in.saidAny("this install is not linked"));
-    CHECK(fs::exists(in.captures / "s/Bob"));
+    CHECK(fs::exists(in.captures / "s/Mirabeth"));
     CHECK(Importer::pending(in.state));
 
     server.token = "t1";
     saveLink(in.config / "token", { .token = "t1", .account = "player" });
     in.importer(server)->run();
-    CHECK(fs::exists(in.uploaded / "s/Bob"));
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
     CHECK(!Importer::pending(in.state));
 }
 
 TEST_CASE("an unlinked import sends nothing")
 {
     Install in;
-    captainFolder(in.captures, "s/Bob", "log");
+    captainFolder(in.captures, "s/Mirabeth", "log");
     fs::remove(in.config / "token");
     FakeMogsafe server;
     in.importer(server)->run();
     CHECK(server.requests == 0);
-    CHECK(fs::exists(in.captures / "s/Bob"));
+    CHECK(fs::exists(in.captures / "s/Mirabeth"));
 }
 
 TEST_CASE("a pause stops the import between chunks until uploads are on")
 {
     Install    in;
     const auto log = noise(3 << 20); // three appends once compressed
-    captainFolder(in.captures, "s/Bob", log);
+    captainFolder(in.captures, "s/Mirabeth", log);
     FakeMogsafe      server;
     std::atomic<int> patches{ 0 };
     server.onPatch = [&]
@@ -323,7 +323,7 @@ TEST_CASE("a pause stops the import between chunks until uploads are on")
     const auto p = imp->progress();
     CHECK(p.index == 1);
     CHECK(p.count == 1);
-    CHECK(p.character == "Bob");
+    CHECK(p.character == "Mirabeth");
     CHECK(p.sent == Tus::CHUNK_SIZE);
     CHECK(p.size > 2 * Tus::CHUNK_SIZE);
 
@@ -341,21 +341,21 @@ TEST_CASE("an import resumes from each point a crash can leave it at")
     SECTION("asked for, before the first create")
     {
         Install in;
-        captainFolder(in.captures, "s/Bob", log);
+        captainFolder(in.captures, "s/Mirabeth", log);
         fs::create_directories(in.state);
         std::ofstream{ in.state / "imports.txt" };
         CHECK(Importer::pending(in.state));
         FakeMogsafe server;
         in.importer(server)->run();
         CHECK(server.creates == 1);
-        CHECK(fs::exists(in.uploaded / "s/Bob"));
+        CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
     }
     SECTION("after the create, before the first byte, and after some appends")
     {
         for (const int crashAt : { 0, 1 })
         {
             Install in;
-            captainFolder(in.captures, "s/Bob", log);
+            captainFolder(in.captures, "s/Mirabeth", log);
             FakeMogsafe server;
             server.crashAtPatch = crashAt;
             CHECK_THROWS(in.importer(server)->run());
@@ -366,25 +366,25 @@ TEST_CASE("an import resumes from each point a crash can leave it at")
             const auto& u = server.uploads.begin()->second;
             CHECK(server.received == u.data.size()); // no byte twice
             CHECK(unzstd(u.data) == log);
-            CHECK(fs::exists(in.uploaded / "s/Bob"));
+            CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
             CHECK(!Importer::pending(in.state));
         }
     }
     SECTION("closed, before the move")
     {
         Install in;
-        captainFolder(in.captures, "s/Bob", log);
+        captainFolder(in.captures, "s/Mirabeth", log);
         FakeMogsafe server;
         server.crashAfterClose = true;
         CHECK_THROWS(in.importer(server)->run());
-        CHECK(fs::exists(in.captures / "s/Bob"));
+        CHECK(fs::exists(in.captures / "s/Mirabeth"));
         server.crashAfterClose = false;
         const auto received    = server.received;
         in.importer(server)->run();
         CHECK(server.received == received);
         CHECK(server.creates == 1);
-        CHECK(in.saidAny("s/Bob: already in Vault (cap1)."));
-        CHECK(fs::exists(in.uploaded / "s/Bob"));
+        CHECK(in.saidAny("s/Mirabeth: already in Vault (cap1)."));
+        CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
         CHECK(fs::is_empty(in.state));
     }
 }
@@ -504,7 +504,7 @@ TEST_CASE("an import whose state cannot be saved sends nothing and goes on at th
 {
     Install    in;
     const auto log = noise(3 << 20);
-    captainFolder(in.captures, "s/Bob", log);
+    captainFolder(in.captures, "s/Mirabeth", log);
     fs::create_directories(in.state / "imports.txt.tmp");
     FakeMogsafe server;
     in.importer(server)->run();
@@ -517,11 +517,11 @@ TEST_CASE("an import whose state cannot be saved sends nothing and goes on at th
         fs::create_directory(in.state / "imports.txt.tmp");
     };
     in.importer(server)->run();
-    CHECK(in.saidAny("Captain 1/1 s/Bob: cannot write "));
+    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: cannot write "));
     CHECK(server.creates == 1);
     CHECK(server.received == 0);
     CHECK(Importer::pending(in.state));
-    CHECK(fs::exists(in.captures / "s/Bob"));
+    CHECK(fs::exists(in.captures / "s/Mirabeth"));
 
     server.onCreate = nullptr;
     fs::remove(in.state / "imports.txt.tmp");
@@ -530,45 +530,45 @@ TEST_CASE("an import whose state cannot be saved sends nothing and goes on at th
     const auto& u = server.uploads.rbegin()->second;
     CHECK(server.received == u.data.size());
     CHECK(unzstd(u.data) == log);
-    CHECK(fs::exists(in.uploaded / "s/Bob"));
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
     CHECK(!Importer::pending(in.state));
 }
 
 TEST_CASE("an uploaded folder moves to the same path under captures-uploaded")
 {
     Install in;
-    captainFolder(in.captures, "Mining/test/Bob", "a");
-    captainFolder(in.captures, "Mining/test/Alice", "b");
-    auto to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Bob");
+    captainFolder(in.captures, "Mining/test/Mirabeth", "a");
+    captainFolder(in.captures, "Mining/test/Kalnor", "b");
+    auto to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Mirabeth");
     REQUIRE(to);
-    CHECK(*to == in.uploaded / "Mining/test/Bob");
-    CHECK(fs::exists(in.captures / "Mining/test/Alice")); // the parent still holds another capture
+    CHECK(*to == in.uploaded / "Mining/test/Mirabeth");
+    CHECK(fs::exists(in.captures / "Mining/test/Kalnor")); // the parent still holds another capture
 
-    captainFolder(in.captures, "Mining/test/Bob", "c"); // the same path again: a clash
-    to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Bob");
+    captainFolder(in.captures, "Mining/test/Mirabeth", "c"); // the same path again: a clash
+    to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Mirabeth");
     REQUIRE(to);
-    CHECK(to->filename() == "Bob-2");
-    CHECK(fs::exists(in.uploaded / "Mining/test/Bob/manifest.txt"));
+    CHECK(to->filename() == "Mirabeth-2");
+    CHECK(fs::exists(in.uploaded / "Mining/test/Mirabeth/manifest.txt"));
 
-    REQUIRE(moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Alice"));
+    REQUIRE(moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Kalnor"));
     CHECK(fs::is_empty(in.captures));
 }
 
 TEST_CASE("a folder that cannot move stays, and the next import moves it")
 {
     Install in;
-    captainFolder(in.captures, "s/Bob", "log");
+    captainFolder(in.captures, "s/Mirabeth", "log");
     std::ofstream{ in.uploaded }; // a file where the folder goes
     FakeMogsafe server;
     in.importer(server)->run();
-    CHECK(in.saidAny("Captain 1/1 s/Bob: in Vault, but its folder could not move: "));
-    CHECK(fs::exists(in.captures / "s/Bob"));
+    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: in Vault, but its folder could not move: "));
+    CHECK(fs::exists(in.captures / "s/Mirabeth"));
     CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already in Vault, 0 refused, 1 in Vault but not moved."));
 
     fs::remove(in.uploaded);
     in.importer(server)->run();
     CHECK(in.saidAny("already in Vault (cap1)."));
-    CHECK(fs::exists(in.uploaded / "s/Bob"));
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 
 namespace
@@ -626,7 +626,7 @@ TEST_CASE("the import runs on its own thread, and stops at once mid-append and m
 {
     Install     in;
     FakeMogsafe server;
-    captainFolder(in.captures, "s/Bob", noise(3 << 20));
+    captainFolder(in.captures, "s/Mirabeth", noise(3 << 20));
     {
         auto  blocking = std::make_unique<Blocking>(server, "PATCH");
         auto& http     = *blocking;
@@ -649,7 +649,7 @@ TEST_CASE("the import runs on its own thread, and stops at once mid-append and m
 
     // Large enough to compress for a while; stop once its .tmp appears.
     fs::rename(in.captures / "s", in.dir / "s");
-    captainFolder(in.captures, "t/Bob", noise(64 << 20));
+    captainFolder(in.captures, "t/Mirabeth", noise(64 << 20));
     auto       imp = std::make_unique<Importer>(in.options(), std::make_unique<Forward>(server));
     const auto tmp = [&]
     {
@@ -681,7 +681,7 @@ TEST_CASE("the import reminder shows once per install, to one client")
     CHECK(!remindImport(in.config, in.captures)); // nothing waiting
     CHECK(!fs::exists(in.config / "import-reminded"));
 
-    captainFolder(in.captures, "s/Bob", "log");
+    captainFolder(in.captures, "s/Mirabeth", "log");
     fs::rename(in.config / "token", in.dir / "token");
     CHECK(!remindImport(in.config, in.captures)); // not linked
     fs::rename(in.dir / "token", in.config / "token");
@@ -711,7 +711,7 @@ TEST_CASE("a second client sharing the install does not import while the first d
     Install     in;
     FakeMogsafe first;
     FakeMogsafe second;
-    captainFolder(in.captures, "s/Bob", noise(3 << 20));
+    captainFolder(in.captures, "s/Mirabeth", noise(3 << 20));
     const auto mutex   = std::format("Local\\Memoria-import-test-{}", std::random_device{}());
     auto       options = in.options();
     options.mutex      = mutex;
@@ -746,6 +746,6 @@ TEST_CASE("a second client sharing the install does not import while the first d
                     {
                         return next.finished();
                     }));
-    CHECK(fs::exists(in.uploaded / "s/Bob"));
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 #endif

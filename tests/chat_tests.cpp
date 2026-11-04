@@ -44,7 +44,7 @@ TEST_CASE("each capture takes the chat choice it opens with")
     };
     {
         Recorder rec(opts);
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         REQUIRE(waitFor([&]
                         {
@@ -52,7 +52,7 @@ TEST_CASE("each capture takes the chat choice it opens with")
                         }));
         saveChat = true; // the open capture keeps its policy
         rec.packet(gamePacket(T0 + 2));
-        rec.login(T0 + 10'000, who("Bob", 2));
+        rec.login(T0 + 10'000, who("Mirabeth", 2));
         rec.packet(gamePacket(T0 + 10'001));
         rec.stop();
     }
@@ -77,7 +77,7 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
         };
         {
             Recorder rec(opts);
-            rec.login(T0, who("Alice", 1));
+            rec.login(T0, who("Kalnor", 1));
             auto said           = gamePacket(T0 + 1, 0x0B5); // chat, from the client
             said.clientToServer = true;
             rec.packet(std::move(said));

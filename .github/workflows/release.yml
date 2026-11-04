@@ -35,6 +35,8 @@ jobs:
         run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v3
         with:
-          files: out/Memoria.dll
+          files: |
+            out/Memoria.dll
+            THIRD_PARTY_NOTICES.md
           body: SHA-256 ${{ steps.sum.outputs.sha256 }}
           prerelease: ${{ contains(github.ref_name, '-') }}

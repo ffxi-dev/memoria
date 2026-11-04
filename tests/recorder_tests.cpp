@@ -59,7 +59,7 @@ TEST_CASE("a recording is xicap format 5, complete")
     const auto dir = tempDir();
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.logout(T0 + 2);
         rec.stop();
@@ -78,11 +78,11 @@ TEST_CASE("a relog on the same character continues the capture")
     const auto dir = tempDir();
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.packet(gamePacket(T0 + 2));
         rec.logout(T0 + 3);
-        rec.login(T0 + 10'000, who("Alice", 1));
+        rec.login(T0 + 10'000, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 10'001));
         rec.stop();
         CHECK(rec.status().packets == 3);
@@ -93,10 +93,10 @@ TEST_CASE("a relog on the same character continues the capture")
     const auto c = readCapture(files[0]);
     CHECK(c.complete);
     CHECK(c.packets == 3);
-    CHECK(c.name == "Alice");
+    CHECK(c.name == "Kalnor");
     CHECK(c.atLogin);
     CHECK(c.markers == std::vector{ xicap::MarkerKind::Login, xicap::MarkerKind::Logout, xicap::MarkerKind::Login });
-    CHECK(files[0].filename().string().find("-Alice-") != std::string::npos);
+    CHECK(files[0].filename().string().find("-Kalnor-") != std::string::npos);
     fs::remove_all(dir);
 }
 
@@ -104,16 +104,16 @@ TEST_CASE("a start that missed the content id continues on a login that has it")
 {
     const auto dir = tempDir();
     {
-        Login late               = who("Alice", 1);
+        Login late               = who("Kalnor", 1);
         late.character.contentId = 0;
         late.worldId             = 0;
         late.midSession          = true;
         Recorder rec(options(dir));
         rec.login(T0, late);
         rec.packet(gamePacket(T0 + 1));
-        rec.login(T0 + 10'000, who("Alice", 1));
+        rec.login(T0 + 10'000, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 10'001));
-        Login other               = who("Alice", 1);
+        Login other               = who("Kalnor", 1);
         other.character.contentId = 7; // same character id and name on another account
         rec.login(T0 + 20'000, other);
         rec.packet(gamePacket(T0 + 20'001));
@@ -131,9 +131,9 @@ TEST_CASE("the same character id and name on another world starts a new capture"
     const auto dir = tempDir();
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
-        Login moved   = who("Alice", 1);
+        Login moved   = who("Kalnor", 1);
         moved.worldId = 43;
         rec.login(T0 + 10'000, moved);
         rec.packet(gamePacket(T0 + 10'001));
@@ -148,7 +148,7 @@ TEST_CASE("another character starts a capture that continues the first")
     const auto dir = tempDir();
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.logout(T0 + 2);
         rec.login(T0 + 5'000, who("Mule", 2));
@@ -159,7 +159,7 @@ TEST_CASE("another character starts a capture that continues the first")
     REQUIRE(files.size() == 2);
     const auto first  = readCapture(files[0]);
     const auto second = readCapture(files[1]);
-    CHECK(first.name == "Alice");
+    CHECK(first.name == "Kalnor");
     CHECK(second.name == "Mule");
     CHECK(first.complete);
     CHECK(second.previous == first.id);
@@ -173,7 +173,7 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
     xicap::CaptureId cut{};
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.stop();
         cut = readCapture(captures(dir)[0]).id;
@@ -188,7 +188,7 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
         state << " open\n";
     }
     {
-        Login late      = who("Alice", 1);
+        Login late      = who("Kalnor", 1);
         late.midSession = true; // the client came back already in a zone
         Recorder rec(options(dir));
         rec.login(T0 + 60'000, late);
@@ -217,7 +217,7 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     const auto session = dir / "captain" / "session one" / "memoria.xicap";
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.sessionStart(T0 + 2, session);
         rec.note(T0 + 2, "cap start");
@@ -231,7 +231,7 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     const auto main = readCapture(captures(dir)[0]);
     const auto part = readCapture(session);
     CHECK(part.complete);
-    CHECK(part.name == "Alice");
+    CHECK(part.name == "Kalnor");
     CHECK(part.previous == main.id);
     CHECK(!part.atLogin);
 
@@ -258,7 +258,7 @@ TEST_CASE("a session never replaces a file, the main capture least of all")
     std::ofstream(existing) << "yesterday's session";
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         for (int i = 0; i < 200 && rec.status().capture.empty(); ++i)
         {
@@ -289,7 +289,7 @@ TEST_CASE("a session that cannot start leaves the main capture recording")
     std::ofstream(dir / "blocker") << "a file, not a folder";
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.sessionStart(T0 + 2, dir / "blocker" / "memoria.xicap");
         rec.packet(gamePacket(T0 + 3));
@@ -314,7 +314,7 @@ TEST_CASE("a session write that fails leaves the main capture recording")
     opts.flushEvery    = std::chrono::hours(1); // only the logout's marker writes the session
     {
         Recorder rec(opts);
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.sessionStart(T0 + 2, session);
         for (int i = 0; i < 200 && rec.status().session.empty(); ++i)
@@ -336,7 +336,7 @@ TEST_CASE("a session write that fails leaves the main capture recording")
         ::close(full);
         rec.packet(gamePacket(T0 + 3));
         rec.logout(T0 + 4);
-        rec.login(T0 + 5, who("Alice", 1));
+        rec.login(T0 + 5, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 6));
         rec.stop();
         CHECK(rec.status().error.empty());
@@ -356,7 +356,7 @@ TEST_CASE("packets before any login are not recorded, and the flush timer writes
     const auto dir = tempDir();
     Recorder   rec(options(dir));
     rec.packet(gamePacket(T0));
-    rec.login(T0 + 1, who("Alice", 1));
+    rec.login(T0 + 1, who("Kalnor", 1));
     rec.packet(gamePacket(T0 + 2));
     // Without a stop, the 20 ms flush gets the frame to disk.
     for (int i = 0; i < 100 && (captures(dir).empty() || fs::file_size(captures(dir)[0]) == 0); ++i)
@@ -379,7 +379,7 @@ TEST_CASE("dropped packets leave a note in the capture")
     opts.drainEvery = std::chrono::milliseconds(200); // let the queue fill
     {
         Recorder rec(opts);
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         for (int i = 0; i < 10; ++i)
         {
             rec.packet(gamePacket(T0 + 1 + i));

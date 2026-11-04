@@ -74,9 +74,9 @@ A named mutex `Local\Memoria-import-<hash of the captures path>` is taken for th
 ### Chat
 
 - Start: "Uploading 4 captain captures (3.1 GB) in the background."
-- Each capture: "Captain 2/4 2026-8-4_23_54/Bob: uploaded." or "uploaded with its search log.", "uploaded with its search log, replacing <capture id>.", "already in Vault (<capture id>).", "refused: <reason>.", "still being written; skipped.", "in Vault, but its folder could not move: <error>."
+- Each capture: "Captain 2/4 2026-8-4_23_54/Mirabeth: uploaded." or "uploaded with its search log.", "uploaded with its search log, replacing <capture id>.", "already in Vault (<capture id>).", "refused: <reason>.", "still being written; skipped.", "in Vault, but its folder could not move: <error>."
 - End: "Captain import done: 2 uploaded, 1 already in Vault, 1 refused. Uploaded folders are in addons/captain/captures-uploaded."
-- `/memoria status` adds `Import: 2/4 Bob, 340/900 MB sent` while a run lasts, and `/memoria import` during a run prints the same line.
+- `/memoria status` adds `Import: 2/4 Mirabeth, 340/900 MB sent` while a run lasts, and `/memoria import` during a run prints the same line.
 
 ## Risks / Trade-offs
 

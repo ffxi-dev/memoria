@@ -15,13 +15,13 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     const auto dir = tempDir();
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         for (uint64_t i = 0; i < 6; ++i)
         {
             rec.packet(gamePacket(T0 + 1 + i * 3));
             rec.packet(gamePacket(T0 + 2 + i * 3));
             rec.logout(T0 + 3 + i * 3); // ends the frame
-            rec.login(T0 + 3 + i * 3, who("Alice", 1));
+            rec.login(T0 + 3 + i * 3, who("Kalnor", 1));
         }
         rec.stop();
     }
@@ -209,7 +209,7 @@ TEST_CASE("timestamps that step back or leap ahead lose no packet")
     constexpr uint64_t DAYS = 50ULL * 24 * 3600 * 1000; // past 2^32 ms: a PC asleep for 50 days
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         for (const auto t : { T0 + 10, T0 + 5, T0 + 5, T0 + DAYS, T0 + DAYS + 1, T0 + 1 })
         {
             rec.packet(gamePacket(t));
@@ -237,7 +237,7 @@ TEST_CASE("a three-day session stays one capture, whole")
     constexpr uint64_t STEP    = 3ULL * 24 * 3600 * 1000 / PACKETS; // past two midnights
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         for (uint64_t i = 0; i < PACKETS; ++i)
         {
             rec.packet(gamePacket(T0 + 1 + i * STEP, static_cast<uint16_t>(0x00D + i % 64)));
@@ -260,14 +260,14 @@ TEST_CASE("sessions: a stop without a start, a start over a running one, and a c
     const auto b   = dir / "sessions" / "b.xicap";
     {
         Recorder rec(options(dir));
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.sessionStop(T0 + 1); // nothing to stop
         rec.packet(gamePacket(T0 + 2));
         rec.sessionStart(T0 + 3, a);
         rec.packet(gamePacket(T0 + 4));
         rec.sessionStart(T0 + 5, b); // ends a
         rec.packet(gamePacket(T0 + 6));
-        rec.login(T0 + 7, who("Mule", 2)); // ends b with Alice' capture
+        rec.login(T0 + 7, who("Mule", 2)); // ends b with Kalnor' capture
         rec.packet(gamePacket(T0 + 8));
         rec.sessionStop(T0 + 9);
         rec.stop();
@@ -282,16 +282,16 @@ TEST_CASE("sessions: a stop without a start, a start over a running one, and a c
     CHECK(second.packets == 1);
     const auto files = captures(dir);
     REQUIRE(files.size() == 2);
-    auto alice = readCapture(files[0]);
-    auto mule  = readCapture(files[1]);
-    if (alice.name != "Alice")
+    auto kalnor = readCapture(files[0]);
+    auto mule   = readCapture(files[1]);
+    if (kalnor.name != "Kalnor")
     {
-        std::swap(alice, mule);
+        std::swap(kalnor, mule);
     }
-    CHECK(alice.packets == 3);
+    CHECK(kalnor.packets == 3);
     CHECK(mule.packets == 1);
-    CHECK(first.previous == alice.id);
-    CHECK(second.previous == alice.id);
+    CHECK(first.previous == kalnor.id);
+    CHECK(second.previous == kalnor.id);
     fs::remove_all(dir);
 }
 
@@ -324,7 +324,7 @@ TEST_CASE("a full disk is said once, ends the session with a reason, and counts 
         said.push_back(why);
     };
     Recorder rec(opts);
-    rec.login(T0, who("Alice", 1));
+    rec.login(T0, who("Kalnor", 1));
     rec.packet(gamePacket(T0 + 1));
     rec.sessionStart(T0 + 2, dir / "session" / "memoria.xicap");
     REQUIRE(waitFor([&]
@@ -370,7 +370,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
     opts.flushEvery = std::chrono::hours(1); // only the close writes
     {
         Recorder rec(opts);
-        rec.login(T0, who("Alice", 1));
+        rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
         rec.packet(gamePacket(T0 + 6'000)); // over the live preset's 5 s a frame: the first frame reaches disk
         fs::path path;
@@ -397,7 +397,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
     }
     {
         Recorder rec(options(dir));
-        rec.login(T0 + 60'000, who("Alice", 1));
+        rec.login(T0 + 60'000, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 60'001));
         rec.stop();
     }

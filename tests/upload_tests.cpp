@@ -490,7 +490,7 @@ namespace
 auto twoFrames(const fs::path& path) -> uint64_t
 {
     {
-        xicap::Writer w(path, { .character = { .name = "Alice" } });
+        xicap::Writer w(path, { .character = { .name = "Kalnor" } });
         w.write(outPacket(gamePacket(T0 + 1)));
         w.flush();
         w.write(outPacket(gamePacket(T0 + 2)));
@@ -533,7 +533,7 @@ TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, onc
     CHECK(tail.complete);
     CHECK(tail.packets == 2);
     CHECK(tail.previous == readCapture(file).id);
-    CHECK(tail.name == "Alice");
+    CHECK(tail.name == "Kalnor");
     CHECK(server.creates == 2);
     CHECK(std::ssize(server.uploads.begin()->second.data) == held); // the cut-off file never goes again
     CHECK(uploader(dir, server)->ended("a.xicap"));                 // another client reads it from disk
@@ -605,7 +605,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
         return true;
     };
     Recorder rec(opts);
-    rec.login(T0, who("Alice", 1));
+    rec.login(T0, who("Kalnor", 1));
     rec.packet(gamePacket(T0 + 1));
     fs::path first;
     REQUIRE(waitFor([&]
