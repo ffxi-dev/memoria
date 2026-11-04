@@ -8,7 +8,7 @@ Memoria records every packet on retail, uploads it to Mogsafe as it goes, and st
 
 ## Live
 
-`/memoria live` opens Lens on the capture as it records, for anyone with the link. It needs `/memoria link` first. Memoria asks Mogsafe for a link, opens it in your browser, and sends packets over a WebSocket only while someone watches. Viewers see what the capture holds, so chat stays stubbed. `/memoria live` again reopens the link; `/memoria live off` ends it, as do `/memoria unlink`, `/memoria upload off`, and unloading. A link lasts at most 12 hours. The requirements are in `ffxi-dev/vault`, `openspec/specs/live-viewing/`, and the protocol in `openspec/changes/archive/2026-10-31-add-memoria-live/design.md`.
+`/memoria live` opens Lens on the capture as it records, for anyone with the link. It needs `/memoria link` first. Memoria asks Mogsafe for a link, opens it in your browser, and sends packets over a WebSocket only while someone watches. Viewers see what the capture holds, so chat stays stubbed. `/memoria live` again reopens the link; `/memoria live off` ends it, as do `/memoria unlink` and `/memoria upload off` in any client sharing the install, and unloading; while uploads are paused, `/memoria live` waits for `/memoria upload on`. A link lasts at most 12 hours. The requirements are in `ffxi-dev/vault`, `openspec/specs/live-viewing/`, and the protocol in `openspec/changes/archive/2026-10-31-add-memoria-live/design.md`.
 
 ## Captain imports
 

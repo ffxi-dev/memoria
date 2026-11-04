@@ -116,8 +116,9 @@ auto browse(const std::string& url) -> void
     }
 }
 
-Live::Live(std::string server, std::string installToken, LiveFeed& feed, std::string hello, std::function<void(std::string)> post)
+Live::Live(std::string server, std::filesystem::path config, std::string installToken, LiveFeed& feed, std::string hello, std::function<void(std::string)> post)
 : server_(std::move(server))
+, config_(std::move(config))
 , installToken_(std::move(installToken))
 , feed_(feed)
 , owner_(feed.claim())
@@ -303,10 +304,21 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                                     wake_.notify_all();
                                 });
 
-        bool open = false;
+        bool open    = false;
+        auto checked = std::chrono::steady_clock::now();
         while (!stop.stop_requested())
         {
             wait(stop, TICK);
+            if (const auto now = std::chrono::steady_clock::now(); now - checked >= 1s)
+            {
+                checked = now;
+                if (!sharing(config_, installToken_))
+                {
+                    post_(paint(Color::Yellow, "Live off: uploads were paused or unlinked on this install."));
+                    thread_.request_stop(); // ends the link as /memoria live off does
+                    break;
+                }
+            }
             {
                 std::lock_guard lock(mutex_);
                 if (closed_)

@@ -142,4 +142,15 @@ auto removeLink(const std::filesystem::path& path, const std::string& token) -> 
     return refused;
 }
 
+auto sharing(const std::filesystem::path& config, const std::string& token) -> bool
+{
+    std::error_code ec;
+    if (std::filesystem::exists(config / "paused", ec) || ec)
+    {
+        return false;
+    }
+    const auto link = loadLink(config / "token");
+    return link && link->token == token;
+}
+
 } // namespace memoria

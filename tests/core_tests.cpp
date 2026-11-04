@@ -1087,6 +1087,23 @@ TEST_CASE("a link that cannot be written says so")
 }
 #endif
 
+TEST_CASE("live goes on only while the install shares: not paused, and the same token")
+{
+    const auto dir    = tempDir();
+    const auto config = dir / "config";
+    REQUIRE(saveLink(config / "token", { .token = "t0ken", .account = "sruon" }));
+    CHECK(sharing(config, "t0ken"));
+    std::ofstream{ config / "paused" }; // /memoria upload off, in any client
+    CHECK_FALSE(sharing(config, "t0ken"));
+    fs::remove(config / "paused");
+    CHECK(sharing(config, "t0ken"));
+    REQUIRE(saveLink(config / "token", { .token = "t1", .account = "sruon" })); // linked again
+    CHECK_FALSE(sharing(config, "t0ken"));
+    fs::remove(config / "token"); // /memoria unlink
+    CHECK_FALSE(sharing(config, "t1"));
+    fs::remove_all(dir);
+}
+
 TEST_CASE("only the refused token is deleted")
 {
     const auto dir  = tempDir();

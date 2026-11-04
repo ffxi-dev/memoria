@@ -40,4 +40,7 @@ auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool;
 // Deletes the link only while it holds this token: one saved since, even mid-call, stays.
 auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool;
 
+// True while no client sharing the install paused uploads and its token file still holds token: what live checks as it streams.
+auto sharing(const std::filesystem::path& config, const std::string& token) -> bool;
+
 } // namespace memoria
