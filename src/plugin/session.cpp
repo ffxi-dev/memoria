@@ -789,7 +789,11 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     else if (sub == "unlink" && linked())
     {
         std::error_code ec;
-        std::filesystem::remove(config_ / "token", ec);
+        if (!std::filesystem::remove(config_ / "token", ec) && ec)
+        {
+            say(paint(Color::Red, "Still linked: cannot delete " + (config_ / "token").string() + ": " + ec.message()));
+            return;
+        }
         unlink("Unlinked");
     }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
@@ -798,13 +802,21 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
         std::error_code ec;
         if (args[2] == "off")
         {
-            std::ofstream{ paused };
+            if (!std::ofstream{ paused })
+            {
+                say(paint(Color::Red, "Uploads still on: cannot create " + paused.string()));
+                return;
+            }
             stopLive();
             say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
         }
         else
         {
-            std::filesystem::remove(paused, ec);
+            if (!std::filesystem::remove(paused, ec) && ec)
+            {
+                say(paint(Color::Red, "Uploads still paused: cannot delete " + paused.string() + ": " + ec.message()));
+                return;
+            }
             say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
         }
     }
