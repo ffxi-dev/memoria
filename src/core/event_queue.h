@@ -44,7 +44,7 @@ struct Event
     std::optional<Login> login;
 };
 
-// Hands events from the game thread to the writer thread without waiting on it. Past maxBytes, packets are dropped and counted; other events are always kept, so logins still rotate.
+// Hands events from the game thread to the writer thread without waiting on it. Past maxBytes, counting the batch the writer still holds, packets are dropped and counted; other events are always kept, so logins still rotate.
 class EventQueue
 {
 public:
@@ -57,7 +57,8 @@ public:
 private:
     std::mutex         mutex_;
     std::vector<Event> events_;
-    size_t             bytes_{ 0 };
+    size_t             bytes_{ 0 }; // queued, and taken_
+    size_t             taken_{ 0 }; // in the batch the last drain handed out
     size_t             maxBytes_;
     uint64_t           dropped_{ 0 };
 };
