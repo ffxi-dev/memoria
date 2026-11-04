@@ -1,14 +1,17 @@
 #include "core/link.h"
 
 #include "core/ed25519.h"
+#include "core/seed_file.h"
 
 #include <nlohmann/json.hpp>
 #include <picosha2.h>
 
 #include <array>
+#include <chrono>
 #include <format>
 #include <fstream>
 #include <random>
+#include <thread>
 
 namespace memoria
 {
@@ -110,15 +113,36 @@ auto loadLink(const std::filesystem::path& path) -> std::optional<Linked>
     return link;
 }
 
+// Written whole to a file only this user can open, then renamed over the old one, which keeps the new file's permissions.
 auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool
 {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
-    std::ofstream out(path, std::ios::trunc);
+    std::random_device random;
+    const auto         temp = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.new", random(), random()));
+    if (!createNew(temp, true))
+    {
+        return false;
+    }
+    std::ofstream out(temp, std::ios::trunc);
     out << link.token << '\n'
         << link.account << '\n';
-    out.close(); // a full disk shows here, not before
-    return static_cast<bool>(out);
+    out.close();
+    if (out)
+    {
+        // Another client sharing the install may be reading the old token: Windows refuses the rename until it closes it.
+        for (int attempt = 0; attempt < 50; ++attempt)
+        {
+            std::filesystem::rename(temp, path, ec);
+            if (!ec)
+            {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    std::filesystem::remove(temp, ec);
+    return false;
 }
 
 auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool

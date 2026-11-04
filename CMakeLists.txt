@@ -57,6 +57,9 @@ add_library(memoria_core STATIC
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
 target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json)
+if(WIN32)
+    target_link_libraries(memoria_core PRIVATE advapi32) # the key and token files' permissions
+endif()
 
 if(MEMORIA_BUILD_PLUGIN)
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)

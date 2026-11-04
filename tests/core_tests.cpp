@@ -37,11 +37,27 @@
 #include <unistd.h>
 #endif
 
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace memoria;
 
 namespace
 {
+
+// Wine, which runs these tests on Linux, keeps no DACL on a file: the permission checks run on Windows itself.
+auto keepsPermissions() -> bool
+{
+#ifdef _WIN32
+    return ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") == nullptr;
+#else
+    return true;
+#endif
+}
 
 auto tempDir() -> fs::path
 {
@@ -115,6 +131,7 @@ TEST_CASE("the install key is created once and never replaced")
     const auto first = loadOrCreateSeed(path);
     REQUIRE(first.has_value());
     CHECK(fs::file_size(path) == 32);
+    CHECK((!keepsPermissions() || ownerOnly(path))); // other users of the PC cannot read the seed
     const auto second = loadOrCreateSeed(path);
     REQUIRE(second.has_value());
     CHECK(*second == *first);
@@ -1100,15 +1117,21 @@ TEST_CASE("the link is kept across restarts")
     REQUIRE(link);
     CHECK(link->token == "t0ken");
     CHECK(link->account == "sruon");
+    CHECK((!keepsPermissions() || ownerOnly(path)));
+    REQUIRE(saveLink(path, { .token = "n3w", .account = "sruon" })); // replaced whole, still private
+    CHECK(loadLink(path)->token == "n3w");
+    CHECK((!keepsPermissions() || ownerOnly(path)));
+    CHECK(std::distance(fs::directory_iterator(path.parent_path()), fs::directory_iterator{}) == 1);
     fs::remove_all(dir);
 }
 
-#ifdef __linux__
 TEST_CASE("a link that cannot be written says so")
 {
-    CHECK_FALSE(saveLink("/dev/full", { .token = "t0ken", .account = "sruon" })); // a full disk
+    const auto dir = tempDir();
+    std::ofstream{ dir / "config" }; // a file where the folder should be
+    CHECK_FALSE(saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" }));
+    fs::remove_all(dir);
 }
-#endif
 
 TEST_CASE("live goes on only while the install shares: not paused, and the same token")
 {
