@@ -70,6 +70,7 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 - `src/core/`: the event queue, clock, recorder, uploader, linking, live feed and captain importer. No Ashita headers.
 - `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe.
 - `tests/`: the core's tests, one file per module, with shared fakes in `support.h`.
+- `openspec/`: what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's CMake helper, unchanged.
 
 ## Licence
