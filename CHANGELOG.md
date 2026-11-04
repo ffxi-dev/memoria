@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Captures**
+- Memoria writes xicap format 5 (xicap 7.1), which has no signatures: Vault knows who sent a capture from the install's upload token. It needs Mogsafe with xicap 7. Chat text is zeroed in place, so chat packets keep their length.
+- After a long network gap, the part of a recording Vault cut off goes up as a capture of its own, which names the one it continues. Before, it stayed on the PC.
+- A `/memoria note` in Japanese reaches the capture as readable text.
+
+**Linking**
+- Memoria no longer has a signing key. `/memoria link` asks Vault for a code and a secret handle, and polls with the handle until you enter the code. `/memoria key` is gone. The old `key` file is no longer read; delete it if you like.
+
 **Game**
 - A login no longer reads or writes Memoria's files on the game thread: the link and import reminders check them on a thread of their own.
 - When the disk cannot keep up, Memoria's packet queue holds at most 64 MB in all. Before, the batch being written did not count, so the queue could reach twice that.
@@ -10,7 +18,7 @@
 - `/memoria live` sends its link to Vault in a header, not in the address, so it stays out of proxy and request logs. It needs Mogsafe with the matching change.
 
 **Install**
-- Memoria creates its signing key and upload token so that only the Windows user running the game can open them; before, they took the Ashita folder's permissions, which often let every user of the PC read them. A key or token saved before keeps its old permissions. Linking now writes the token whole and swaps it in, so other clients never read half a token.
+- Memoria creates its upload token so that only the Windows user running the game can open it; before, it took the Ashita folder's permissions, which often let every user of the PC read it. A token saved before keeps its old permissions. Linking now writes the token whole and swaps it in, so other clients never read half a token.
 
 **Chat**
 - When your account turns on Save chat on Vault's Memoria page, your captures keep all chat, other players' included; off, the default, chat is cut as before. A change applies from the next capture. `/memoria status` says which.
