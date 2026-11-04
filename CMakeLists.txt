@@ -129,7 +129,15 @@ if(MEMORIA_BUILD_TESTS)
         GIT_TAG        v3.5.4
     )
     FetchContent_MakeAvailable(Catch2)
-    add_executable(memoria_core_tests tests/core_tests.cpp)
+    add_executable(memoria_core_tests
+        tests/captain_tests.cpp
+        tests/chat_tests.cpp
+        tests/fault_tests.cpp
+        tests/link_tests.cpp
+        tests/live_tests.cpp
+        tests/recorder_tests.cpp
+        tests/upload_tests.cpp
+    )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
