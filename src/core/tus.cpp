@@ -69,7 +69,7 @@ auto Tus::request(const std::string& method, const std::string& url, HttpHeaders
 {
     headers.emplace_back("Tus-Resumable", "1.0.0");
     headers.emplace_back("Authorization", "Bearer " + token_);
-    auto res = http_.request(method, url, headers, body);
+    auto res = http_.request(method, onServer(url), headers, body);
     if (res && res->status == 401)
     {
         if (removeLink(config_ / "token", token_))
@@ -84,12 +84,18 @@ auto Tus::request(const std::string& method, const std::string& url, HttpHeaders
 
 auto Tus::location(const HttpResponse& res) const -> std::string
 {
-    auto url = header(res, "location");
-    if (url.starts_with('/'))
+    return onServer(header(res, "location"));
+}
+
+// Only the path: behind its tunnel Mogsafe names an http:// Location, and the token goes nowhere but HTTPS to Mogsafe,
+// even for a URL saved before this rule.
+auto Tus::onServer(std::string_view url) const -> std::string
+{
+    if (const auto scheme = url.find("://"); scheme != std::string_view::npos)
     {
-        url = server_.substr(0, server_.find('/', server_.find("://") + 3)) + url;
+        url.remove_prefix((std::min)(url.find('/', scheme + 3), url.size()));
     }
-    return url;
+    return server_.substr(0, server_.find('/', server_.find("://") + 3)) + std::string(url);
 }
 
 auto Tus::append(const std::filesystem::path& path, const std::string& url, uint64_t offset, uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>

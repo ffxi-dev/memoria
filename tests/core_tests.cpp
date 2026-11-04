@@ -624,6 +624,8 @@ public:
     std::set<std::thread::id>               threads;
     std::string                             token = "t0ken";
     std::string                             foreignEnd; // an upload that answers 410 with Mogsafe-Ended: refused
+    std::string                             origin;     // put before a create's Location: tusd behind a tunnel names http://
+    std::vector<std::string>                strayed;    // URLs asked for anywhere but https://mogsafe.test
     bool                                    down{};
     bool                                    crashAfterClose{}; // the game dies once a close is accepted, before its answer
     int                                     creates{};
@@ -638,6 +640,11 @@ public:
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
         ++requests;
+        if (!url.starts_with("https://mogsafe.test/"))
+        {
+            strayed.push_back(url);
+            return std::unexpected("not Mogsafe");
+        }
         if (down)
         {
             return std::unexpected("connection refused");
@@ -691,7 +698,7 @@ public:
             {
                 onCreate();
             }
-            HttpResponse res{ .status = 201, .headers = { { "location", path } } };
+            HttpResponse res{ .status = 201, .headers = { { "location", origin + path } } };
             if (!replaces.empty())
             {
                 res.headers.emplace("mogsafe-replaces", replaces);
@@ -1123,6 +1130,41 @@ TEST_CASE("a file Mogsafe keeps refusing never holds the recording's upload past
     }
     CHECK(longest < std::chrono::milliseconds(600)); // 12 passes of 10 ms, and slack
     fs::remove_all(dir);
+}
+
+TEST_CASE("an upload's URL keeps Mogsafe's HTTPS origin, whatever Location says")
+{
+    // Behind its Cloudflare tunnel, Mogsafe's tusd sees plain HTTP and answers a create with an http:// Location.
+    for (const auto* origin : { "http://mogsafe.test", "https://elsewhere.test", "" })
+    {
+        INFO(origin);
+        const auto  dir = tempDir();
+        FakeMogsafe server;
+        server.origin = origin;
+        append(dir / "a.xicap", std::string(500, 'x') + "XCPF");
+        auto up = uploader(dir, server);
+        CHECK(!up->pass());
+        CHECK(!up->pass());
+        CHECK(server.strayed.empty());
+        CHECK(server.uploads.begin()->second.closed);
+        fs::remove_all(dir);
+    }
+    {
+        // A URL saved before the rule.
+        const auto  dir = tempDir();
+        FakeMogsafe server;
+        append(dir / "a.xicap", std::string(500, 'x'));
+        CHECK(!uploader(dir, server)->pass());
+        std::ofstream(dir / "uploads.txt", std::ios::trunc) << "a.xicap\thttp://mogsafe.test/v1/uploads/1\t0\t0\t500\n";
+        append(dir / "a.xicap", "XCPF");
+        auto up = uploader(dir, server);
+        CHECK(!up->pass());
+        CHECK(!up->pass());
+        CHECK(server.strayed.empty());
+        CHECK(server.creates == 1);
+        CHECK(server.uploads.begin()->second.closed);
+        fs::remove_all(dir);
+    }
 }
 
 TEST_CASE("an uploader stops without waiting for a request in flight")
