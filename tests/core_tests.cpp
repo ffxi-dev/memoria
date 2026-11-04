@@ -1,11 +1,14 @@
 #include "core/captain.h"
 #include "core/chat.h"
 #include "core/clock.h"
+#include "core/compress.h"
 #include "core/event_queue.h"
 #include "core/file.h"
+#include "core/importer.h"
 #include "core/link.h"
 #include "core/live.h"
 #include "core/recorder.h"
+#include "core/units.h"
 #include "core/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>

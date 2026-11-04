@@ -20,7 +20,7 @@ struct UploadFile
     bool                                  rescued{}; // its tail went up as a -rest.xicap capture of its own
     uint64_t                              refused{}; // size at the last refused close
     uint64_t                              sent{};
-    std::string                           reason; // why Mogsafe refused it for good
+    std::string                           reason;       // why Mogsafe refused it for good
     bool                                  restFailed{}; // writing the tail failed: tried again after a restart
     uint64_t                              size{};
     std::chrono::steady_clock::time_point seen{}; // when size last changed

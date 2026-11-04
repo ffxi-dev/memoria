@@ -47,6 +47,8 @@ FetchContent_MakeAvailable(json)
 
 add_library(memoria_core STATIC
     src/core/captain.cpp
+    src/core/compress.cpp
+    src/core/importer.cpp
     src/core/clock.cpp
     src/core/event_queue.cpp
     src/core/file.cpp
@@ -55,6 +57,7 @@ add_library(memoria_core STATIC
     src/core/chat.cpp
     src/core/recorder.cpp
     src/core/tus.cpp
+    src/core/units.cpp
     src/core/upload_state.cpp
     src/core/uploader.cpp
 )
