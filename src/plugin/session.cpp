@@ -481,9 +481,18 @@ auto Session::link() -> void
 {
     linker_ = std::jthread([this](std::stop_token stop)
                            {
-                               WinHttp    http("Memoria/" MEMORIA_VERSION_TEXT);
-                               const auto now  = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                               const auto code = startLink(http, server_, seed_, static_cast<uint64_t>(now));
+                               WinHttp http("Memoria/" MEMORIA_VERSION_TEXT);
+                               // Replacing or destroying linker_ joins this thread on the game thread: end a request in flight at once.
+                               const std::stop_callback cancel(stop, [&http]
+                                                               {
+                                                                   http.cancel();
+                                                               });
+                               const auto               now  = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                               const auto               code = startLink(http, server_, seed_, static_cast<uint64_t>(now));
+                               if (stop.stop_requested())
+                               {
+                                   return;
+                               }
                                if (!code)
                                {
                                    post(paint(Color::Red, "Cannot start linking: " + code.error()));
@@ -511,6 +520,10 @@ auto Session::link() -> void
                                        return;
                                    }
                                    const auto result = pollLink(http, server_, code->poll);
+                                   if (stop.stop_requested())
+                                   {
+                                       return;
+                                   }
                                    if (!result)
                                    {
                                        post(paint(Color::Red, "Not linked: " + result.error() + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
