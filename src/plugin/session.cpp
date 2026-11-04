@@ -169,6 +169,10 @@ auto Session::start(std::optional<LateLogin> late) -> void
                 post("The server ended the last recording; continuing in a new one.");
                 return true;
             },
+            .failed = [this](const std::string& why)
+            {
+                post(paint(Color::Red, "Cannot write the capture: " + why + ".") + " Nothing records until it can; Memoria tries again each minute.");
+            },
         });
         if (Importer::pending(captures_) && linked())
         {

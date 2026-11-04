@@ -12,6 +12,7 @@
 #include <fstream>
 #include <random>
 #include <span>
+#include <utility>
 
 namespace memoria
 {
@@ -198,6 +199,11 @@ auto Recorder::run() -> void
             try
             {
                 writer_->flush();
+                if (std::exchange(failing_, false))
+                {
+                    std::lock_guard lock(statusMutex_);
+                    status_.error.clear();
+                }
             }
             catch (const std::exception& error)
             {
@@ -261,6 +267,11 @@ auto Recorder::handle(const Event& event) -> void
                 if (writer_)
                 {
                     write(event);
+                }
+                else if (login_) // the capture broke: until it reopens, the packet is lost
+                {
+                    std::lock_guard lock(statusMutex_);
+                    status_.dropped++;
                 }
                 break;
         }
@@ -448,9 +459,19 @@ auto Recorder::broken(const std::exception& error) -> void
     fail(error);
     session_.reset();
     writer_.reset();
-    std::lock_guard lock(statusMutex_);
-    status_.capture.clear();
-    status_.session.clear();
+    {
+        std::lock_guard lock(statusMutex_);
+        if (!status_.session.empty())
+        {
+            status_.sessionError = std::format("the capture stopped: {}", error.what());
+        }
+        status_.capture.clear();
+        status_.session.clear();
+    }
+    if (!std::exchange(failing_, true) && options_.failed)
+    {
+        options_.failed(error.what());
+    }
 }
 
 // The server ended the open capture: close it here, keep the login and session, and let the next packet start a capture

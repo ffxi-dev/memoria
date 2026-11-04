@@ -523,6 +523,7 @@ TEST_CASE("a session write that fails leaves the main capture recording")
     CHECK(main.markers == std::vector{ xicap::MarkerKind::Login, xicap::MarkerKind::Logout, xicap::MarkerKind::Login });
     fs::remove_all(dir);
 }
+
 #endif
 
 TEST_CASE("packets before any login are not recorded, and the flush timer writes while open")
@@ -2807,3 +2808,69 @@ TEST_CASE("sessions: a stop without a start, a start over a running one, and a c
     CHECK(second.previous == nouurs.id);
     fs::remove_all(dir);
 }
+
+#ifdef __linux__
+// Points every descriptor open on path at /dev/full: from here its writes fail as on a full disk.
+static auto fill(const fs::path& path) -> void
+{
+    const int full = ::open("/dev/full", O_WRONLY);
+    REQUIRE(full >= 0);
+    for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
+    {
+        std::error_code ec;
+        if (fs::read_symlink(fd.path(), ec) == fs::canonical(path))
+        {
+            ::dup2(full, std::stoi(fd.path().filename().string()));
+        }
+    }
+    ::close(full);
+}
+
+TEST_CASE("a full disk is said once, ends the session with a reason, and counts the packets it lost")
+{
+    const auto               dir  = tempDir();
+    auto                     opts = options(dir);
+    std::mutex               mutex;
+    std::vector<std::string> said;
+    opts.failed = [&](const std::string& why)
+    {
+        std::lock_guard lock(mutex);
+        said.push_back(why);
+    };
+    Recorder rec(opts);
+    rec.login(T0, who("Nouurs", 1));
+    rec.packet(gamePacket(T0 + 1));
+    rec.sessionStart(T0 + 2, dir / "session" / "memoria.xicap");
+    REQUIRE(waitFor([&]
+                    {
+                        return !rec.status().session.empty();
+                    }));
+    const auto broken = rec.status().capture;
+    fill(broken);
+    for (uint64_t i = 0; i < 5; ++i)
+    {
+        rec.packet(gamePacket(T0 + 3 + i));
+        std::this_thread::sleep_for(std::chrono::milliseconds(30)); // past a flush each
+    }
+    REQUIRE(waitFor([&]
+                    {
+                        return rec.status().capture.empty();
+                    }));
+    CHECK(!rec.status().error.empty());
+    CHECK(!rec.status().sessionError.empty());
+    CHECK(rec.status().dropped >= 4); // packets after the failure went nowhere
+
+    rec.login(T0 + 100, who("Mule", 2)); // a new file on a disk with room again
+    rec.packet(gamePacket(T0 + 101));
+    REQUIRE(waitFor([&]
+                    {
+                        return rec.status().error.empty();
+                    }));
+    rec.stop();
+    {
+        std::lock_guard lock(mutex);
+        CHECK(said.size() == 1);
+    }
+    fs::remove_all(dir);
+}
+#endif

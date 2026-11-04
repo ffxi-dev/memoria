@@ -29,6 +29,8 @@ struct RecorderOptions
     // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then
     // closes, and the next packet starts a new one that names it, as after a write error.
     std::function<bool(const std::filesystem::path& capture)> ended;
+    // Called on the writer thread when the capture stops being written, once until a capture writes again.
+    std::function<void(const std::string& why)> failed;
 };
 
 struct RecorderStatus
@@ -43,8 +45,8 @@ struct RecorderStatus
     uint64_t              search{};
     uint64_t              firstMs{};
     uint64_t              lastMs{};
-    uint64_t              dropped{};
-    std::string           error;
+    uint64_t              dropped{};    // the queue's, and those that came while no capture could be written
+    std::string           error;        // why the capture stopped, until one writes again
     std::string           sessionError; // why the last session ended early or never started
     xicap::PublicKey      publicKey{};
 };
@@ -110,6 +112,7 @@ private:
     std::chrono::steady_clock::time_point reopenAt_{};
     xicap::CaptureId                      previous_{};
     std::chrono::steady_clock::time_point lastFlush_{};
+    bool                                  failing_{}; // the player was told; cleared once a capture writes again
 
     mutable std::mutex statusMutex_;
     RecorderStatus     status_;
