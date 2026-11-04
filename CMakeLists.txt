@@ -22,7 +22,7 @@ set(XICAP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     xicap
     GIT_REPOSITORY https://github.com/ffxi-dev/xicap.git
-    GIT_TAG        192b7bee1147d90cac5a2f7aa75fc9396eb4a392 # anonymous-pseudonyms (ffxi-dev/xicap#25); the release tag once it merges
+    GIT_TAG        3ad271cd9801463f473b2656b6731c0cb6aad47c # anonymous-pseudonyms (ffxi-dev/xicap#25); the release tag once it merges
 )
 FetchContent_MakeAvailable(xicap)
 

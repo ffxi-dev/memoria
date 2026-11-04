@@ -6,7 +6,7 @@ Captures are public once uploaded. The owner chose an anonymous mode, beside def
 
 ## What Changes
 
-- In anonymous mode the recorder runs every packet through xicap's pseudonymizer (ffxi-dev/xicap#25) before the writer, the `/cap` session file, and the live feed. The header's character gets the same pseudonyms, and the capture carries xicap's anonymous policy: default, plus stubs for what the pseudonymizer cannot place.
+- In anonymous mode the recorder runs every packet through xicap's pseudonymizer (ffxi-dev/xicap#25) before the writer, the `/cap` session file, and the live feed. The header's character gets the same pseudonyms, and the capture carries xicap's anonymous policy: default, plus zeroed ranges over the text players write. Every packet keeps its layout.
 - The pseudonym key is the account's, from Mogsafe's `GET /v1/install/mode`, so live captures and imports agree. Without one, unlinked or before Mogsafe answers, it is derived from the install's seed with the label `xicap pseudonym key`.
 - Anonymous captures sign with a key derived from the seed (`xicap anonymous signing`), so the header's signing key does not link them to the install's other captures. Mogsafe binds that key to the install the first time an anonymous capture arrives with the install's token.
 - A capture never names one of another mode as the capture it continues; the state file and the capture's file name use the pseudonym.

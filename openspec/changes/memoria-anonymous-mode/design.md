@@ -1,6 +1,6 @@
 # Design
 
-The mapping, the field map, and what is stubbed live in xicap: `openspec/changes/anonymous-pseudonyms/design.md` there, and the table `FIELD_MAP` in `src/pseudonym.cpp`. This change only decides when Memoria uses them.
+The mapping, the field map, and what is zeroed live in xicap: FORMAT.md's Anonymous captures, `pseudonym_fields.tsv`, and `openspec/changes/anonymous-pseudonyms/design.md` there. This change only decides when Memoria uses them.
 
 ## Where the rewriting runs
 

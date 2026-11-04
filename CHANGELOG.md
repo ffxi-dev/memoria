@@ -4,7 +4,7 @@
 
 **Modes (new)**
 - Memoria records in your account's privacy mode, chosen on Vault's Memoria page: default cuts chat as before, everything keeps all chat, other players' included. A change applies from the next capture. An unlinked install sets its own with `/memoria mode`. `/memoria status` shows the mode.
-- Anonymous mode: default, and every player's name and id, yours included, becomes a stand-in that stays the same across your captures. The file on your PC, its name, the live view and the upload hold only stand-ins. Packets whose names Memoria cannot place are cut, as chat is.
+- Anonymous mode: default, and every player's name and id, yours included, becomes a stand-in that stays the same across your captures. The file on your PC, its name, the live view and the upload hold only stand-ins. Every packet keeps its layout; only text players write, such as proposals and bazaar messages, is blanked.
 
 ## 0.6.0-rc.3
 
