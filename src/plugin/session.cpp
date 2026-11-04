@@ -547,6 +547,7 @@ auto Session::stopLive() -> void
 
 auto Session::status() -> void
 {
+    say(paint(Color::Grey, "Memoria " MEMORIA_VERSION_TEXT));
     const auto s = recorder_->status();
     if (s.capture.empty())
     {
