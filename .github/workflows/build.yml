@@ -1,6 +1,6 @@
 name: build
 
-# Builds Memoria.dll on lsb with clang-cl in vault's vault-msvc image (ffxi-dev/vault msvc/); release.yml calls this too.
+# Builds Memoria.dll with MSVC for 32-bit Windows; release.yml calls this too.
 on:
   push:
     branches: [main]
@@ -8,44 +8,50 @@ on:
   workflow_dispatch:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   format:
-    runs-on: [self-hosted, lsb]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.15"
       - name: Check formatting
-        env:
-          PYTHONNOUSERSITE: "1"
-        run: |
-          python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q clang-format==23.1.3
-          git ls-files -z '*.c' '*.cc' '*.cpp' '*.h' '*.hpp' | xargs -0 -r "$RUNNER_TEMP/venv/bin/clang-format" --dry-run --Werror
+        run: git ls-files -z '*.c' '*.cc' '*.cpp' '*.h' '*.hpp' | xargs -0 -r pipx run --spec clang-format==23.1.3 clang-format --dry-run --Werror
 
   plugin:
-    runs-on: [self-hosted, lsb]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - name: Fetch the Ashita SDK
         run: |
-          sdk="$RUNNER_TEMP/ashita"
+          sdk="${RUNNER_TEMP//\//}/ashita"
           git clone -q --filter=blob:none --no-checkout --depth 1 --branch v4.3.1.1 https://github.com/AshitaXI/Ashita-v4beta.git "$sdk"
           git -C "$sdk" sparse-checkout set plugins/sdk
           git -C "$sdk" checkout -q
           echo "ASHITA4_SDK_PATH=$sdk/plugins/sdk" >> "$GITHUB_ENV"
-      - uses: ffxi-dev/vault/.github/actions/deploy-key@ci/v1.14
-        with:
-          key: ${{ secrets.XICAP_DEPLOY_KEY }}
-      - uses: ffxi-dev/vault/.github/actions/msvc@ci/v1.14
-        with:
-          env: ASHITA4_SDK_PATH
-          run: |
-            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="$PWD/out"
-            cmake --build build --target memoria
+      # Fetches the private xicap; does nothing without the secret, and can go once xicap is public.
+      - name: Use the xicap deploy key
+        env:
+          KEY: ${{ secrets.XICAP_DEPLOY_KEY }}
+        run: |
+          [ -n "$KEY" ] || exit 0
+          key="${RUNNER_TEMP//\//}/xicap_key"
+          printf '%s\n' "$KEY" > "$key"
+          chmod 600 "$key"
+          {
+            echo "GIT_SSH_COMMAND=ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+            echo "GIT_CONFIG_COUNT=1"
+            echo "GIT_CONFIG_KEY_0=url.git@github.com:ffxi-dev/xicap.insteadOf"
+            echo "GIT_CONFIG_VALUE_0=https://github.com/ffxi-dev/xicap"
+          } >> "$GITHUB_ENV"
+      - run: cmake -S . -B build -A Win32 -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="${GITHUB_WORKSPACE//\//}/out"
+      - run: cmake --build build --config Release --parallel --target memoria
       - uses: actions/upload-artifact@v7
         with:
           name: memoria
-          path: out/Memoria.dll
+          path: out/Release/Memoria.dll
           if-no-files-found: error

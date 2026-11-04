@@ -6,12 +6,39 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   core:
-    uses: ffxi-dev/vault/.github/workflows/cmake.yml@ci/v1.14
-    with:
-      windows: '["x86"]'
-      configure-args: -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
-      targets: memoria_core_tests
-    secrets:
-      SSH_PRIVATE_KEY: ${{ secrets.XICAP_DEPLOY_KEY }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          # The plugin is 32-bit, so the core's tests run as 32-bit Windows programs too.
+          - { os: windows-latest, arch: Win32 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      # Fetches the private xicap; does nothing without the secret, and can go once xicap is public.
+      - name: Use the xicap deploy key
+        env:
+          KEY: ${{ secrets.XICAP_DEPLOY_KEY }}
+        run: |
+          [ -n "$KEY" ] || exit 0
+          key="${RUNNER_TEMP//\//}/xicap_key"
+          printf '%s\n' "$KEY" > "$key"
+          chmod 600 "$key"
+          {
+            echo "GIT_SSH_COMMAND=ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+            echo "GIT_CONFIG_COUNT=1"
+            echo "GIT_CONFIG_KEY_0=url.git@github.com:ffxi-dev/xicap.insteadOf"
+            echo "GIT_CONFIG_VALUE_0=https://github.com/ffxi-dev/xicap"
+          } >> "$GITHUB_ENV"
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON ${{ matrix.arch && format('-A {0}', matrix.arch) || '' }}
+      - run: cmake --build build --config Release --parallel --target memoria_core_tests
+      - run: ctest --test-dir build -C Release --output-on-failure
