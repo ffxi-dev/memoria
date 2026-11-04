@@ -203,10 +203,8 @@ auto captures(const fs::path& dir) -> std::vector<fs::path>
             out.push_back(e.path());
         }
     }
-    std::ranges::sort(out, {}, [](const fs::path& p)
-                      {
-                          return fs::last_write_time(p);
-                      });
+    // By name, which starts with the capture's first timestamp: two files closed within the clock's tick share a write time.
+    std::ranges::sort(out);
     return out;
 }
 
