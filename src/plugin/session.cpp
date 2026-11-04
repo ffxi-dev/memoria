@@ -166,6 +166,11 @@ auto Session::start(std::optional<LateLogin> late) -> void
                 std::lock_guard lock(modeMutex_);
                 return policyFor(mode_.mode);
             },
+            .pseudonymKey = [this]
+            {
+                std::lock_guard lock(modeMutex_);
+                return pseudonymKeyFor(mode_, seed_);
+            },
             .ended = [this](const std::filesystem::path& capture)
             {
                 if (!uploader_->ended(capture.filename().string()))
@@ -542,7 +547,13 @@ auto Session::unlink(const std::string& why) -> void
 
 auto Session::hello() -> std::string
 {
-    return liveHello(character_.characterName.data(), character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
+    std::optional<xicap::PseudonymKey> key;
+    {
+        std::lock_guard lock(modeMutex_);
+        key = pseudonymKeyFor(mode_, seed_);
+    }
+    const std::string name = character_.characterName.data();
+    return liveHello(key ? xicap::Pseudonymizer(*key).name(name) : name, character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
 }
 
 // A linked install records in its account's mode. The request runs on its own thread; while one is in flight, another waits for the next call.
@@ -575,10 +586,6 @@ auto Session::modeLine() -> std::string
 {
     std::lock_guard lock(modeMutex_);
     auto            line = std::format("mode {}", modeName(mode_.mode));
-    if (mode_.mode == Mode::Anonymous)
-    {
-        line += paint(Color::Yellow, " (not built yet: recording as default)");
-    }
     return line + (modeFromVault_ ? " (set on Vault)" : "");
 }
 
@@ -804,10 +811,6 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     else if (sub == "mode" && args.size() == 2)
     {
         say(modeLine() + ". /memoria mode default|everything|anonymous");
-    }
-    else if (sub == "mode" && parseMode(args[2]) == Mode::Anonymous)
-    {
-        say(paint(Color::Yellow, "Anonymous mode is not ready yet.") + " Memoria keeps recording in " + modeLine() + ".");
     }
     else if (const auto mode = sub == "mode" ? parseMode(args[2]) : std::nullopt; mode)
     {

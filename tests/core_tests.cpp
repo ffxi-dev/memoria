@@ -257,7 +257,7 @@ TEST_CASE("a recording is xicap format 4, signed to the end")
     {
         xicap::Reader r(files[0]);
         CHECK(r.versionMajor() == 4);
-        CHECK(r.versionMinor() == 0);
+        CHECK(r.versionMinor() == xicap::VERSION_MINOR);
     }
     const auto read = readCapture(files[0]);
     CHECK(read.packets == 1);
@@ -2304,14 +2304,15 @@ TEST_CASE("the install's mode is kept, and only modes this build records in come
     CHECK(loadMode(path) == Mode::Default); // none saved
     REQUIRE(saveMode(path, Mode::Everything));
     CHECK(loadMode(path) == Mode::Everything);
-    REQUIRE(saveMode(path, Mode::Anonymous)); // not built yet: records as default
-    CHECK(loadMode(path) == Mode::Default);
+    REQUIRE(saveMode(path, Mode::Anonymous));
+    CHECK(loadMode(path) == Mode::Anonymous);
     std::ofstream(path, std::ios::trunc) << "loud\n";
     CHECK(loadMode(path) == Mode::Default);
     CHECK(parseMode("everything") == Mode::Everything);
     CHECK_FALSE(parseMode("Everything"));
     CHECK(policyFor(Mode::Default).rules.size() == xicap::defaultExclusionPolicy().rules.size());
     CHECK(policyFor(Mode::Everything).rules.empty());
+    CHECK(policyFor(Mode::Anonymous).name == "xicap-anonymous");
     fs::remove_all(dir);
 }
 
@@ -2408,4 +2409,128 @@ TEST_CASE("everything mode keeps chat whole, in the capture and the live frames;
         CHECK(frame.size() == 16 + (mode == Mode::Everything ? 16 : 4));
         fs::remove_all(dir);
     }
+}
+
+namespace
+{
+
+// A zone-in naming the character (UniqueNo at 4, name at 132), and another player's update (name at 90).
+auto named(uint64_t t, uint16_t opcode, size_t size, size_t nameAt, const char* name, uint32_t id) -> Event
+{
+    auto e = gamePacket(t, opcode);
+    e.data.resize(size, 0);
+    const auto hdr = static_cast<uint16_t>(((size / 4) << 9) | opcode);
+    e.data[0]      = static_cast<uint8_t>(hdr);
+    e.data[1]      = static_cast<uint8_t>(hdr >> 8);
+    std::memcpy(e.data.data() + 4, &id, 4);
+    std::memcpy(e.data.data() + nameAt, name, std::strlen(name));
+    return e;
+}
+
+} // namespace
+
+TEST_CASE("an anonymous capture names no player: not in its file name, header, packets, live frames, or state file")
+{
+    const auto dir    = tempDir();
+    auto       opts   = options(dir);
+    const auto key    = xicap::deriveKey(opts.seed, xicap::PSEUDONYM_KEY_LABEL);
+    opts.pseudonymKey = [&]
+    {
+        return std::optional(key);
+    };
+    std::vector<std::vector<uint8_t>> live;
+    {
+        Recorder   rec(opts);
+        const auto owner = rec.live().claim();
+        rec.live().open(owner, true);
+        rec.login(T0, who("Nouurs", 0x0AB61C));
+        rec.packet(named(T0 + 1, 0x00A, 148, 132, "Nouurs", 0x0AB61C));
+        rec.packet(named(T0 + 2, 0x00D, 108, 90, "Audithor", 0x0A0B0C));
+        rec.stop();
+        live = rec.live().take(owner);
+    }
+
+    xicap::Pseudonymizer p(key);
+    const auto           paths = captures(dir);
+    REQUIRE(paths.size() == 1);
+    xicap::Reader r(paths[0]);
+    CHECK(r.policy().name == "xicap-anonymous");
+    CHECK(std::string(r.character().characterName.data()) == p.name("Nouurs"));
+    CHECK(r.character().characterId == p.playerId(0x0AB61C));
+    CHECK(r.character().contentId >= 0x80000000u);
+    CHECK_FALSE(r.characterMismatch());
+    CHECK(r.verify().signedToEnd);
+    std::array<uint8_t, 64> secret{};
+    std::array<uint8_t, 32> install{};
+    auto                    seed = opts.seed;
+    crypto_ed25519_key_pair(secret.data(), install.data(), seed.data());
+    CHECK(r.signingKey() != install); // nothing links it to the install's other captures
+
+    // Every file Memoria left, by name and by content, every packet read back, and every live frame.
+    std::string all;
+    for (const auto& e : fs::recursive_directory_iterator(dir))
+    {
+        all += e.path().filename().string() + "/";
+        if (e.is_regular_file())
+        {
+            std::ifstream in(e.path(), std::ios::binary);
+            all.append(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    xicap::ReadPacket packet{};
+    size_t            packets = 0;
+    while (r.next(packet))
+    {
+        all.append(reinterpret_cast<const char*>(packet.data.data()), packet.data.size());
+        ++packets;
+    }
+    CHECK(packets == 2);
+    for (const auto& m : live)
+    {
+        all.append(m.begin(), m.end());
+    }
+    for (const uint32_t id : { 0x0AB61Cu, 0x0A0B0Cu })
+    {
+        CHECK(all.find(std::string(reinterpret_cast<const char*>(&id), 4)) == std::string::npos);
+    }
+    CHECK(all.find("Nouurs") == std::string::npos);
+    CHECK(all.find("Audithor") == std::string::npos);
+    CHECK(all.find(p.name("Audithor")) != std::string::npos);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a capture never names one of another mode as the capture it continues")
+{
+    const auto        dir  = tempDir();
+    auto              opts = options(dir);
+    std::atomic<bool> anonymous{ false };
+    opts.pseudonymKey = [&]
+    {
+        return anonymous ? std::optional(xicap::deriveKey(opts.seed, xicap::PSEUDONYM_KEY_LABEL)) : std::nullopt;
+    };
+    {
+        Recorder rec(opts);
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        REQUIRE(waitFor([&]
+                        {
+                            return !rec.status().capture.empty();
+                        }));
+        anonymous = true;
+        rec.login(T0 + 10'000, who("Audithor", 2));
+        rec.packet(gamePacket(T0 + 10'001));
+        rec.stop();
+    }
+    size_t seen = 0;
+    for (const auto& path : captures(dir))
+    {
+        xicap::Reader r(path);
+        if (r.policy().name == "xicap-anonymous")
+        {
+            CHECK(r.previousCaptureId() == xicap::CaptureId{});
+            ++seen;
+        }
+    }
+    CHECK(seen == 1);
+    fs::remove_all(dir);
 }

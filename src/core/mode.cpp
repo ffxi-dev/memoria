@@ -1,8 +1,10 @@
 #include "core/mode.h"
 
 #include <nlohmann/json.hpp>
+#include <xicap/pseudonym.h>
 #include <xicap/writer.h>
 
+#include <charconv>
 #include <format>
 #include <fstream>
 #include <string>
@@ -39,7 +41,7 @@ auto loadMode(const std::filesystem::path& path) -> Mode
 {
     std::string text;
     std::getline(std::ifstream(path), text);
-    return parseMode(text) == Mode::Everything ? Mode::Everything : Mode::Default;
+    return parseMode(text).value_or(Mode::Default);
 }
 
 auto saveMode(const std::filesystem::path& path, Mode mode) -> bool
@@ -58,7 +60,27 @@ auto policyFor(Mode mode) -> xicap::ExclusionPolicy
     {
         return { .name = "everything", .version = 1, .rules = {} };
     }
-    return xicap::defaultExclusionPolicy(); // anonymous mode's rewriting hooks in here once it is built
+    if (mode == Mode::Anonymous)
+    {
+        return xicap::anonymousExclusionPolicy();
+    }
+    return xicap::defaultExclusionPolicy();
+}
+
+auto pseudonymKeyFor(const AccountMode& mode, const xicap::SecretSeed& seed) -> std::optional<xicap::PseudonymKey>
+{
+    if (mode.mode != Mode::Anonymous)
+    {
+        return std::nullopt;
+    }
+    xicap::PseudonymKey key{};
+    const auto&         hex = mode.pseudonymKey;
+    bool                ok  = hex.size() == key.size() * 2;
+    for (size_t i = 0; ok && i < key.size(); ++i)
+    {
+        ok = std::from_chars(hex.data() + i * 2, hex.data() + i * 2 + 2, key[i], 16).ptr == hex.data() + i * 2 + 2;
+    }
+    return ok ? key : xicap::deriveKey(seed, xicap::PSEUDONYM_KEY_LABEL);
 }
 
 auto fetchMode(Http& http, const std::string& server, const std::string& installToken) -> std::expected<AccountMode, std::string>

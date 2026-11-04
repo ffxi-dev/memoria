@@ -3,6 +3,7 @@
 #include "core/event_queue.h"
 #include "core/live.h"
 
+#include <xicap/pseudonym.h>
 #include <xicap/writer.h>
 
 #include <chrono>
@@ -28,6 +29,10 @@ struct RecorderOptions
     size_t                    queueBytes = 64 * 1024 * 1024;
     // Asked on the writer thread as each capture opens: the policy for it, its session file, and its live frames. Empty: the default.
     std::function<xicap::ExclusionPolicy()> policy;
+    // Asked on the writer thread as each capture opens: a key when the capture is anonymous. Its names and player ids then
+    // become pseudonyms before anything is written or sent live, it takes xicap's anonymous policy whatever policy says,
+    // and it is signed with a key derived from seed, so nothing links it to the install's other captures.
+    std::function<std::optional<xicap::PseudonymKey>()> pseudonymKey;
     // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then
     // closes, and the next packet starts a new one that names it, as after a write error.
     std::function<bool(const std::filesystem::path& capture)> ended;
@@ -112,6 +117,9 @@ private:
     std::chrono::steady_clock::time_point reopenAt_{};
     xicap::CaptureId                      previous_{};
     xicap::ExclusionPolicy                policy_ = xicap::defaultExclusionPolicy(); // the open capture's
+    xicap::CharacterIdentity              character_{};                              // as the open capture's header names it
+    std::optional<xicap::PseudonymKey>    pseudonymKey_;
+    std::optional<xicap::Pseudonymizer>   pseudonymizer_; // while captures are anonymous
     std::chrono::steady_clock::time_point lastFlush_{};
 
     mutable std::mutex statusMutex_;

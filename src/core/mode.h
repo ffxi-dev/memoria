@@ -2,6 +2,7 @@
 
 #include "core/http.h"
 
+#include <xicap/pseudonym.h>
 #include <xicap/types.h>
 
 #include <expected>
@@ -19,7 +20,7 @@ enum class Mode
 {
     Default,    // the library's default policy: chat, tells and linkshell board posts cut out
     Everything, // no policy: every packet whole, other players' chat included
-    Anonymous,  // names and player ids replaced with pseudonyms: not built yet, so it records as Default
+    Anonymous,  // Default, with names and player ids replaced by pseudonyms
 };
 
 auto modeName(Mode mode) -> std::string_view;
@@ -37,6 +38,10 @@ struct AccountMode
     Mode        mode = Mode::Default;
     std::string pseudonymKey; // for anonymous mode's pseudonyms; never printed
 };
+
+// The key an anonymous capture's pseudonyms are made with: the account's from Mogsafe, so imports agree, or one derived
+// from the install's seed when there is none. Nothing outside anonymous mode.
+auto pseudonymKeyFor(const AccountMode& mode, const xicap::SecretSeed& seed) -> std::optional<xicap::PseudonymKey>;
 
 // Asks Mogsafe for the linked account's mode with the install's token.
 auto fetchMode(Http& http, const std::string& server, const std::string& installToken) -> std::expected<AccountMode, std::string>;

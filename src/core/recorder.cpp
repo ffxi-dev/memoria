@@ -276,13 +276,13 @@ auto Recorder::config(const Login& who, xicap::StartContext start, const xicap::
     xicap::WriterConfig config{};
     config.captureAgent      = options_.captureAgent;
     config.clientVersion     = who.clientVersion;
-    config.character         = who.character;
+    config.character         = character_;
     config.clockSource       = xicap::ClockSource::Live;
     config.origin            = xicap::Origin::Live;
     config.network           = who.network;
     config.startContext      = start;
     config.previousCaptureId = previous;
-    config.signingSeed       = options_.seed;
+    config.signingSeed       = pseudonymizer_ ? xicap::deriveKey(options_.seed, xicap::ANONYMOUS_SIGNING_LABEL) : options_.seed;
     config.policy            = policy_;
     config.captureId         = randomCaptureId();
     return config;
@@ -291,9 +291,21 @@ auto Recorder::config(const Login& who, xicap::StartContext start, const xicap::
 // Called with no capture open. A session open from before goes on.
 auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 {
+    const auto key = options_.pseudonymKey ? options_.pseudonymKey() : std::nullopt;
+    if (key != pseudonymKey_)
+    {
+        previous_     = {}; // a capture never names one of another mode or key, which would link them
+        pseudonymKey_ = key;
+        pseudonymizer_.reset();
+        if (key)
+        {
+            pseudonymizer_.emplace(*key);
+        }
+    }
+    character_ = pseudonymizer_ ? pseudonymizer_->character(who.character) : who.character;
     if (previous_ == xicap::CaptureId{})
     {
-        std::ifstream state(stateFile(options_.dir, who.character));
+        std::ifstream state(stateFile(options_.dir, character_));
         std::string   id;
         std::string   open;
         if (state >> id >> open && open == "open")
@@ -301,9 +313,10 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
             previous_ = parseHex(id).value_or(xicap::CaptureId{});
         }
     }
-    policy_         = options_.policy ? options_.policy() : xicap::defaultExclusionPolicy();
+    policy_         = pseudonymizer_ ? xicap::anonymousExclusionPolicy() : options_.policy ? options_.policy()
+                                                                                           : xicap::defaultExclusionPolicy();
     auto       cfg  = config(who, who.midSession ? xicap::StartContext::MidSession : xicap::StartContext::Login, previous_);
-    const auto path = options_.dir / fileName(timestamp, who.character, cfg.captureId);
+    const auto path = options_.dir / fileName(timestamp, character_, cfg.captureId);
     login_          = who;
     reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
     writer_         = std::make_unique<xicap::Writer>(path, std::move(cfg));
@@ -328,10 +341,19 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 
 auto Recorder::write(const Event& event) -> void
 {
+    const auto             direction = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient;
+    auto                   data      = std::as_bytes(std::span{ event.data });
+    std::vector<std::byte> pseudonymized;
+    if (pseudonymizer_) // before the capture, its session file and the live feed: none of them gets a real name
+    {
+        pseudonymized.assign(data.begin(), data.end());
+        pseudonymizer_->packet(event.channel, direction, pseudonymized);
+        data = pseudonymized;
+    }
     const xicap::OutPacket packet{
         .timestamp  = event.timestamp,
-        .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
-        .data       = std::as_bytes(std::span{ event.data }),
+        .direction  = direction,
+        .data       = data,
         .channel    = event.channel,
         .opcode     = event.opcode,
         .provenance = event.provenance,
@@ -478,7 +500,7 @@ auto Recorder::saveState(bool open) -> void
 {
     if (login_)
     {
-        std::ofstream(stateFile(options_.dir, login_->character), std::ios::trunc) << picosha2::bytes_to_hex_string(previous_) << ' ' << (open ? "open" : "closed") << '\n';
+        std::ofstream(stateFile(options_.dir, character_), std::ios::trunc) << picosha2::bytes_to_hex_string(previous_) << ' ' << (open ? "open" : "closed") << '\n';
     }
 }
 
