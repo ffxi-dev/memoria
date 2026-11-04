@@ -15,10 +15,11 @@ namespace memoria
 // Who logged in, as the plugin read it at the zone-in after character select.
 struct Login
 {
-    xicap::CharacterIdentity character{};
-    xicap::Network           network    = xicap::Network::Unknown;
-    bool                     midSession = false; // the plugin loaded after the login
-    std::string              clientVersion;      // as the client told the lobby
+    xicap::Character character;
+    uint16_t         worldId{}; // 0 when unknown; the capture keeps only the world's name
+    xicap::Network   network    = xicap::Network::Unknown;
+    bool             midSession = false; // the plugin loaded after the login
+    std::string      clientVersion;      // as the client told the lobby
 };
 
 struct Event

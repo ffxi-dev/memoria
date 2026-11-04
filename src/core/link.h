@@ -2,8 +2,6 @@
 
 #include "core/http.h"
 
-#include <xicap/types.h>
-
 #include <chrono>
 #include <expected>
 #include <filesystem>
@@ -28,8 +26,8 @@ struct Linked
     std::string account;
 };
 
-// Asks Mogsafe for a code, proving with the install's key that this install holds it.
-auto startLink(Http& http, const std::string& server, const xicap::SecretSeed& seed, uint64_t unixSeconds) -> std::expected<LinkCode, std::string>;
+// Asks Mogsafe for a code the player enters on the link page, and a secret handle to poll with.
+auto startLink(Http& http, const std::string& server) -> std::expected<LinkCode, std::string>;
 
 // Empty while the player has not approved yet; an error once the code expired or was refused.
 auto pollLink(Http& http, const std::string& server, const std::string& poll) -> std::expected<std::optional<Linked>, std::string>;

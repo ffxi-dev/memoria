@@ -1,12 +1,9 @@
 #include "plugin/session.h"
 
-#include "core/seed_file.h"
+#include "core/file.h"
 #include "plugin/client.h"
 #include "plugin/text.h"
 #include "plugin/winhttp.h"
-
-#include <picosha2.h>
-#include <xicap/constants.h>
 
 #include <algorithm>
 #include <array>
@@ -29,6 +26,15 @@ namespace memoria
 {
 namespace
 {
+
+// GP_SERV_COMMAND_LOGIN (0x00A) and GP_SERV_COMMAND_LOGOUT (0x00B), after atom0s's XiPackets. Offsets count the packet's
+// 4-byte header.
+constexpr uint16_t LOGIN           = 0x00A;
+constexpr uint16_t LOGOUT          = 0x00B;
+constexpr size_t   LOGIN_UNIQUE_NO = 4;
+constexpr size_t   LOGIN_NAME      = 132;
+constexpr size_t   LOGIN_NAME_SIZE = 16;
+constexpr size_t   LOGOUT_STATE    = 4;
 
 // Square Enix's retail zone servers, 124.150.152.0/21.
 constexpr uint32_t RETAIL_FIRST = 0x7C969800;
@@ -63,14 +69,14 @@ auto zoneServer() -> uint32_t
     }
 }
 
-auto characterOf(const uint8_t* data, uint32_t size) -> xicap::CharacterIdentity
+auto characterOf(const uint8_t* data, uint32_t size) -> xicap::Character
 {
-    xicap::CharacterIdentity c{};
-    if (size >= xicap::FFXIPacket::LOGIN_NAME_OFFSET + xicap::FFXIPacket::LOGIN_NAME_SIZE)
+    xicap::Character c;
+    if (size >= LOGIN_NAME + LOGIN_NAME_SIZE)
     {
-        std::memcpy(&c.characterId, data + xicap::FFXIPacket::LOGIN_UNIQUE_NO_OFFSET, sizeof(c.characterId));
-        const auto* name = reinterpret_cast<const char*>(data + xicap::FFXIPacket::LOGIN_NAME_OFFSET);
-        std::memcpy(c.characterName.data(), name, strnlen(name, c.characterName.size() - 1));
+        std::memcpy(&c.characterId, data + LOGIN_UNIQUE_NO, sizeof(c.characterId));
+        const auto* name = reinterpret_cast<const char*>(data + LOGIN_NAME);
+        c.name.assign(name, strnlen(name, LOGIN_NAME_SIZE));
     }
     return c;
 }
@@ -137,14 +143,6 @@ Session::Session(Host host)
 
 auto Session::start(std::optional<LateLogin> late) -> void
 {
-    const auto seed = loadOrCreateSeed(config_ / "key");
-    if (!seed)
-    {
-        startError_ = seed.error();
-        say("not recording: " + startError_);
-        return; // stay loaded so /memoria status can say why
-    }
-    seed_ = *seed;
     if (auto config = readIni(config_ / "upload.ini"); config && (*config)["server"].starts_with("https://"))
     {
         server_ = (*config)["server"];
@@ -159,7 +157,6 @@ auto Session::start(std::optional<LateLogin> late) -> void
         startUploads();
         recorder_ = std::make_unique<Recorder>(RecorderOptions{
             .dir          = captures_,
-            .seed         = seed_,
             .captureAgent = "Memoria " MEMORIA_VERSION_TEXT,
             .policy       = [this]
             {
@@ -200,10 +197,8 @@ auto Session::start(std::optional<LateLogin> late) -> void
     // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
-        Login login{ .network = network(), .midSession = true, .clientVersion = client::lobby::version() };
-        login.character.characterId = late->characterId;
-        std::memcpy(login.character.characterName.data(), late->name.data(), (std::min)(late->name.size(), login.character.characterName.size() - 1));
-        characterError_ = client::lobby::character(login.character);
+        Login login{ .character = { .characterId = late->characterId, .name = late->name }, .network = network(), .midSession = true, .clientVersion = client::lobby::version() };
+        characterError_ = client::lobby::character(login);
         character_      = login.character;
         loggedIn_       = true;
         loggedInAs_     = login.character.characterId;
@@ -225,10 +220,10 @@ Session::~Session()
     if (recorder_)
     {
         capture = recorder_->status().capture;
-        recorder_->stop(); // writes the footer
+        recorder_->stop(); // writes the trailer
         recorder_.reset();
     }
-    // Mogsafe ends a silent recording after 5 minutes: without its last bytes and footer now, Vault keeps it cut off.
+    // Mogsafe ends a silent recording after 5 minutes: without its last bytes and trailer now, Vault keeps it cut off.
     if (uploader_ && !capture.empty())
     {
         uploader_->finish(capture.filename().string(), std::chrono::seconds(3));
@@ -247,18 +242,18 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
         return;
     }
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
-    if (id == xicap::FFXIPacket::LOGIN_ZONE)
+    if (id == LOGIN)
     {
-        auto who = characterOf(data, size);
-        if (!loggedIn_ || who.characterId != loggedInAs_)
+        Login who{ .character = characterOf(data, size), .network = network(), .clientVersion = client::lobby::version() };
+        if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
             characterError_ = client::lobby::character(who);
-            character_      = who;
+            character_      = who.character;
             loggedIn_       = true;
-            loggedInAs_     = who.characterId;
+            loggedInAs_     = who.character.characterId;
             refreshChat(); // a change made on Mogsafe applies from the capture after this one
             greet();
-            recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
+            recorder_->login(clock_.nowMs(), std::move(who));
             if (live_)
             {
                 live_->setHello(hello());
@@ -266,7 +261,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
         }
     }
     record(false, size, data, modified, sizeChunk, dataChunk, injected, blocked);
-    if (id == xicap::FFXIPacket::LOGOUT && size > 4 && leavesGame(data[4]))
+    if (id == LOGOUT && size > LOGOUT_STATE && leavesGame(data[LOGOUT_STATE]))
     {
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
@@ -503,8 +498,7 @@ auto Session::link() -> void
                                                                {
                                                                    http.cancel();
                                                                });
-                               const auto               now  = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                               const auto               code = startLink(http, server_, seed_, static_cast<uint64_t>(now));
+                               const auto               code = startLink(http, server_);
                                if (stop.stop_requested())
                                {
                                    return;
@@ -574,7 +568,7 @@ auto Session::unlink(const std::string& why) -> void
 
 auto Session::hello() -> std::string
 {
-    return liveHello(character_.characterName.data(), character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
+    return liveHello(character_.name, character_.world, client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
 }
 
 // A linked install saves chat when its account chose to. The request runs on its own thread; while one is in flight,
@@ -624,12 +618,12 @@ auto Session::status() -> void
     }
     else
     {
-        std::error_code   ec;
-        const auto        onDisk  = std::filesystem::file_size(s.capture, ec);
-        const auto        raw     = s.bytesIn + s.bytesOut;
-        const auto        seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
-        const std::string name(character_.characterName.data());
-        const std::string world(character_.worldName.data());
+        std::error_code ec;
+        const auto      onDisk  = std::filesystem::file_size(s.capture, ec);
+        const auto      raw     = s.bytesIn + s.bytesOut;
+        const auto      seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
+        const auto&     name    = character_.name;
+        const auto&     world   = character_.world;
         say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), name, world.empty() ? "" : " on " + world, duration(seconds), count(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), sizeText(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
     }
     const auto version = client::lobby::version();
@@ -740,11 +734,6 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     if (sub == "status")
     {
         status();
-    }
-    else if (sub == "key")
-    {
-        const auto s = recorder_->status();
-        say(s.capture.empty() ? "the key shows once a capture opens" : "public key " + picosha2::bytes_to_hex_string(s.publicKey));
     }
     else if (sub == "note" && args.size() > 2)
     {
@@ -882,7 +871,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     }
     else
     {
-        say("/memoria status | link | unlink | live [off] | upload on|off | import | key | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | live [off] | upload on|off | import | note <text> | session start <file.xicap> | session stop");
     }
 }
 

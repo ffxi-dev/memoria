@@ -1,6 +1,6 @@
 #include "core/recorder.h"
 
-#include "core/seed_file.h"
+#include "core/file.h"
 #include "core/tus.h"
 
 #include <picosha2.h>
@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <cstring>
 #include <format>
 #include <fstream>
 #include <random>
@@ -22,7 +21,7 @@ namespace
 {
 
 // Per character, since clients can share an install. It says whether the character's last capture was left open by a crash, so the next one can name it.
-auto stateFile(const std::filesystem::path& dir, const xicap::CharacterIdentity& character) -> std::filesystem::path
+auto stateFile(const std::filesystem::path& dir, const xicap::Character& character) -> std::filesystem::path
 {
     return dir / std::format("state-{}.txt", character.characterId);
 }
@@ -59,17 +58,17 @@ auto randomCaptureId() -> xicap::CaptureId
 }
 
 // A login that could not read the content id and world (0) matches on the character id and name alone.
-auto sameCharacter(const xicap::CharacterIdentity& a, const xicap::CharacterIdentity& b) -> bool
+auto sameCharacter(const Login& a, const Login& b) -> bool
 {
-    const bool known = a.contentId != 0 && b.contentId != 0;
-    return a.characterId == b.characterId && a.characterName == b.characterName && (!known || (a.contentId == b.contentId && a.worldId == b.worldId));
+    const bool known = a.character.contentId != 0 && b.character.contentId != 0;
+    return a.character.characterId == b.character.characterId && a.character.name == b.character.name && (!known || (a.character.contentId == b.character.contentId && a.worldId == b.worldId));
 }
 
-auto fileName(uint64_t timestamp, const xicap::CharacterIdentity& character, const xicap::CaptureId& id) -> std::string
+auto fileName(uint64_t timestamp, const xicap::Character& character, const xicap::CaptureId& id) -> std::string
 {
     const std::chrono::sys_time<std::chrono::milliseconds> when{ std::chrono::milliseconds{ timestamp } };
 
-    std::string name(character.characterName.data(), strnlen(character.characterName.data(), character.characterName.size()));
+    auto name = character.name;
     std::ranges::replace_if(name, [](unsigned char c)
                             {
                                 return !std::isalnum(c);
@@ -236,9 +235,9 @@ auto Recorder::handle(const Event& event) -> void
         switch (event.kind)
         {
             case Event::Kind::Login:
-                if (writer_ && login_ && sameCharacter(login_->character, event.login->character))
+                if (writer_ && login_ && sameCharacter(*login_, *event.login))
                 {
-                    login_->character = event.login->character; // the header keeps what it had; later logins compare against what is now known
+                    login_ = event.login; // the header keeps what it had; later logins compare against what is now known
                     mark(xicap::MarkerKind::Login);
                 }
                 else
@@ -284,21 +283,17 @@ auto Recorder::handle(const Event& event) -> void
     }
 }
 
-auto Recorder::config(const Login& who, xicap::StartContext start, const xicap::CaptureId& previous) const -> xicap::WriterConfig
+auto Recorder::metadata(const Login& who, const xicap::CaptureId& previous) const -> xicap::Metadata
 {
-    xicap::WriterConfig config{};
-    config.captureAgent      = options_.captureAgent;
-    config.clientVersion     = who.clientVersion;
-    config.character         = who.character;
-    config.clockSource       = xicap::ClockSource::Live;
-    config.origin            = xicap::Origin::Live;
-    config.network           = who.network;
-    config.startContext      = start;
-    config.previousCaptureId = previous;
-    config.signingSeed       = options_.seed;
-    config.policy            = policy_;
-    config.captureId         = randomCaptureId();
-    return config;
+    return {
+        .captureId         = randomCaptureId(),
+        .previousCaptureId = previous,
+        .network           = who.network,
+        .captureAgent      = options_.captureAgent,
+        .clientVersion     = who.clientVersion,
+        .character         = who.character,
+        .policy            = policy_,
+    };
 }
 
 // Called with no capture open. A session open from before goes on.
@@ -315,11 +310,11 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
         }
     }
     policy_         = options_.policy ? options_.policy() : xicap::defaultExclusionPolicy();
-    auto       cfg  = config(who, who.midSession ? xicap::StartContext::MidSession : xicap::StartContext::Login, previous_);
-    const auto path = options_.dir / fileName(timestamp, who.character, cfg.captureId);
+    auto       meta = metadata(who, previous_);
+    const auto path = options_.dir / fileName(timestamp, who.character, meta.captureId);
     login_          = who;
     reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
-    writer_         = std::make_unique<xicap::Writer>(path, std::move(cfg));
+    writer_         = std::make_unique<xicap::Writer>(path, std::move(meta));
     previous_       = writer_->captureId();
     saveState(true);
     if (!who.midSession)
@@ -328,7 +323,6 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
     }
     std::lock_guard lock(statusMutex_);
     status_.capture    = path;
-    status_.publicKey  = writer_->publicKey();
     status_.packets    = 0;
     status_.packetsIn  = 0;
     status_.packetsOut = 0;
@@ -393,7 +387,7 @@ auto Recorder::openSession(const std::filesystem::path& path) -> void
         {
             throw std::runtime_error(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));
         }
-        session_ = std::make_unique<xicap::Writer>(path, config(*login_, xicap::StartContext::MidSession, writer_->captureId()));
+        session_ = std::make_unique<xicap::Writer>(path, metadata(*login_, writer_->captureId()));
     }
     catch (const std::exception& error)
     {
@@ -479,7 +473,7 @@ auto Recorder::rollover() -> void
     status_.capture.clear();
 }
 
-// Writes the footer and drops the writer. A footer that failed leaves the capture cut off, so the state stays open and the next capture names it.
+// Writes the trailer and drops the writer. A trailer that failed leaves the capture cut off, so the state stays open and the next capture names it.
 auto Recorder::finish() -> void
 {
     bool closed = true;

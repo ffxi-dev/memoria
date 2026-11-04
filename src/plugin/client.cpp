@@ -247,14 +247,15 @@ auto version() -> std::string
     }
 }
 
-auto character(xicap::CharacterIdentity& c) -> std::string
+auto character(Login& who) -> std::string
 {
     if (getter() == 0)
     {
         return "the character signature is missing";
     }
     // The list holds lobby packet 0x20's entries (LSB's lpkt_chr_info_sub2); the context keeps the count before it and the index sent in packet 0x07 before that.
-    constexpr uint32_t ENTRY_SIZE = 0x8C;
+    constexpr uint32_t ENTRY_SIZE      = 0x8C;
+    constexpr size_t   WORLD_NAME_SIZE = 16;
     try
     {
         const auto list = lobby::list();
@@ -270,15 +271,14 @@ auto character(xicap::CharacterIdentity& c) -> std::string
         const auto* entry = reinterpret_cast<const uint8_t*>(list + index * ENTRY_SIZE);
         uint16_t    low{};
         std::memcpy(&low, entry + 4, sizeof(low));
-        if ((static_cast<uint32_t>(entry[11]) << 16 | low) != c.characterId)
+        if ((static_cast<uint32_t>(entry[11]) << 16 | low) != who.character.characterId)
         {
             return "the selected character is another one";
         }
-        std::memcpy(&c.contentId, entry, sizeof(c.contentId));
-        std::memcpy(&c.worldId, entry + 6, sizeof(c.worldId));
-        const auto* world = reinterpret_cast<const char*>(entry + 28);
-        c.worldName       = {};
-        std::memcpy(c.worldName.data(), world, strnlen(world, c.worldName.size() - 1));
+        std::memcpy(&who.character.contentId, entry, sizeof(who.character.contentId));
+        std::memcpy(&who.worldId, entry + 6, sizeof(who.worldId));
+        const auto* world   = reinterpret_cast<const char*>(entry + 28);
+        who.character.world = std::string(world, strnlen(world, WORLD_NAME_SIZE));
         return {};
     }
     catch (...) // /EHa

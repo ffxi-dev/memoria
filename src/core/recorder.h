@@ -21,7 +21,6 @@ namespace memoria
 struct RecorderOptions
 {
     std::filesystem::path     dir;
-    xicap::SecretSeed         seed{};
     std::string               captureAgent;
     std::chrono::milliseconds flushEvery{ 5000 };
     std::chrono::milliseconds drainEvery{ 50 };
@@ -50,7 +49,6 @@ struct RecorderStatus
     uint64_t              dropped{};    // the queue's, and those that came while no capture could be written
     std::string           error;        // why the capture stopped, until one writes again
     std::string           sessionError; // why the last session ended early or never started
-    xicap::PublicKey      publicKey{};
 };
 
 // Writes queued events to xicap captures on a thread of its own. A login of another character starts a new capture; the same character logging back in continues it. A session is a second capture of the same packets, written to a path of the caller's choosing until sessionStop.
@@ -83,7 +81,7 @@ public:
 private:
     auto run() -> void;
     auto handle(const Event& event) -> void;
-    auto config(const Login& who, xicap::StartContext start, const xicap::CaptureId& previous) const -> xicap::WriterConfig;
+    auto metadata(const Login& who, const xicap::CaptureId& previous) const -> xicap::Metadata;
     auto open(uint64_t timestamp, const Login& who) -> void;
     auto write(const Event& event) -> void;
     auto mark(xicap::MarkerKind kind, std::string_view text = {}) -> void;

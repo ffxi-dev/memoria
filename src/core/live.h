@@ -2,7 +2,7 @@
 
 #include "core/http.h"
 
-#include <xicap/writer.h>
+#include <xicap/policy.h>
 
 #include <atomic>
 #include <cstdint>

@@ -1,18 +1,16 @@
 #include "core/captain.h"
 #include "core/chat.h"
 #include "core/clock.h"
-#include "core/ed25519.h"
 #include "core/event_queue.h"
+#include "core/file.h"
 #include "core/link.h"
 #include "core/live.h"
 #include "core/recorder.h"
-#include "core/seed_file.h"
 #include "core/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 #include <picosha2.h>
-#include <xicap/constants.h>
 #include <xicap/reader.h>
 #include <zstd.h>
 
@@ -71,6 +69,12 @@ auto tempDir() -> fs::path
     return dir;
 }
 
+auto readAll(const fs::path& path) -> std::vector<uint8_t>
+{
+    std::ifstream in(path, std::ios::binary);
+    return { std::istreambuf_iterator<char>(in), {} };
+}
+
 auto packet(size_t size) -> Event
 {
     return Event{ .kind = Event::Kind::Packet, .data = std::vector<uint8_t>(size, 1) };
@@ -124,63 +128,6 @@ TEST_CASE("the queue drops packets past its limit, never markers")
     CHECK_FALSE(queue.push(packet(100)));
 }
 
-TEST_CASE("the install key is created once and never replaced")
-{
-    const auto dir  = tempDir();
-    const auto path = dir / "config" / "memoria" / "key";
-
-    const auto first = loadOrCreateSeed(path);
-    REQUIRE(first.has_value());
-    CHECK(fs::file_size(path) == 32);
-    CHECK((!keepsPermissions() || ownerOnly(path))); // other users of the PC cannot read the seed
-    const auto second = loadOrCreateSeed(path);
-    REQUIRE(second.has_value());
-    CHECK(*second == *first);
-
-    std::ofstream(path, std::ios::binary | std::ios::trunc) << "short";
-    CHECK_FALSE(loadOrCreateSeed(path).has_value());
-    CHECK(fs::file_size(path) == 5); // left alone, not replaced
-
-    fs::remove(path);
-    fs::create_directory(path); // something there that is not a file
-    CHECK_FALSE(loadOrCreateSeed(path).has_value());
-    fs::remove_all(dir);
-}
-
-TEST_CASE("clients starting together on a fresh install all get the key on disk")
-{
-    for (int round = 0; round < 20; ++round)
-    {
-        const auto                                                 dir  = tempDir();
-        const auto                                                 path = dir / "key";
-        std::vector<std::expected<xicap::SecretSeed, std::string>> seeds(8);
-        {
-            std::latch                go(static_cast<std::ptrdiff_t>(seeds.size()));
-            std::vector<std::jthread> clients;
-            for (auto& seed : seeds)
-            {
-                clients.emplace_back([&]
-                                     {
-                                         go.arrive_and_wait();
-                                         seed = loadOrCreateSeed(path);
-                                     });
-            }
-        }
-        const auto onDisk = loadOrCreateSeed(path);
-        REQUIRE(onDisk.has_value());
-        for (const auto& seed : seeds)
-        {
-            if (!seed)
-            {
-                FAIL(seed.error());
-            }
-            CHECK(*seed == *onDisk);
-        }
-        CHECK(std::distance(fs::directory_iterator(dir), fs::directory_iterator{}) == 1); // no temporary file left
-        fs::remove_all(dir);
-    }
-}
-
 namespace
 {
 
@@ -189,8 +136,7 @@ constexpr uint64_t T0 = 1'790'000'000'000ULL;
 auto options(const fs::path& dir) -> RecorderOptions
 {
     RecorderOptions o;
-    o.dir = dir;
-    o.seed.fill(7);
+    o.dir          = dir;
     o.captureAgent = "Memoria test";
     o.flushEvery   = std::chrono::milliseconds(20);
     o.drainEvery   = std::chrono::milliseconds(5);
@@ -199,14 +145,12 @@ auto options(const fs::path& dir) -> RecorderOptions
 
 auto who(const char* name, uint32_t id) -> Login
 {
-    Login l{};
-    l.character.contentId   = id;
-    l.character.characterId = id;
-    l.character.worldId     = 42;
-    std::memcpy(l.character.characterName.data(), name, std::strlen(name));
-    l.network       = xicap::Network::Retail;
-    l.clientVersion = "30261006_0";
-    return l;
+    return {
+        .character     = { .contentId = id, .characterId = id, .name = name, .world = "Asura" },
+        .worldId       = 42,
+        .network       = xicap::Network::Retail,
+        .clientVersion = "30261006_0",
+    };
 }
 
 auto gamePacket(uint64_t t, uint16_t opcode = 0x015) -> Event
@@ -238,8 +182,7 @@ struct Read
     std::vector<xicap::MarkerKind> markers;
     uint64_t                       packets{};
     bool                           complete{};
-    bool                           signedToEnd{};
-    xicap::StartContext            start{};
+    bool                           atLogin{}; // a login marker comes before the first packet
     xicap::CaptureId               id{};
     xicap::CaptureId               previous{};
     std::string                    name;
@@ -247,25 +190,25 @@ struct Read
 
 auto readCapture(const fs::path& path) -> Read
 {
-    xicap::Reader     r(path);
-    Read              out{ .complete = r.complete(), .start = r.startContext(), .id = r.captureId(), .previous = r.previousCaptureId() };
-    xicap::ReadPacket p{};
-    while (r.next(p))
+    xicap::Reader r(path);
+    const auto&   meta = r.metadata();
+    Read          out{ .id = meta.captureId, .previous = meta.previousCaptureId, .name = meta.character.name };
+    for (const auto& p : r)
     {
+        out.atLogin = out.atLogin || (out.packets == 0 && std::ranges::find(p.markers, xicap::MarkerKind::Login, &xicap::Marker::kind) != p.markers.end());
         out.packets++;
         for (const auto& m : p.markers)
         {
             out.markers.push_back(m.kind);
         }
     }
-    out.signedToEnd = r.verify().signedToEnd;
-    out.name        = r.character().characterName.data();
+    out.complete = r.complete();
     return out;
 }
 
 } // namespace
 
-TEST_CASE("a recording is xicap format 4, signed to the end")
+TEST_CASE("a recording is xicap format 5, complete")
 {
     const auto dir = tempDir();
     {
@@ -277,15 +220,10 @@ TEST_CASE("a recording is xicap format 4, signed to the end")
     }
     const auto files = captures(dir);
     REQUIRE(files.size() == 1);
-    {
-        xicap::Reader r(files[0]);
-        CHECK(r.versionMajor() == 4);
-        CHECK(r.versionMinor() == 0);
-    }
+    CHECK(readAll(files[0])[8] == 5);
     const auto read = readCapture(files[0]);
     CHECK(read.packets == 1);
     CHECK(read.complete);
-    CHECK(read.signedToEnd);
     fs::remove_all(dir);
 }
 
@@ -308,10 +246,9 @@ TEST_CASE("a relog on the same character continues the capture")
     REQUIRE(files.size() == 1);
     const auto c = readCapture(files[0]);
     CHECK(c.complete);
-    CHECK(c.signedToEnd);
     CHECK(c.packets == 3);
     CHECK(c.name == "Nouurs");
-    CHECK(c.start == xicap::StartContext::Login);
+    CHECK(c.atLogin);
     CHECK(c.markers == std::vector{ xicap::MarkerKind::Login, xicap::MarkerKind::Logout, xicap::MarkerKind::Login });
     CHECK(files[0].filename().string().find("-Nouurs-") != std::string::npos);
     fs::remove_all(dir);
@@ -323,7 +260,7 @@ TEST_CASE("a start that missed the content id continues on a login that has it")
     {
         Login late               = who("Nouurs", 1);
         late.character.contentId = 0;
-        late.character.worldId   = 0;
+        late.worldId             = 0;
         late.midSession          = true;
         Recorder rec(options(dir));
         rec.login(T0, late);
@@ -340,6 +277,23 @@ TEST_CASE("a start that missed the content id continues on a login that has it")
     REQUIRE(files.size() == 2);
     CHECK(readCapture(files[0]).markers == std::vector{ xicap::MarkerKind::Login });
     CHECK(readCapture(files[0]).packets == 2);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("the same character id and name on another world starts a new capture")
+{
+    const auto dir = tempDir();
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        Login moved   = who("Nouurs", 1);
+        moved.worldId = 43;
+        rec.login(T0 + 10'000, moved);
+        rec.packet(gamePacket(T0 + 10'001));
+        rec.stop();
+    }
+    CHECK(captures(dir).size() == 2);
     fs::remove_all(dir);
 }
 
@@ -406,7 +360,7 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
     const auto after = readCapture(files[1]);
     CHECK(after.previous == cut);
     CHECK(readCapture(files[2]).previous == xicap::CaptureId{}); // Mule never crashed
-    CHECK(after.start == xicap::StartContext::MidSession);
+    CHECK(!after.atLogin);
     CHECK(after.markers.empty()); // no login seen: none marked
     fs::remove_all(dir);
 }
@@ -433,13 +387,12 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     CHECK(part.complete);
     CHECK(part.name == "Nouurs");
     CHECK(part.previous == main.id);
-    CHECK(part.start == xicap::StartContext::MidSession);
+    CHECK(!part.atLogin);
 
-    xicap::Reader     r(session);
-    xicap::ReadPacket p{};
-    size_t            packets = 0;
-    std::string       notes;
-    while (r.next(p))
+    xicap::Reader r(session);
+    size_t        packets = 0;
+    std::string   notes;
+    for (const auto& p : r)
     {
         ++packets;
         for (const auto& m : p.markers)
@@ -592,9 +545,8 @@ TEST_CASE("dropped packets leave a note in the capture")
     }
     bool noted = false;
     {
-        xicap::Reader     r(captures(dir)[0]); // closed before the folder goes: Windows keeps an open file
-        xicap::ReadPacket p{};
-        while (r.next(p))
+        xicap::Reader r(captures(dir)[0]); // closed before the folder goes: Windows keeps an open file
+        for (const auto& p : r)
         {
             for (const auto& m : p.markers)
             {
@@ -608,6 +560,9 @@ TEST_CASE("dropped packets leave a note in the capture")
 
 namespace
 {
+
+// Stands in for a capture's trailer.
+const auto TRAILER = std::string("XCPF") + std::string(20, 't');
 
 auto fromBase64(std::string_view in) -> std::string
 {
@@ -630,7 +585,8 @@ auto fromBase64(std::string_view in) -> std::string
     return out;
 }
 
-// Mogsafe's upload protocol in memory. Like the real one, a close wants the file's hash and a complete capture: here, one ending in the trailer magic XCPF.
+// Mogsafe's upload protocol in memory. Like the real one, a close wants the file's hash and a complete capture: here, one
+// whose last 24 bytes start with the trailer magic XCPF.
 // A captain import instead names its log's CRC-32 and size, which a later import of the same log meets as a 409.
 class FakeMogsafe final : public Http
 {
@@ -800,7 +756,7 @@ public:
         {
             return HttpResponse{ .status = 409 };
         }
-        const bool complete = u.data.size() >= 4 && std::string(u.data.end() - 4, u.data.end()) == "XCPF";
+        const bool complete = u.data.size() >= TRAILER.size() && std::string(u.data.end() - static_cast<std::ptrdiff_t>(TRAILER.size()), u.data.end()).starts_with("XCPF");
         if (!complete)
         {
             return HttpResponse{ .status = 409 };
@@ -833,12 +789,6 @@ auto append(const fs::path& path, const std::string& bytes) -> void
     std::ofstream(path, std::ios::binary | std::ios::app) << bytes;
 }
 
-auto readAll(const fs::path& path) -> std::vector<uint8_t>
-{
-    std::ifstream in(path, std::ios::binary);
-    return { std::istreambuf_iterator<char>(in), {} };
-}
-
 auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_ptr<Uploader>
 {
     if (!fs::exists(dir / "config" / "token"))
@@ -868,8 +818,8 @@ TEST_CASE("an upload follows a growing file and closes once it is complete")
 
     append(file, std::string(400, 'x'));
     CHECK(!up->pass());
-    CHECK(!up->pass()); // all sent; the close is refused: no footer yet
-    append(file, std::string(50, 'x') + "XCPF");
+    CHECK(!up->pass()); // all sent; the close is refused: no trailer yet
+    append(file, std::string(50, 'x') + TRAILER);
     CHECK(!up->pass()); // sends the rest
     CHECK(!up->pass()); // closes
     REQUIRE(server.creates == 1);
@@ -878,7 +828,7 @@ TEST_CASE("an upload follows a growing file and closes once it is complete")
     CHECK(u.data == readAll(file));
     const auto status = up->status();
     REQUIRE(status.size() == 1);
-    CHECK(status[0].sent == 554);
+    CHECK(status[0].sent == 574);
     CHECK(status[0].error.empty());
 }
 
@@ -1006,7 +956,7 @@ TEST_CASE("outages only delay, and an upload the server never kept starts over")
 namespace
 {
 
-// Mogsafe's link endpoints in memory. start checks the signature as Mogsafe does; the test plays the player who approves.
+// Mogsafe's link endpoints in memory; the test plays the player who approves.
 class FakeLink final : public Http
 {
 public:
@@ -1019,25 +969,16 @@ public:
     };
 
     Code        state = Code::Pending;
-    std::string signedKey;
+    std::string started; // the body of the last start
 
     auto request([[maybe_unused]] const std::string& method, const std::string& url, [[maybe_unused]] const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
-        const auto json = nlohmann::json::parse(std::string(body.begin(), body.end()));
         if (url.ends_with("/v1/link/start"))
         {
-            const auto key     = json.at("key").get<std::string>();
-            const auto message = std::format("memoria-link\n{}\n{}", key, json.at("time").get<uint64_t>());
-            const auto sig     = fromHex(json.at("sig").get<std::string>());
-            const auto pub     = fromHex(key);
-            if (sig.size() != 64 || pub.size() != 32 || crypto_ed25519_check(sig.data(), pub.data(), reinterpret_cast<const uint8_t*>(message.data()), message.size()) != 0)
-            {
-                return HttpResponse{ .status = 400 };
-            }
-            signedKey = key;
+            started = std::string(body.begin(), body.end());
             return HttpResponse{ .status = 201, .body = R"({"code":"ABCD-2345","poll":"p0ll","url":"https://mogsafe.test/link?code=ABCD-2345","interval":1,"expires":600})" };
         }
-        if (json.at("poll") != "p0ll")
+        if (nlohmann::json::parse(std::string(body.begin(), body.end())).at("poll") != "p0ll")
         {
             return HttpResponse{ .status = 410 };
         }
@@ -1054,38 +995,19 @@ public:
         }
         return HttpResponse{ .status = 500 };
     }
-
-private:
-    static auto fromHex(const std::string& hex) -> std::vector<uint8_t>
-    {
-        std::vector<uint8_t> out;
-        for (size_t i = 0; i + 1 < hex.size(); i += 2)
-        {
-            out.push_back(static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16)));
-        }
-        return out;
-    }
 };
 
 } // namespace
 
-TEST_CASE("a link starts with a signature by the install key and ends with a token")
+TEST_CASE("a link starts with a code and a handle, and polls with the handle until a token comes")
 {
-    FakeLink          mogsafe;
-    xicap::SecretSeed seed{};
-    seed.fill(7);
-
-    const auto code = startLink(mogsafe, "https://mogsafe.test", seed, 1'790'000'000);
+    FakeLink   mogsafe;
+    const auto code = startLink(mogsafe, "https://mogsafe.test");
     REQUIRE(code.has_value());
+    CHECK(mogsafe.started == "{}");
     CHECK(code->code == "ABCD-2345");
+    CHECK(code->poll == "p0ll");
     CHECK(code->interval == std::chrono::seconds(1));
-
-    // The key Mogsafe saw is the one xicap signs captures with.
-    std::array<uint8_t, 64> secret{};
-    std::array<uint8_t, 32> pub{};
-    auto                    copy = seed;
-    crypto_ed25519_key_pair(secret.data(), pub.data(), copy.data());
-    CHECK(mogsafe.signedKey == picosha2::bytes_to_hex_string(pub));
 
     const auto pending = pollLink(mogsafe, "https://mogsafe.test", code->poll);
     REQUIRE(pending.has_value());
@@ -1097,6 +1019,7 @@ TEST_CASE("a link starts with a signature by the install key and ends with a tok
     REQUIRE(linked->has_value());
     CHECK((*linked)->token == "t0ken");
     CHECK((*linked)->account == "sruon");
+    CHECK(!pollLink(mogsafe, "https://mogsafe.test", "another").has_value()); // a handle Mogsafe never issued
 }
 
 TEST_CASE("an expired or refused link says why")
@@ -1218,7 +1141,7 @@ TEST_CASE("an upload's URL keeps Mogsafe's HTTPS origin, whatever Location says"
         const auto  dir = tempDir();
         FakeMogsafe server;
         server.origin = origin;
-        append(dir / "a.xicap", std::string(500, 'x') + "XCPF");
+        append(dir / "a.xicap", std::string(500, 'x') + TRAILER);
         auto up = uploader(dir, server);
         CHECK(!up->pass());
         CHECK(!up->pass());
@@ -1233,7 +1156,7 @@ TEST_CASE("an upload's URL keeps Mogsafe's HTTPS origin, whatever Location says"
         append(dir / "a.xicap", std::string(500, 'x'));
         CHECK(!uploader(dir, server)->pass());
         std::ofstream(dir / "uploads.txt", std::ios::trunc) << "a.xicap\thttp://mogsafe.test/v1/uploads/1\t0\t0\t500\n";
-        append(dir / "a.xicap", "XCPF");
+        append(dir / "a.xicap", TRAILER);
         auto up = uploader(dir, server);
         CHECK(!up->pass());
         CHECK(!up->pass());
@@ -1462,7 +1385,7 @@ TEST_CASE("a live frame is version, channel, flags, time, length, then the packe
     CHECK(liveFrame(outPacket(e)) == want);
 }
 
-TEST_CASE("live frames hold what the capture holds, so chat goes out stubbed")
+TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
 {
     const auto dir = tempDir();
     {
@@ -1480,15 +1403,15 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out stubbed")
 
         const auto live = frames(rec.live().take(owner));
         REQUIRE(live.size() == 4);
-        CHECK(live[0].data.size() == 4);
-        CHECK((live[0].flags & xicap::PacketFlag::Excluded) != 0);
-        CHECK(live[1].data.size() == 4);
-        CHECK(live[1].flags == (xicap::PacketFlag::Excluded | xicap::PacketFlag::ClientToServer));
-        CHECK(live[2].data.size() == 16);
+        CHECK(live[0].flags == xicap::PacketFlag::Redacted);
+        CHECK(live[1].flags == (xicap::PacketFlag::Redacted | xicap::PacketFlag::ClientToServer));
+        CHECK(live[1].data.size() == 16);
+        CHECK(std::ranges::count(live[1].data, 0) == 10); // the text, from 0x06
+        CHECK(live[2].flags == 0);
         CHECK(live[3].channel == 1);
 
-        xicap::Reader     r(captures(dir)[0]);
-        xicap::ReadPacket p{};
+        xicap::Reader r(captures(dir)[0]);
+        xicap::Packet p;
         for (const auto& f : live)
         {
             REQUIRE(r.next(p));
@@ -1579,21 +1502,20 @@ TEST_CASE("a malformed answer from Mogsafe is an error, never an exception that 
             return answer;
         }
     };
-    const xicap::SecretSeed seed{};
-    Canned                  http;
+    Canned http;
     for (const auto* body : { R"({"code":null})", R"({"code":"A","interval":"5"})", R"({"token":{}})", R"({"token":"t","account":7})", R"({"token":1,"url":"https://x"})", R"({"token":"t","url":[]})" })
     {
         INFO(body);
         for (const int status : { 200, 201 })
         {
             http.answer = { .status = status, .body = body };
-            CHECK_NOTHROW(std::ignore = startLink(http, "https://mogsafe.test", seed, 1));
+            CHECK_NOTHROW(std::ignore = startLink(http, "https://mogsafe.test"));
             CHECK_NOTHROW(std::ignore = pollLink(http, "https://mogsafe.test", "p"));
             CHECK_NOTHROW(std::ignore = startLive(http, "https://mogsafe.test", "t0ken"));
         }
     }
     http.answer = { .status = 201, .body = R"({"code":null})" };
-    CHECK(!startLink(http, "https://mogsafe.test", {}, 1).has_value());
+    CHECK(!startLink(http, "https://mogsafe.test").has_value());
 }
 
 TEST_CASE("a live link comes from Mogsafe with the install's token")
@@ -2393,7 +2315,7 @@ TEST_CASE("a capture Mogsafe refused stays refused, with its reason, after a res
     const auto  dir  = tempDir();
     const auto  file = dir / "a.xicap";
     FakeMogsafe server;
-    append(file, std::string(500, 'x') + "XCPF");
+    append(file, std::string(500, 'x') + TRAILER);
     auto up = uploader(dir, server);
     CHECK(!up->pass());              // sends
     server.forced["POST"] = { 422 }; // the close: refused for good
@@ -2413,7 +2335,7 @@ TEST_CASE("a capture Mogsafe refused stays refused, with its reason, after a res
     fs::remove_all(dir);
 }
 
-TEST_CASE("at unload the last bytes and the footer reach Mogsafe, and the game waits no longer than allowed")
+TEST_CASE("at unload the last bytes and the trailer reach Mogsafe, and the game waits no longer than allowed")
 {
     const auto  dir  = tempDir();
     const auto  file = dir / "a.xicap";
@@ -2429,7 +2351,7 @@ TEST_CASE("at unload the last bytes and the footer reach Mogsafe, and the game w
                         const auto status = up->status();
                         return !status.empty() && status[0].sent == 500;
                     }));
-    append(file, std::string(100, 'y') + "XCPF"); // the recorder's last frame and footer, at unload
+    append(file, std::string(100, 'y') + TRAILER); // the recorder's last frame and trailer, at unload
     const auto before = std::chrono::steady_clock::now();
     up->finish("a.xicap", std::chrono::seconds(3));
     CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(3));
@@ -2472,7 +2394,7 @@ TEST_CASE("at unload a hung connection holds the game for the time allowed, no l
     };
     const auto dir = tempDir();
     saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" });
-    append(dir / "a.xicap", std::string(500, 'x') + "XCPF");
+    append(dir / "a.xicap", std::string(500, 'x') + TRAILER);
     auto up = std::make_unique<Uploader>(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config" }, std::make_unique<Hung>());
     up->start();
     std::this_thread::sleep_for(std::chrono::milliseconds(50)); // the first pass hangs in its create
@@ -2539,7 +2461,7 @@ TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, onc
     FakeMogsafe server;
     append(file, std::string(500, 'x'));
     CHECK(!uploader(dir, server)->pass());
-    append(file, std::string(100, 'y') + "XCPF"); // a long outage, then the recorder rolled over and closed the file
+    append(file, std::string(100, 'y') + TRAILER); // a long outage, then the recorder rolled over and closed the file
     server.uploads.begin()->second.cutOff = true;
 
     // Stands in for xicap: the frames past held, as a capture of their own that a closed upload accepts.
@@ -2548,7 +2470,7 @@ TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, onc
     {
         asked.emplace_back(capture, held);
         const auto bytes = readAll(capture);
-        std::ofstream(out, std::ios::binary) << std::string(xicap::HEADER_SIZE, 'h') << std::string(bytes.begin() + static_cast<std::ptrdiff_t>(held), bytes.end());
+        std::ofstream(out, std::ios::binary) << std::string(CAPTURE_HEADER_SIZE, 'h') << std::string(bytes.begin() + static_cast<std::ptrdiff_t>(held), bytes.end());
         return std::nullopt;
     };
     const auto make = [&]
@@ -2613,13 +2535,13 @@ TEST_CASE("a lost close answer for a capture the server holds complete counts as
     const auto  dir  = tempDir();
     const auto  file = dir / "a.xicap";
     FakeMogsafe server;
-    append(file, std::string(500, 'x') + "XCPF");
+    append(file, std::string(500, 'x') + TRAILER);
     CHECK(!uploader(dir, server)->pass());
     server.uploads.begin()->second.closed = true; // closed, its answer lost
     auto up                               = uploader(dir, server);
     CHECK(!up->pass());
     CHECK(!up->ended("a.xicap"));
-    CHECK(up->status()[0].sent == 504);
+    CHECK(up->status()[0].sent == 524);
     CHECK(server.creates == 1);
     fs::remove_all(dir);
 }
@@ -2648,7 +2570,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
                     {
                         first = rec.status().capture;
                         std::error_code ec;
-                        return !first.empty() && fs::file_size(first, ec) >= xicap::HEADER_SIZE;
+                        return !first.empty() && fs::file_size(first, ec) >= CAPTURE_HEADER_SIZE;
                     }));
     CHECK(!up->pass());
     REQUIRE(server.creates == 1);
@@ -2689,7 +2611,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     CHECK(old.packets == 2);
     CHECK(now.packets == 1);
     CHECK(now.previous == old.id);
-    CHECK(now.start == xicap::StartContext::MidSession);
+    CHECK(!now.atLogin);
     fs::remove_all(dir);
 }
 
@@ -2749,13 +2671,13 @@ TEST_CASE("each capture takes the chat choice it opens with")
     std::set<std::string> policies;
     for (const auto& path : captures(dir))
     {
-        policies.insert(xicap::Reader(path).policy().name);
+        policies.insert(xicap::Reader(path).metadata().policy.name);
     }
     CHECK(policies == std::set<std::string>{ "xicap-default", "save-chat" });
     fs::remove_all(dir);
 }
 
-TEST_CASE("a capture that saves chat keeps it whole, in the file and the live frames; otherwise it is cut")
+TEST_CASE("a capture that saves chat keeps it whole, in the file and the live frames; otherwise its text is zeroed")
 {
     for (const bool saveChat : { false, true })
     {
@@ -2768,22 +2690,22 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
         {
             Recorder rec(opts);
             rec.login(T0, who("Nouurs", 1));
-            rec.packet(gamePacket(T0 + 1, 0x017)); // chat, to the client
+            auto said           = gamePacket(T0 + 1, 0x0B5); // chat, from the client
+            said.clientToServer = true;
+            rec.packet(std::move(said));
             rec.stop();
         }
-        size_t chat = 0;
+        const auto zeroed = static_cast<std::ptrdiff_t>(saveChat ? 0 : 10); // the text, from 0x06
         {
-            xicap::Reader     r(captures(dir)[0]);
-            xicap::ReadPacket p{};
-            while (r.next(p))
+            xicap::Reader r(captures(dir)[0]);
+            for (const auto& p : r)
             {
-                chat = p.opcode == 0x017 ? p.data.size() : chat;
+                CHECK(std::ranges::count(p.data, std::byte{ 0 }) == zeroed);
             }
         }
-        CHECK(chat == (saveChat ? 16 : 4));
-        const auto e     = gamePacket(T0 + 1, 0x017);
-        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }) }, policyFor(saveChat));
-        CHECK(frame.size() == 16 + (saveChat ? 16 : 4));
+        const auto e     = gamePacket(T0 + 1, 0x0B5);
+        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = std::as_bytes(std::span{ e.data }) }, policyFor(saveChat));
+        CHECK(std::ranges::count(frame | std::views::drop(16), 0) == zeroed);
         fs::remove_all(dir);
     }
 }
@@ -2814,20 +2736,16 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     };
     uint64_t most   = 0;
     bool     opened = false;
-    for (size_t n = xicap::HEADER_SIZE; n < bytes.size(); ++n)
+    for (size_t n = CAPTURE_HEADER_SIZE; n < bytes.size(); ++n)
     {
         write(n);
         uint64_t packets = 0;
         try
         {
-            xicap::Reader     r(cut);
-            xicap::ReadPacket p{};
+            xicap::Reader r(cut);
             opened = true;
             CHECK_FALSE(r.complete());
-            while (r.next(p))
-            {
-                ++packets;
-            }
+            packets = static_cast<uint64_t>(std::ranges::distance(r));
         }
         catch (const xicap::Error& error)
         {
@@ -2838,14 +2756,14 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
         most = std::max(most, packets);
     }
     CHECK(opened);
-    CHECK(most == 12); // a cut inside the footer still reads every packet
+    CHECK(most == 12); // a cut inside the trailer still reads every packet
 
     // Killed mid-frame: the uploader sends every byte, and stops at a close Mogsafe refuses until the file changes.
     write(bytes.size() / 2);
     FakeMogsafe server;
     auto        up = uploader(cut.parent_path(), server);
     CHECK(!up->pass());
-    CHECK(!up->pass()); // close refused: no footer
+    CHECK(!up->pass()); // close refused: no trailer
     const auto requests = server.requests;
     CHECK(!up->pass());
     CHECK(server.requests == requests + 1); // a HEAD, no close
@@ -2896,7 +2814,7 @@ TEST_CASE("any failed answer at any step is retried, and the upload ends whole")
             {
                 std::ignore = up->pass();
             }
-            append(file, "XCPF");
+            append(file, TRAILER);
             if (status != 0)
             {
                 server.forced["POST"] = { status }; // the close fails once too
@@ -3000,11 +2918,10 @@ TEST_CASE("timestamps that step back or leap ahead lose no packet")
         }
         rec.stop();
     }
-    xicap::Reader     r(captures(dir)[0]);
-    xicap::ReadPacket p{};
-    uint64_t          last = 0;
-    int               n    = 0;
-    while (r.next(p))
+    xicap::Reader r(captures(dir)[0]);
+    uint64_t      last = 0;
+    int           n    = 0;
+    for (const auto& p : r)
     {
         CHECK(p.timestamp >= last);
         last = p.timestamp;
@@ -3012,11 +2929,10 @@ TEST_CASE("timestamps that step back or leap ahead lose no packet")
     }
     CHECK(n == 6);
     CHECK(r.complete());
-    CHECK(r.verify().signedToEnd);
     CHECK(last == T0 + DAYS + 1);
 }
 
-TEST_CASE("a three-day session stays one capture, whole and signed")
+TEST_CASE("a three-day session stays one capture, whole")
 {
     const auto         dir     = tempDir();
     constexpr uint64_t PACKETS = 50'000;
@@ -3036,7 +2952,6 @@ TEST_CASE("a three-day session stays one capture, whole and signed")
     const auto read = readCapture(files[0]);
     CHECK(read.packets == PACKETS);
     CHECK(read.complete);
-    CHECK(read.signedToEnd);
     fs::remove_all(dir);
 }
 
@@ -3167,7 +3082,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
                         {
                             path = rec.status().capture;
                             std::error_code ec;
-                            return !path.empty() && fs::file_size(path, ec) > xicap::HEADER_SIZE;
+                            return !path.empty() && fs::file_size(path, ec) > CAPTURE_HEADER_SIZE;
                         }));
         cut            = readCapture(path).id;
         const int full = ::open("/dev/full", O_WRONLY);
@@ -3181,7 +3096,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
             }
         }
         ::close(full);
-        rec.stop(); // the footer never lands
+        rec.stop(); // the trailer never lands
         CHECK(!rec.status().error.empty());
     }
     {

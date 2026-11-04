@@ -2,7 +2,7 @@
 
 #include "core/http.h"
 
-#include <xicap/types.h>
+#include <xicap/policy.h>
 
 #include <expected>
 #include <string>
