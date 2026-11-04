@@ -6,6 +6,9 @@
 - A login no longer reads or writes Memoria's files on the game thread: the link and import reminders check them on a thread of their own.
 - When the disk cannot keep up, Memoria's packet queue holds at most 64 MB in all. Before, the batch being written did not count, so the queue could reach twice that.
 
+**Live**
+- `/memoria live` sends its link to Vault in a header, not in the address, so it stays out of proxy and request logs. It needs Mogsafe with the matching change.
+
 ## 0.6.0-rc.3
 
 **Captures**
