@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**Game**
+- A login no longer reads or writes Memoria's files on the game thread: the link and import reminders check them on a thread of their own.
+
 ## 0.6.0-rc.3
 
 **Captures**

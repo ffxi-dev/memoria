@@ -58,7 +58,7 @@ Retries back off from 5 s, doubling to 5 minutes (Mogsafe waits 24 hours on a si
 
 ### The reminder
 
-At a login (the zone-in that calls `remind()`) and when a link arrives, if the install is linked and `config/memoria/import-reminded` does not exist, a short-lived thread scans. If it finds a capture waiting, it creates `import-reminded` with `O_EXCL` and, only if that create succeeded, posts the line through `post()`. Clients logging in together race for the create, and one wins. `/memoria import` creates the same file. Nothing removes it, so the reminder comes once per install, ever; a scan that finds nothing writes nothing.
+At a login (the zone-in that calls `greet()`) and when a link arrives, a short-lived thread does every file check, so the packet hook never waits on the disk: if the install is linked and `config/memoria/import-reminded` does not exist, it scans. If it finds a capture waiting, it creates `import-reminded` with `O_EXCL` and, only if that create succeeded, posts the line through `post()`. Clients logging in together race for the create, and one wins. `/memoria import` creates the same file. Nothing removes it, so the reminder comes once per install, ever; a scan that finds nothing writes nothing.
 
 ### Threads and the game
 
