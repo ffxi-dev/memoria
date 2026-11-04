@@ -55,6 +55,7 @@ add_library(memoria_core STATIC
     src/core/chat.cpp
     src/core/recorder.cpp
     src/core/tus.cpp
+    src/core/upload_state.cpp
     src/core/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
