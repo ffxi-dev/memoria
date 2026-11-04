@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Fetch the Ashita SDK
         run: |
-          sdk="${RUNNER_TEMP//\//}/ashita"
+          sdk="${RUNNER_TEMP//\\//}/ashita"
           git clone -q --filter=blob:none --no-checkout --depth 1 --branch v4.3.1.1 https://github.com/AshitaXI/Ashita-v4beta.git "$sdk"
           git -C "$sdk" sparse-checkout set plugins/sdk
           git -C "$sdk" checkout -q
@@ -39,7 +39,7 @@ jobs:
           KEY: ${{ secrets.XICAP_DEPLOY_KEY }}
         run: |
           [ -n "$KEY" ] || exit 0
-          key="${RUNNER_TEMP//\//}/xicap_key"
+          key="${RUNNER_TEMP//\\//}/xicap_key"
           printf '%s\n' "$KEY" > "$key"
           chmod 600 "$key"
           {
@@ -48,7 +48,7 @@ jobs:
             echo "GIT_CONFIG_KEY_0=url.git@github.com:ffxi-dev/xicap.insteadOf"
             echo "GIT_CONFIG_VALUE_0=https://github.com/ffxi-dev/xicap"
           } >> "$GITHUB_ENV"
-      - run: cmake -S . -B build -A Win32 -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="${GITHUB_WORKSPACE//\//}/out"
+      - run: cmake -S . -B build -A Win32 -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="${GITHUB_WORKSPACE//\\//}/out"
       - run: cmake --build build --config Release --parallel --target memoria
       - uses: actions/upload-artifact@v7
         with:

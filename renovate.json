@@ -1,23 +1,36 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":semanticCommitsDisabled"],
+  "extends": [
+    "config:recommended",
+    ":semanticCommitsDisabled"
+  ],
   "timezone": "America/Denver",
-  "schedule": ["before 6am on monday"],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "prConcurrentLimit": 5,
   "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
   "customManagers": [
     {
       "customType": "regex",
       "description": "Python packages pinned with == in workflow steps",
-      "managerFilePatterns": ["/(^|/)\.github/workflows/[^/]+\.ya?ml$/"],
-      "matchStrings": ["\s(?<depName>[A-Za-z][\w.-]*)==(?<currentValue>\d[\w.]*)"],
+      "managerFilePatterns": [
+        "/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "\\s(?<depName>[A-Za-z][\\w.-]*)==(?<currentValue>\\d[\\w.]*)"
+      ],
       "datasourceTemplate": "pypi"
     }
   ],
   "packageRules": [
     {
       "description": "One pull request for every minor and patch update",
-      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
       "groupName": "minor and patch updates"
     }
   ]

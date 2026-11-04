@@ -30,7 +30,7 @@ jobs:
           KEY: ${{ secrets.XICAP_DEPLOY_KEY }}
         run: |
           [ -n "$KEY" ] || exit 0
-          key="${RUNNER_TEMP//\//}/xicap_key"
+          key="${RUNNER_TEMP//\\//}/xicap_key"
           printf '%s\n' "$KEY" > "$key"
           chmod 600 "$key"
           {
