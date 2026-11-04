@@ -43,7 +43,6 @@ TEST_CASE("a client that is not uploading reports what the uploading one sent")
     CHECK(!sender->pass());
     append(file, std::string(100, 'x'));
     const auto status = other->status();
-    CHECK(!other->uploading());
     REQUIRE(status.size() == 1);
     CHECK(status[0].name == "a.xicap");
     CHECK(status[0].sent == 500);

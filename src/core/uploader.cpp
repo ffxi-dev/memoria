@@ -496,11 +496,6 @@ auto Uploader::recordingId(const std::string& name) const -> std::string
     return url.substr(url.find_last_of('/') + 1);
 }
 
-auto Uploader::uploading() const -> bool
-{
-    return uploading_;
-}
-
 auto Uploader::status() const -> std::vector<UploadStatus>
 {
     // Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk are the truth.

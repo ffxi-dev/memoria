@@ -60,7 +60,6 @@ public:
     auto pass() -> std::optional<std::string>; // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
-    [[nodiscard]] auto uploading() const -> bool;                                 // false while another client sharing the folder sends its captures
     [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did
     [[nodiscard]] auto unauthorized() -> bool;                                    // true once each time Mogsafe refuses the token on disk, which it then deletes
     [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed: its bytes never go again
