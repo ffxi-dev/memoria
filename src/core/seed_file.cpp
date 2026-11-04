@@ -91,7 +91,11 @@ auto loadOrCreateSeed(const std::filesystem::path& path) -> std::expected<xicap:
     // A hard link fails when the key exists: of two clients starting together, one creates it and the other reads it.
     std::filesystem::create_hard_link(temp, path, ec);
     std::error_code ignored;
-    std::filesystem::remove(temp, ignored);
+    // Windows refuses to delete a name of a file another client has open to read the key: try until it lets go.
+    for (int attempt = 0; attempt < 100 && !std::filesystem::remove(temp, ignored) && std::filesystem::exists(temp, ignored); ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     if (ec && std::filesystem::exists(path, ignored))
     {
         return loadOrCreateSeed(path);
