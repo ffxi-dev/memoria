@@ -612,7 +612,19 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
                     {
                         first = rec.status().capture;
                         std::error_code ec;
-                        return !first.empty() && fs::file_size(first, ec) >= CAPTURE_HEADER_SIZE;
+                        if (first.empty() || fs::file_size(first, ec) < CAPTURE_HEADER_SIZE)
+                        {
+                            return false;
+                        }
+                        // The first frame must be whole on disk, not only its start, or the tail would hold it too.
+                        try
+                        {
+                            return readCapture(first).packets == 1;
+                        }
+                        catch (const std::exception&)
+                        {
+                            return false;
+                        }
                     }));
     CHECK(!up->pass());
     REQUIRE(server.creates == 1);
