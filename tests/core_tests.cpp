@@ -1080,6 +1080,13 @@ TEST_CASE("the link is kept across restarts")
     fs::remove_all(dir);
 }
 
+#ifdef __linux__
+TEST_CASE("a link that cannot be written says so")
+{
+    CHECK_FALSE(saveLink("/dev/full", { .token = "t0ken", .account = "sruon" })); // a full disk
+}
+#endif
+
 TEST_CASE("only the refused token is deleted")
 {
     const auto dir  = tempDir();

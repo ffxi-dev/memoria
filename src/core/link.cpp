@@ -114,8 +114,11 @@ auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool
 {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
-    return static_cast<bool>(std::ofstream(path, std::ios::trunc) << link.token << '\n'
-                                                                  << link.account << '\n');
+    std::ofstream out(path, std::ios::trunc);
+    out << link.token << '\n'
+        << link.account << '\n';
+    out.close(); // a full disk shows here, not before
+    return static_cast<bool>(out);
 }
 
 auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool

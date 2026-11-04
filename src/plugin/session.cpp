@@ -518,7 +518,11 @@ auto Session::link() -> void
                                    }
                                    if (*result)
                                    {
-                                       saveLink(config_ / "token", **result);
+                                       if (!saveLink(config_ / "token", **result))
+                                       {
+                                           post(paint(Color::Red, "Not linked: cannot save the link in " + config_.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
+                                           return;
+                                       }
                                        std::lock_guard inbox(inboxMutex_);
                                        arrived_ = **result;
                                        return;
