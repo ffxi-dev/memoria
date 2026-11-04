@@ -29,6 +29,7 @@ auto post(Http& http, const std::string& url, const nlohmann::json& body) -> std
 } // namespace
 
 auto startLink(Http& http, const std::string& server, const xicap::SecretSeed& seed, uint64_t unixSeconds) -> std::expected<LinkCode, std::string>
+try
 {
     std::array<uint8_t, 64> secret{};
     std::array<uint8_t, 32> publicKey{};
@@ -59,8 +60,13 @@ auto startLink(Http& http, const std::string& server, const xicap::SecretSeed& s
         .expires  = std::chrono::seconds(body.value("expires", 600)),
     };
 }
+catch (const nlohmann::json::exception&) // a field of the wrong type
+{
+    return std::unexpected("Mogsafe sent a malformed answer");
+}
 
 auto pollLink(Http& http, const std::string& server, const std::string& poll) -> std::expected<std::optional<Linked>, std::string>
+try
 {
     const auto res = post(http, server + "/v1/link/poll", { { "poll", poll } });
     if (!res)
@@ -85,6 +91,10 @@ auto pollLink(Http& http, const std::string& server, const std::string& poll) ->
         default:
             return std::unexpected(std::format("Mogsafe answered {}", status));
     }
+}
+catch (const nlohmann::json::exception&) // a field of the wrong type
+{
+    return std::unexpected("Mogsafe sent a malformed answer");
 }
 
 // Two lines: the token, then the account it belongs to.

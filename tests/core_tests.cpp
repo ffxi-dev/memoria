@@ -1490,6 +1490,36 @@ TEST_CASE("a live link stopped late cannot close the feed of the one that replac
     CHECK(frames(feed.take(now)).size() == 1);
 }
 
+TEST_CASE("a malformed answer from Mogsafe is an error, never an exception that ends the game")
+{
+    // Link and live run on threads of their own: an exception that escapes one ends the client.
+    class Canned final : public Http
+    {
+    public:
+        HttpResponse answer;
+
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            return answer;
+        }
+    };
+    const xicap::SecretSeed seed{};
+    Canned                  http;
+    for (const auto* body : { R"({"code":null})", R"({"code":"A","interval":"5"})", R"({"token":{}})", R"({"token":"t","account":7})", R"({"token":1,"url":"https://x"})", R"({"token":"t","url":[]})" })
+    {
+        INFO(body);
+        for (const int status : { 200, 201 })
+        {
+            http.answer = { .status = status, .body = body };
+            CHECK_NOTHROW(std::ignore = startLink(http, "https://mogsafe.test", seed, 1));
+            CHECK_NOTHROW(std::ignore = pollLink(http, "https://mogsafe.test", "p"));
+            CHECK_NOTHROW(std::ignore = startLive(http, "https://mogsafe.test", "t0ken"));
+        }
+    }
+    http.answer = { .status = 201, .body = R"({"code":null})" };
+    CHECK(!startLink(http, "https://mogsafe.test", {}, 1).has_value());
+}
+
 TEST_CASE("a live link comes from Mogsafe with the install's token")
 {
     struct Live final : Http
