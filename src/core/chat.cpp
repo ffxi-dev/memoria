@@ -1,7 +1,6 @@
 #include "core/chat.h"
 
 #include <nlohmann/json.hpp>
-#include <xicap/writer.h>
 
 #include <format>
 

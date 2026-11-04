@@ -44,7 +44,7 @@ inline auto paint(Color c, std::string_view text) -> std::string
 // What a framework gives the session: where its files go, and how it talks to the player.
 struct Host
 {
-    std::filesystem::path                   config;   // the key, token, and settings
+    std::filesystem::path                   config;   // the token and settings
     std::filesystem::path                   captures; // captures and upload state
     std::filesystem::path                   captain;  // captain's addon folder, for /memoria import
     std::function<void(const std::string&)> say;      // one chat line, on the game thread
@@ -111,7 +111,6 @@ private:
     std::filesystem::path              config_;
     std::filesystem::path              captures_;
     std::filesystem::path              captain_;
-    xicap::SecretSeed                  seed_{};
     std::string                        server_ = "https://mogsafe.sruon.dev";
     std::mutex                         inboxMutex_;
     std::vector<std::string>           inbox_;
@@ -127,7 +126,7 @@ private:
     std::string                        startError_;
     std::string                        searchError_;
     std::string                        characterError_; // why the content id and world are missing
-    xicap::CharacterIdentity           character_{};
+    xicap::Character                   character_;
     bool                               loggedIn_{ false };
     bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
     std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here

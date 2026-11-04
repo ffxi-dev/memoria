@@ -1,12 +1,9 @@
 #include "core/link.h"
 
-#include "core/ed25519.h"
-#include "core/seed_file.h"
+#include "core/file.h"
 
 #include <nlohmann/json.hpp>
-#include <picosha2.h>
 
-#include <array>
 #include <chrono>
 #include <format>
 #include <fstream>
@@ -31,21 +28,10 @@ auto post(Http& http, const std::string& url, const nlohmann::json& body) -> std
 
 } // namespace
 
-auto startLink(Http& http, const std::string& server, const xicap::SecretSeed& seed, uint64_t unixSeconds) -> std::expected<LinkCode, std::string>
+auto startLink(Http& http, const std::string& server) -> std::expected<LinkCode, std::string>
 try
 {
-    std::array<uint8_t, 64> secret{};
-    std::array<uint8_t, 32> publicKey{};
-    auto                    copy = seed; // Monocypher wipes the seed it is given
-    crypto_ed25519_key_pair(secret.data(), publicKey.data(), copy.data());
-
-    const auto              key     = picosha2::bytes_to_hex_string(publicKey);
-    const auto              message = std::format("memoria-link\n{}\n{}", key, unixSeconds);
-    std::array<uint8_t, 64> signature{};
-    crypto_ed25519_sign(signature.data(), secret.data(), reinterpret_cast<const uint8_t*>(message.data()), message.size());
-    crypto_wipe(secret.data(), secret.size());
-
-    const auto res = post(http, server + "/v1/link/start", { { "key", key }, { "time", unixSeconds }, { "sig", picosha2::bytes_to_hex_string(signature) } });
+    const auto res = post(http, server + "/v1/link/start", nlohmann::json::object());
     if (!res)
     {
         return std::unexpected(res.error());

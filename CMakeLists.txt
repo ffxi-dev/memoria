@@ -17,12 +17,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
-set(XICAP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(XICAP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# One static zstd, which captain imports use too.
+set(XICAP_FETCH_ZSTD ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     xicap
     GIT_REPOSITORY https://github.com/ffxi-dev/xicap.git
-    GIT_TAG        v4.0.0
+    GIT_TAG        v7.1.0
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(xicap)
@@ -48,18 +49,18 @@ add_library(memoria_core STATIC
     src/core/captain.cpp
     src/core/clock.cpp
     src/core/event_queue.cpp
+    src/core/file.cpp
     src/core/link.cpp
     src/core/live.cpp
     src/core/chat.cpp
     src/core/recorder.cpp
-    src/core/seed_file.cpp
     src/core/tus.cpp
     src/core/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
-target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json libzstd_static)
 if(WIN32)
-    target_link_libraries(memoria_core PRIVATE advapi32) # the key and token files' permissions
+    target_link_libraries(memoria_core PRIVATE advapi32) # the token file's permissions
 endif()
 
 if(MEMORIA_BUILD_PLUGIN)
@@ -122,7 +123,7 @@ if(MEMORIA_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     add_executable(memoria_core_tests tests/core_tests.cpp)
-    target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
+    target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(memoria_core_tests)

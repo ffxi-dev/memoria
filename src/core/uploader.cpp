@@ -1,7 +1,6 @@
 #include "core/uploader.h"
 
 #include <picosha2.h>
-#include <xicap/constants.h>
 
 #include <algorithm>
 #include <format>
@@ -151,7 +150,7 @@ auto Uploader::finish(const std::string& name, std::chrono::milliseconds limit) 
                    });
 }
 
-// Up to three steps: the last bytes, then the close the footer allows. The game waits on it, so finish() bounds it.
+// Up to three steps: the last bytes, then the close the trailer allows. The game waits on it, so finish() bounds it.
 auto Uploader::last(const std::string& name) -> void
 {
     if (!uploading_ || !allowed())
@@ -247,7 +246,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f, std::chrono::mil
         f.size = size;
         f.seen = now;
     }
-    if (size < xicap::HEADER_SIZE) // Mogsafe refuses a first append without the whole header
+    if (size < CAPTURE_HEADER_SIZE)
     {
         return std::nullopt;
     }
@@ -368,7 +367,7 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
             f.closed = true;
             f.error.clear();
             return std::nullopt;
-        case 409: // no footer yet, or bytes missing: wait for the file to change
+        case 409: // no trailer yet, or bytes missing: wait for the file to change
             f.refused = size;
             return std::nullopt;
         case 404: // Mogsafe never kept it; the caller decides

@@ -29,9 +29,12 @@ struct UploadOptions
     std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
 };
 
+// xicap's header, which Mogsafe wants whole in a file's first append.
+inline constexpr uint64_t CAPTURE_HEADER_SIZE = 160;
+
 // Writes the frames of capture past its first held bytes, the most Mogsafe kept before it cut the upload off, to out as a
-// new capture that continues it, signed by the install's key. Answers why not, if it could not. xicap's library will
-// supply it; until then cut-off tails stay on this PC.
+// new capture that continues it. Answers why not, if it could not. xicap's library will supply it; until then cut-off
+// tails stay on this PC.
 using TailWriter = std::function<std::optional<std::string>(const std::filesystem::path& capture, uint64_t held, const std::filesystem::path& out)>;
 
 struct UploadStatus

@@ -1,7 +1,7 @@
 #include "core/captain.h"
 
+#include "core/file.h"
 #include "core/link.h"
-#include "core/seed_file.h"
 
 #include <zstd.h>
 
