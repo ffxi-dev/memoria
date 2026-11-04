@@ -35,10 +35,10 @@ jobs:
           git -C "$sdk" sparse-checkout set plugins/sdk
           git -C "$sdk" checkout -q
           echo "ASHITA4_SDK_PATH=$sdk/plugins/sdk" >> "$GITHUB_ENV"
-      - uses: ffxi-dev/vault/.github/actions/deploy-key@ci/v1.12
+      - uses: ffxi-dev/vault/.github/actions/deploy-key@ci/v1.14
         with:
           key: ${{ secrets.XICAP_DEPLOY_KEY }}
-      - uses: ffxi-dev/vault/.github/actions/msvc@ci/v1.12
+      - uses: ffxi-dev/vault/.github/actions/msvc@ci/v1.14
         with:
           env: ASHITA4_SDK_PATH
           run: |
