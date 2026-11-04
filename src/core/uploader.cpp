@@ -17,7 +17,9 @@ namespace
 
 constexpr uint64_t CHUNK_SIZE = Tus::CHUNK_SIZE;
 constexpr auto     STATE_FILE = "uploads.txt";
-constexpr auto     MAX_WAIT   = std::chrono::minutes(5);
+// Failures slow the uploader to at most 12 passes' wait, a minute at the default 5 s. Mogsafe ends a recording that
+// sends nothing for 5 minutes, and one file it keeps refusing fails every pass.
+constexpr int MAX_WAIT_PASSES = 12;
 
 // A refusal's body as one line of the state file.
 auto oneLine(std::string text) -> std::string
@@ -105,7 +107,7 @@ auto Uploader::run() -> void
         catch (const std::exception&) // out of memory, or the folder went away
         {
         }
-        wait = failed ? std::min<std::chrono::milliseconds>(wait * 2, MAX_WAIT) : options_.every;
+        wait = failed ? std::min(wait * 2, options_.every * MAX_WAIT_PASSES) : options_.every;
 
         std::unique_lock lock(wakeMutex_);
         if (wake_.wait_for(lock, wait, [this]

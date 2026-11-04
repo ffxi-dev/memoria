@@ -50,7 +50,7 @@ A crash at each point:
 5. `POST <url>/close` with `{}`. `200`: done. `4xx` but `409`, `423`: refusal. `409`, `423`, `5xx`, and transport failures: retry.
 6. Delete the staged files and move the folder.
 
-Retries back off from 5 s, doubling to 5 minutes, as the `Uploader` does, and never give up while the run lasts. Rejected: sending the plain log, several times the bytes of hex text; recompressing on resume and skipping bytes as the page does with deflate, since zstd's output is not promised to match across versions and a Memoria update between two runs would send a log that fails Mogsafe's CRC check. Staging costs disk space of a fraction of the log, for one capture at a time.
+Retries back off from 5 s, doubling to 5 minutes (Mogsafe waits 24 hours on a silent import), and never give up while the run lasts. Rejected: sending the plain log, several times the bytes of hex text; recompressing on resume and skipping bytes as the page does with deflate, since zstd's output is not promised to match across versions and a Memoria update between two runs would send a log that fails Mogsafe's CRC check. Staging costs disk space of a fraction of the log, for one capture at a time.
 
 ### Moving aside
 

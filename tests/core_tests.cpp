@@ -620,6 +620,7 @@ public:
     std::map<std::string, std::string>      imported;    // capture id by "crc32:size"
     std::set<std::string>                   replaceable; // imported captures an upload with a search log replaces
     std::map<std::string, std::vector<int>> forced;      // answers by method, given before anything else
+    std::set<std::string>                   foreign;     // uploads another account made: every request answers 403
     std::set<std::thread::id>               threads;
     std::string                             token = "t0ken";
     std::string                             foreignEnd; // an upload that answers 410 with Mogsafe-Ended: refused
@@ -707,6 +708,10 @@ public:
         if (it->first == foreignEnd)
         {
             return HttpResponse{ .status = 410, .headers = { { "mogsafe-ended", "refused" } } };
+        }
+        if (foreign.contains(it->first))
+        {
+            return HttpResponse{ .status = 403 };
         }
         if (u.cutOff || u.closed && !isClose)
         {
@@ -1071,6 +1076,44 @@ TEST_CASE("only the refused token is deleted")
     CHECK(removeLink(path, "n3w"));
     CHECK(!fs::exists(path));
     CHECK(fs::is_empty(dir));
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a file Mogsafe keeps refusing never holds the recording's upload past Mogsafe's 5-minute silence limit")
+{
+    // A file uploaded under another account answers 403 to every request. Mogsafe ends a recording that sends nothing
+    // for 5 minutes, so failures may slow the uploader to at most 12 passes' wait: a minute at the default 5 s.
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    append(dir / "old.xicap", std::string(500, 'x'));
+    CHECK(!uploader(dir, server)->pass());
+    append(dir / "old.xicap", std::string(100, 'x'));
+    server.foreign.insert(server.uploads.begin()->first);
+
+    std::mutex                                         mutex;
+    std::vector<std::chrono::steady_clock::time_point> sent;
+    server.onPatch = [&]
+    {
+        std::lock_guard lock(mutex);
+        sent.push_back(std::chrono::steady_clock::now());
+    };
+    UploadOptions options{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .every = std::chrono::milliseconds(10), .idle = std::chrono::hours(1) };
+    auto          up    = std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
+    const auto    start = std::chrono::steady_clock::now();
+    up->start();
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(4))
+    {
+        append(dir / "live.xicap", std::string(500, 'y')); // the recording grows
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    up.reset();
+    REQUIRE(sent.size() > 2);
+    auto longest = std::chrono::steady_clock::duration{};
+    for (size_t i = 1; i < sent.size(); ++i)
+    {
+        longest = std::max(longest, sent[i] - sent[i - 1]);
+    }
+    CHECK(longest < std::chrono::milliseconds(600)); // 12 passes of 10 ms, and slack
     fs::remove_all(dir);
 }
 
