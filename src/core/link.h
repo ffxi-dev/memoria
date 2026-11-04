@@ -41,7 +41,10 @@ auto captureLink(const std::string& server, const std::string& id, uint64_t from
 // Deletes the link only while it holds this token: one saved since, even mid-call, stays.
 auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool;
 
-// True while no client sharing the install paused uploads and its token file still holds token: what live checks as it streams.
+// Whether any client sharing the install ran /memoria upload off.
+auto paused(const std::filesystem::path& config) -> bool;
+
+// True while uploads are not paused and the install's token file still holds token.
 auto sharing(const std::filesystem::path& config, const std::string& token) -> bool;
 
 } // namespace memoria

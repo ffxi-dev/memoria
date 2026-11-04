@@ -152,15 +152,16 @@ auto removeLink(const std::filesystem::path& path, const std::string& token) -> 
     return refused;
 }
 
-auto sharing(const std::filesystem::path& config, const std::string& token) -> bool
+auto paused(const std::filesystem::path& config) -> bool
 {
     std::error_code ec;
-    if (std::filesystem::exists(config / "paused", ec) || ec)
-    {
-        return false;
-    }
+    return std::filesystem::exists(config / "paused", ec) || ec;
+}
+
+auto sharing(const std::filesystem::path& config, const std::string& token) -> bool
+{
     const auto link = loadLink(config / "token");
-    return link && link->token == token;
+    return !paused(config) && link && link->token == token;
 }
 
 auto captureLink(const std::string& server, const std::string& id, uint64_t fromMs, uint64_t toMs) -> std::string

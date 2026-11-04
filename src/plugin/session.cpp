@@ -620,7 +620,7 @@ auto Session::status() -> void
     {
         std::error_code ec;
         const auto      onDisk  = std::filesystem::file_size(s.capture, ec);
-        const auto      raw     = s.bytesIn + s.bytesOut;
+        const auto      raw     = s.bytes;
         const auto      seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
         const auto&     name    = character_.name;
         const auto&     world   = character_.world;
