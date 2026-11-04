@@ -50,7 +50,7 @@ add_library(memoria_core STATIC
     src/core/event_queue.cpp
     src/core/link.cpp
     src/core/live.cpp
-    src/core/mode.cpp
+    src/core/chat.cpp
     src/core/recorder.cpp
     src/core/seed_file.cpp
     src/core/tus.cpp

@@ -1,9 +1,9 @@
 #pragma once
 
 #include "core/captain.h"
+#include "core/chat.h"
 #include "core/clock.h"
 #include "core/link.h"
-#include "core/mode.h"
 #include "core/recorder.h"
 #include "core/uploader.h"
 #include "plugin/live.h"
@@ -105,8 +105,7 @@ private:
     auto importLine() const -> std::string;
     auto hello() -> std::string;
     auto stopLive() -> void;
-    auto refreshMode() -> void; // asks Mogsafe for a linked account's mode, off the game thread
-    auto modeLine() -> std::string;
+    auto refreshChat() -> void; // asks Mogsafe whether the linked account saves chat, off the game thread
 
     Host                               host_;
     std::filesystem::path              config_;
@@ -133,12 +132,10 @@ private:
     bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
     std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
     uint32_t                           loggedInAs_{ 0 };
-    std::optional<ChunkKey>            lastChunk_[2]; // per direction
-    mutable std::mutex                 modeMutex_;
-    AccountMode                        mode_;            // what the next capture records in
-    bool                               modeFromVault_{}; // mode_ is the linked account's, not this install's
-    std::atomic<bool>                  fetchingMode_{ false };
-    std::jthread                       modeFetch_;
+    std::optional<ChunkKey>            lastChunk_[2];      // per direction
+    std::atomic<bool>                  saveChat_{ false }; // for the next capture: the linked account's choice
+    std::atomic<bool>                  fetchingChat_{ false };
+    std::jthread                       chatFetch_;
     std::jthread                       reminder_;
     std::jthread                       linker_; // last: destroyed first, before what its thread uses
 };

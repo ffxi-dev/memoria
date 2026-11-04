@@ -1,10 +1,10 @@
 #include "core/captain.h"
+#include "core/chat.h"
 #include "core/clock.h"
 #include "core/ed25519.h"
 #include "core/event_queue.h"
 #include "core/link.h"
 #include "core/live.h"
-#include "core/mode.h"
 #include "core/recorder.h"
 #include "core/seed_file.h"
 #include "core/uploader.h"
@@ -2693,61 +2693,44 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     fs::remove_all(dir);
 }
 
-TEST_CASE("the install's mode is kept, and only modes this build records in come back")
+TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
 {
-    const auto dir  = tempDir();
-    const auto path = dir / "config" / "memoria" / "mode";
-    CHECK(loadMode(path) == Mode::Default); // none saved
-    REQUIRE(saveMode(path, Mode::Everything));
-    CHECK(loadMode(path) == Mode::Everything);
-    REQUIRE(saveMode(path, Mode::Anonymous)); // not built yet: records as default
-    CHECK(loadMode(path) == Mode::Default);
-    std::ofstream(path, std::ios::trunc) << "loud\n";
-    CHECK(loadMode(path) == Mode::Default);
-    CHECK(parseMode("everything") == Mode::Everything);
-    CHECK_FALSE(parseMode("Everything"));
-    CHECK(policyFor(Mode::Default).rules.size() == xicap::defaultExclusionPolicy().rules.size());
-    CHECK(policyFor(Mode::Everything).rules.empty());
-    fs::remove_all(dir);
-}
-
-TEST_CASE("a linked install reads its account's mode from Mogsafe")
-{
-    struct Modes final : Http
+    struct Chat final : Http
     {
         std::string auth;
         int         status = 200;
-        std::string body   = R"({"mode":"everything","pseudonym_key":"k3y"})";
+        std::string body   = R"({"save_chat":true})";
 
         auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
         {
             CHECK(method == "GET");
-            CHECK(url == "https://mogsafe.test/v1/install/mode");
+            CHECK(url == "https://mogsafe.test/v1/install/save-chat");
             auth = headers.at(0).second;
             return HttpResponse{ .status = status, .body = body };
         }
     } mogsafe;
-    const auto got = fetchMode(mogsafe, "https://mogsafe.test", "t0ken");
-    REQUIRE(got.has_value());
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == true);
     CHECK(mogsafe.auth == "Bearer t0ken");
-    CHECK(got->mode == Mode::Everything);
-    CHECK(got->pseudonymKey == "k3y");
-    mogsafe.body = R"({"mode":"loud"})";
-    CHECK_FALSE(fetchMode(mogsafe, "https://mogsafe.test", "t0ken"));
-    mogsafe.body = "not json";
-    CHECK_FALSE(fetchMode(mogsafe, "https://mogsafe.test", "t0ken"));
+    mogsafe.body = R"({"save_chat":false})";
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == false);
+    for (const auto* bad : { R"({"save_chat":"yes"})", R"({})", "not json" })
+    {
+        mogsafe.body = bad;
+        CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+    }
+    mogsafe.body   = R"({"save_chat":true})";
     mogsafe.status = 401;
-    CHECK_FALSE(fetchMode(mogsafe, "https://mogsafe.test", "t0ken"));
+    CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
 }
 
-TEST_CASE("each capture takes the mode it opens in")
+TEST_CASE("each capture takes the chat choice it opens with")
 {
     const auto        dir  = tempDir();
     auto              opts = options(dir);
-    std::atomic<Mode> mode{ Mode::Default };
+    std::atomic<bool> saveChat{ false };
     opts.policy = [&]
     {
-        return policyFor(mode);
+        return policyFor(saveChat);
     };
     {
         Recorder rec(opts);
@@ -2757,7 +2740,7 @@ TEST_CASE("each capture takes the mode it opens in")
                         {
                             return !rec.status().capture.empty();
                         }));
-        mode = Mode::Everything; // the open capture keeps its policy
+        saveChat = true; // the open capture keeps its policy
         rec.packet(gamePacket(T0 + 2));
         rec.login(T0 + 10'000, who("Audithor", 2));
         rec.packet(gamePacket(T0 + 10'001));
@@ -2768,19 +2751,19 @@ TEST_CASE("each capture takes the mode it opens in")
     {
         policies.insert(xicap::Reader(path).policy().name);
     }
-    CHECK(policies == std::set<std::string>{ "xicap-default", "everything" });
+    CHECK(policies == std::set<std::string>{ "xicap-default", "save-chat" });
     fs::remove_all(dir);
 }
 
-TEST_CASE("everything mode keeps chat whole, in the capture and the live frames; default stubs it")
+TEST_CASE("a capture that saves chat keeps it whole, in the file and the live frames; otherwise it is cut")
 {
-    for (const auto mode : { Mode::Default, Mode::Everything })
+    for (const bool saveChat : { false, true })
     {
         const auto dir  = tempDir();
         auto       opts = options(dir);
-        opts.policy     = [mode]
+        opts.policy     = [saveChat]
         {
-            return policyFor(mode);
+            return policyFor(saveChat);
         };
         {
             Recorder rec(opts);
@@ -2796,12 +2779,11 @@ TEST_CASE("everything mode keeps chat whole, in the capture and the live frames;
             {
                 chat = p.opcode == 0x017 ? p.data.size() : chat;
             }
-            CHECK(r.policy().name == (mode == Mode::Everything ? "everything" : "xicap-default"));
         }
-        CHECK(chat == (mode == Mode::Everything ? 16 : 4));
+        CHECK(chat == (saveChat ? 16 : 4));
         const auto e     = gamePacket(T0 + 1, 0x017);
-        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }) }, policyFor(mode));
-        CHECK(frame.size() == 16 + (mode == Mode::Everything ? 16 : 4));
+        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }) }, policyFor(saveChat));
+        CHECK(frame.size() == 16 + (saveChat ? 16 : 4));
         fs::remove_all(dir);
     }
 }
