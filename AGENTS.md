@@ -4,7 +4,7 @@ These rules apply to every contributor, human or agent. `CLAUDE.md` imports this
 
 ## Source of truth
 
-A change inside Memoria starts as an OpenSpec change in this repository's `openspec/`; a change that spans bricks starts in `ffxi-dev/vault`'s `openspec/`, where `add-memoria` holds Memoria's first specification. Code, specs, design, and tasks agree at every commit: a change in behaviour updates its spec, `design.md`, or `tasks.md` in the same commit, or in a matching vault commit when the change lives there. Check a task only when it is implemented and verified by a test or a recorded run.
+A change starts as an OpenSpec change in `openspec/`. Code, specs, design, and tasks agree at every commit: a change in behaviour updates its spec, `design.md`, or `tasks.md` in the same commit. Check a task only when it is implemented and verified by a test or a recorded run.
 
 ## Layout
 
@@ -19,18 +19,10 @@ cmake -S . -B build -G Ninja -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
 cmake --build build --target memoria_core_tests && ctest --test-dir build --output-on-failure
 ```
 
-The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. CI runs both on the org's runner lsb: `test.yml` through vault's shared `cmake.yml`, which also runs the core's tests as 32-bit Windows programs under Wine, and `build.yml`, which builds the DLL with clang-cl in vault's `vault-msvc` image. Code must build with both MSVC and clang-cl. Run clang-format (v23, as CI does) on every C++ file you change. Commit in small steps; the message says why.
+The plugin builds from an MSVC x86 developer shell with `ASHITA4_SDK_PATH` set. CI runs both on GitHub's runners: `test.yml` runs the core's tests on Linux and as 32-bit Windows programs, and `build.yml` builds the DLL with MSVC. Code must build with both MSVC and clang-cl. Run clang-format (v23, as CI does) on every C++ file you change. Commit in small steps; the message says why.
 
 ## Rules
 
 - The game thread never waits: packet hooks only copy into the queue. Compression, writing, flushing, and uploading run on Memoria's own threads.
 - Captures follow xicap format 5's writer rules (`ffxi-dev/xicap` `FORMAT.md`) with the library's live preset, and are written only through xicap's library. Never write the format by hand here.
 - Upload credentials and the link handle are never printed or logged.
-- `pilot` on the owner's PC runs five live clients. Test there only when the owner schedules it.
-
-## Part of Vault
-
-One brick of Vault, the owner's platform for capturing retail FFXI and keeping the captures. The platform repository is `ffxi-dev/vault`: its `infra/memoria.tf` owns the deploy key that lets builds fetch the private xicap. On the owner's PC the repositories sit side by side in `C:/Users/sruon/Documents/GitHub/Vault/`.
-
-- **Private.** Never commit credentials, and never make the repository public without the owner.
-- **Writing** (docs, commit messages, UI text) follows `ffxi-dev/vault`'s AGENTS.md: short plain words, active voice, no filler.

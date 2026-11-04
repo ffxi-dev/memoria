@@ -39,3 +39,8 @@ The core's tests build anywhere:
 cmake -S . -B build -G Ninja -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
 cmake --build build --target memoria_core_tests && ctest --test-dir build
 ```
+
+## Licence
+
+Copyright (C) 2026 sruon. Memoria is free software under the GNU General Public License, version 3; see `LICENSE`.
+`cmake/FindAshitaSDK.cmake` is the Ashita team's, under GPL version 3 or later.

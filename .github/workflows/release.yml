@@ -5,6 +5,9 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     uses: ./.github/workflows/build.yml
@@ -12,7 +15,7 @@ jobs:
 
   publish:
     needs: build
-    runs-on: [self-hosted, lsb]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -30,7 +33,6 @@ jobs:
       - name: Checksum
         id: sum
         run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      # lsb has no gh CLI, so the release goes through the API with this action.
       - uses: softprops/action-gh-release@v3
         with:
           files: out/Memoria.dll
