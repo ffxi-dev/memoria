@@ -35,6 +35,7 @@ struct UploadStatus
     uint64_t    sent{};
     uint64_t    size{};
     bool        refused{}; // Mogsafe refused it for good; error says why
+    bool        ended{};   // Mogsafe cut its upload off: bytes past sent stay only on this PC
     std::string error;
 };
 
@@ -63,6 +64,7 @@ private:
         std::string                           url;
         bool                                  closed{};
         bool                                  ended{};   // Mogsafe answered 410: cut off or refused
+        bool                                  cutOff{};  // ended as cut off: Vault keeps the first sent bytes
         uint64_t                              refused{}; // size at the last refused close
         std::string                           reason;    // why Mogsafe refused it for good, kept in the state file
         uint64_t                              size{};
