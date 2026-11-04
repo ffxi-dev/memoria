@@ -77,6 +77,8 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/live.h
         src/plugin/session.cpp
         src/plugin/session.h
+        src/plugin/text.cpp
+        src/plugin/text.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
     )

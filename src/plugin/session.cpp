@@ -2,6 +2,7 @@
 
 #include "core/seed_file.h"
 #include "plugin/client.h"
+#include "plugin/text.h"
 #include "plugin/winhttp.h"
 
 #include <picosha2.h>
@@ -747,7 +748,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     }
     else if (sub == "note" && args.size() > 2)
     {
-        recorder_->note(clock_.nowMs(), args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>());
+        recorder_->note(clock_.nowMs(), utf8FromShiftJis(args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>()));
         say("noted");
     }
     else if (sub == "session" && args.size() > 2 && args[2] == "start")
