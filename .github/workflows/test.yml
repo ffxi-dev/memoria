@@ -40,5 +40,5 @@ jobs:
             echo "GIT_CONFIG_VALUE_0=https://github.com/ffxi-dev/xicap"
           } >> "$GITHUB_ENV"
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON ${{ matrix.arch && format('-A {0}', matrix.arch) || '' }}
-      - run: cmake --build build --config Release --parallel --target memoria_core_tests
+      - run: cmake --build build --config Release --parallel 4 --target memoria_core_tests
       - run: ctest --test-dir build -C Release --output-on-failure
