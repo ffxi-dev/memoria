@@ -12,6 +12,9 @@
 **Install**
 - Memoria creates its signing key and upload token so that only the Windows user running the game can open them; before, they took the Ashita folder's permissions, which often let every user of the PC read them. A key or token saved before keeps its old permissions. Linking now writes the token whole and swaps it in, so other clients never read half a token.
 
+**Modes (new)**
+- Memoria records in your account's privacy mode, chosen on Vault's Memoria page: default cuts chat as before, everything keeps all chat, other players' included. A change applies from the next capture. An unlinked install sets its own with `/memoria mode`. `/memoria status` shows the mode. Anonymous mode comes later.
+
 ## 0.6.0-rc.3
 
 **Captures**

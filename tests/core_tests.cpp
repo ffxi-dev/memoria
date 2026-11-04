@@ -4,6 +4,7 @@
 #include "core/event_queue.h"
 #include "core/link.h"
 #include "core/live.h"
+#include "core/mode.h"
 #include "core/recorder.h"
 #include "core/seed_file.h"
 #include "core/uploader.h"
@@ -2690,6 +2691,119 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     CHECK(now.previous == old.id);
     CHECK(now.start == xicap::StartContext::MidSession);
     fs::remove_all(dir);
+}
+
+TEST_CASE("the install's mode is kept, and only modes this build records in come back")
+{
+    const auto dir  = tempDir();
+    const auto path = dir / "config" / "memoria" / "mode";
+    CHECK(loadMode(path) == Mode::Default); // none saved
+    REQUIRE(saveMode(path, Mode::Everything));
+    CHECK(loadMode(path) == Mode::Everything);
+    REQUIRE(saveMode(path, Mode::Anonymous)); // not built yet: records as default
+    CHECK(loadMode(path) == Mode::Default);
+    std::ofstream(path, std::ios::trunc) << "loud\n";
+    CHECK(loadMode(path) == Mode::Default);
+    CHECK(parseMode("everything") == Mode::Everything);
+    CHECK_FALSE(parseMode("Everything"));
+    CHECK(policyFor(Mode::Default).rules.size() == xicap::defaultExclusionPolicy().rules.size());
+    CHECK(policyFor(Mode::Everything).rules.empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a linked install reads its account's mode from Mogsafe")
+{
+    struct Modes final : Http
+    {
+        std::string auth;
+        int         status = 200;
+        std::string body   = R"({"mode":"everything","pseudonym_key":"k3y"})";
+
+        auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            CHECK(method == "GET");
+            CHECK(url == "https://mogsafe.test/v1/install/mode");
+            auth = headers.at(0).second;
+            return HttpResponse{ .status = status, .body = body };
+        }
+    } mogsafe;
+    const auto got = fetchMode(mogsafe, "https://mogsafe.test", "t0ken");
+    REQUIRE(got.has_value());
+    CHECK(mogsafe.auth == "Bearer t0ken");
+    CHECK(got->mode == Mode::Everything);
+    CHECK(got->pseudonymKey == "k3y");
+    mogsafe.body = R"({"mode":"loud"})";
+    CHECK_FALSE(fetchMode(mogsafe, "https://mogsafe.test", "t0ken"));
+    mogsafe.body = "not json";
+    CHECK_FALSE(fetchMode(mogsafe, "https://mogsafe.test", "t0ken"));
+    mogsafe.status = 401;
+    CHECK_FALSE(fetchMode(mogsafe, "https://mogsafe.test", "t0ken"));
+}
+
+TEST_CASE("each capture takes the mode it opens in")
+{
+    const auto        dir  = tempDir();
+    auto              opts = options(dir);
+    std::atomic<Mode> mode{ Mode::Default };
+    opts.policy = [&]
+    {
+        return policyFor(mode);
+    };
+    {
+        Recorder rec(opts);
+        rec.login(T0, who("Nouurs", 1));
+        rec.packet(gamePacket(T0 + 1));
+        REQUIRE(waitFor([&]
+                        {
+                            return !rec.status().capture.empty();
+                        }));
+        mode = Mode::Everything; // the open capture keeps its policy
+        rec.packet(gamePacket(T0 + 2));
+        rec.login(T0 + 10'000, who("Audithor", 2));
+        rec.packet(gamePacket(T0 + 10'001));
+        rec.stop();
+    }
+    std::set<std::string> policies;
+    for (const auto& path : captures(dir))
+    {
+        policies.insert(xicap::Reader(path).policy().name);
+    }
+    CHECK(policies == std::set<std::string>{ "xicap-default", "everything" });
+    fs::remove_all(dir);
+}
+
+TEST_CASE("everything mode keeps chat whole, in the capture and the live frames; default stubs it")
+{
+    for (const auto mode : { Mode::Default, Mode::Everything })
+    {
+        const auto dir  = tempDir();
+        auto       opts = options(dir);
+        opts.policy     = [mode]
+        {
+            return policyFor(mode);
+        };
+        {
+            Recorder rec(opts);
+            rec.login(T0, who("Nouurs", 1));
+            rec.packet(gamePacket(T0 + 1, 0x017)); // chat, to the client
+            rec.stop();
+        }
+        size_t chat = 0;
+        {
+            xicap::Reader     r(captures(dir)[0]);
+            xicap::ReadPacket p{};
+            while (r.next(p))
+            {
+                chat = p.opcode == 0x017 ? p.data.size() : chat;
+            }
+            CHECK(r.policy().name == (mode == Mode::Everything ? "everything" : "xicap-default"));
+        }
+        CHECK(chat == (mode == Mode::Everything ? 16 : 4));
+        const auto e     = gamePacket(T0 + 1, 0x017);
+        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }) }, policyFor(mode));
+        CHECK(frame.size() == 16 + (mode == Mode::Everything ? 16 : 4));
+        fs::remove_all(dir);
+    }
 }
 
 // Faults a player's PC can throw at a recording: each test says what Memoria must keep.

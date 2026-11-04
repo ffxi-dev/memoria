@@ -31,8 +31,8 @@ auto liveHello(std::string_view character, std::string_view world, std::string_v
 // Mogsafe's {"viewers": n}; nothing for any other message.
 auto liveViewers(std::string_view message) -> std::optional<int>;
 
-// The frame of a packet as the capture stores it.
-auto liveFrame(const xicap::OutPacket& packet) -> std::vector<uint8_t>;
+// The frame of a packet as a capture written with policy stores it.
+auto liveFrame(const xicap::OutPacket& packet, const xicap::ExclusionPolicy& policy = xicap::defaultExclusionPolicy()) -> std::vector<uint8_t>;
 
 // Frames from the writer thread to the live thread. Takes nothing while closed; past maxBytes, drops and counts.
 class LiveFeed
@@ -42,7 +42,7 @@ public:
 
     explicit LiveFeed(size_t maxBytes = 1024 * 1024);
 
-    auto push(const xicap::OutPacket& packet) -> void;
+    auto push(const xicap::OutPacket& packet, const xicap::ExclusionPolicy& policy = xicap::defaultExclusionPolicy()) -> void;
 
     // The rest belong to the live link that claimed the feed last: one stopped but still closing changes nothing.
     auto claim() -> uint64_t;                                       // closes the feed and returns the new owner's id

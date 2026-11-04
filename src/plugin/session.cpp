@@ -153,6 +153,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
         }
     }
 
+    mode_.mode = linked() ? Mode::Default : loadMode(config_ / "mode"); // a linked install's comes from Mogsafe
     try
     {
         startUploads();
@@ -160,7 +161,12 @@ auto Session::start(std::optional<LateLogin> late) -> void
             .dir          = captures_,
             .seed         = seed_,
             .captureAgent = "Memoria " MEMORIA_VERSION_TEXT,
-            .ended        = [this](const std::filesystem::path& capture)
+            .policy       = [this]
+            {
+                std::lock_guard lock(modeMutex_);
+                return policyFor(mode_.mode);
+            },
+            .ended = [this](const std::filesystem::path& capture)
             {
                 if (!uploader_->ended(capture.filename().string()))
                 {
@@ -185,6 +191,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
         say("not recording: " + startError_);
         return;
     }
+    refreshMode();
     instance_    = this;
     searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
                                            {
@@ -208,8 +215,9 @@ auto Session::start(std::optional<LateLogin> late) -> void
 
 Session::~Session()
 {
-    linker_   = {}; // stops and joins
-    reminder_ = {};
+    linker_    = {}; // stops and joins
+    modeFetch_ = {};
+    reminder_  = {};
     importer_.reset(); // cancels its request and joins
     stopLive();
     closing_.clear(); // joins
@@ -249,6 +257,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
             character_      = who;
             loggedIn_       = true;
             loggedInAs_     = who.characterId;
+            refreshMode(); // a change made on Mogsafe applies from the capture after this one
             greet();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
             if (live_)
@@ -338,6 +347,7 @@ auto Session::frame() -> void
     if (arrived)
     {
         say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
+        refreshMode();
         if (!importer_ && Importer::pending(captures_))
         {
             startImport(false);
@@ -568,6 +578,43 @@ auto Session::hello() -> std::string
     return liveHello(character_.characterName.data(), character_.worldName.data(), client::lobby::version(), "Memoria " MEMORIA_VERSION_TEXT);
 }
 
+// A linked install records in its account's mode. The request runs on its own thread; while one is in flight, another waits for the next call.
+auto Session::refreshMode() -> void
+{
+    if (fetchingMode_.exchange(true))
+    {
+        return;
+    }
+    modeFetch_ = std::jthread([this](const std::stop_token& stop)
+                              {
+                                  WinHttp            http("Memoria/" MEMORIA_VERSION_TEXT);
+                                  std::stop_callback cancel(stop, [&]
+                                                            {
+                                                                http.cancel();
+                                                            });
+                                  const auto         link    = linked(); // read here: the caller may be a packet hook
+                                  const auto         fetched = link ? fetchMode(http, server_, link->token) : std::unexpected(std::string("not linked"));
+                                  if (fetched)
+                                  {
+                                      std::lock_guard lock(modeMutex_);
+                                      mode_          = *fetched;
+                                      modeFromVault_ = true;
+                                  }
+                                  fetchingMode_ = false;
+                              });
+}
+
+auto Session::modeLine() -> std::string
+{
+    std::lock_guard lock(modeMutex_);
+    auto            line = std::format("mode {}", modeName(mode_.mode));
+    if (mode_.mode == Mode::Anonymous)
+    {
+        line += paint(Color::Yellow, " (not built yet: recording as default)");
+    }
+    return line + (modeFromVault_ ? " (set on Vault)" : "");
+}
+
 // Ends the link without waiting: the live thread closes the connection, and a later frame joins it.
 auto Session::stopLive() -> void
 {
@@ -602,6 +649,7 @@ auto Session::status() -> void
     {
         client += std::format(" · {} search packets", count(s.search));
     }
+    client += " · " + modeLine();
     if (s.dropped > 0)
     {
         client += " · " + paint(Color::Yellow, std::format("{} packets dropped", count(s.dropped)));
@@ -818,6 +866,35 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
         }
         unlink("Unlinked");
     }
+    else if (sub == "mode" && linked())
+    {
+        say(std::format("This install follows the mode set on Vault: {}. Change it at ", modeLine()) + paint(Color::Cyan, server_ + "/link"));
+    }
+    else if (sub == "mode" && args.size() == 2)
+    {
+        say(modeLine() + ". /memoria mode default|everything|anonymous");
+    }
+    else if (sub == "mode" && parseMode(args[2]) == Mode::Anonymous)
+    {
+        say(paint(Color::Yellow, "Anonymous mode is not ready yet.") + " Memoria keeps recording in " + modeLine() + ".");
+    }
+    else if (const auto mode = sub == "mode" ? parseMode(args[2]) : std::nullopt; mode)
+    {
+        if (!saveMode(config_ / "mode", *mode))
+        {
+            say(paint(Color::Red, "Cannot save the mode."));
+            return;
+        }
+        {
+            std::lock_guard lock(modeMutex_);
+            mode_.mode = *mode;
+        }
+        say(std::format("Mode {} from the next capture.", modeName(*mode)));
+        if (*mode == Mode::Everything)
+        {
+            say(paint(Color::Yellow, "Captures will keep all chat, tells and other players' messages, and they are public once uploaded.") + " " + paint(Color::Cyan, "/memoria mode default") + " goes back.");
+        }
+    }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
     {
         const auto      paused = config_ / "paused";
@@ -844,7 +921,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     }
     else
     {
-        say("/memoria status | link | unlink | live [off] | upload on|off | import | key | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | live [off] | upload on|off | mode [default|everything|anonymous] | import | key | note <text> | session start <file.xicap> | session stop");
     }
 }
 
