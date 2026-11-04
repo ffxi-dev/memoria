@@ -622,6 +622,7 @@ public:
     std::map<std::string, std::vector<int>> forced;      // answers by method, given before anything else
     std::set<std::thread::id>               threads;
     std::string                             token = "t0ken";
+    std::string                             foreignEnd; // an upload that answers 410 with Mogsafe-Ended: refused
     bool                                    down{};
     bool                                    crashAfterClose{}; // the game dies once a close is accepted, before its answer
     int                                     creates{};
@@ -703,6 +704,10 @@ public:
             return HttpResponse{ .status = 404 };
         }
         auto& u = it->second;
+        if (it->first == foreignEnd)
+        {
+            return HttpResponse{ .status = 410, .headers = { { "mogsafe-ended", "refused" } } };
+        }
         if (u.cutOff || u.closed && !isClose)
         {
             return HttpResponse{ .status = 410, .headers = { { "mogsafe-ended", u.cutOff ? "cut_off" : "complete" } } };
@@ -2252,6 +2257,82 @@ TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from V
     REQUIRE(status.size() == 1);
     CHECK(!status[0].ended);
     CHECK(status[0].sent == status[0].size);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, once")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    append(file, std::string(500, 'x'));
+    CHECK(!uploader(dir, server)->pass());
+    append(file, std::string(100, 'y') + "XCPF"); // a long outage, then the recorder rolled over and closed the file
+    server.uploads.begin()->second.cutOff = true;
+
+    // Stands in for xicap: the frames past held, as a capture of their own that a closed upload accepts.
+    std::vector<std::pair<fs::path, uint64_t>> asked;
+    const auto                                 rest = [&](const fs::path& capture, uint64_t held, const fs::path& out) -> std::optional<std::string>
+    {
+        asked.emplace_back(capture, held);
+        const auto bytes = readAll(capture);
+        std::ofstream(out, std::ios::binary) << std::string(xicap::HEADER_SIZE, 'h') << std::string(bytes.begin() + static_cast<std::ptrdiff_t>(held), bytes.end());
+        return std::nullopt;
+    };
+    const auto make = [&]
+    {
+        auto up = uploader(dir, server);
+        up->continueTail(rest);
+        return up;
+    };
+    auto up = make();
+    CHECK(!up->pass());     // 410: ended
+    CHECK(!up->pass());     // writes a-rest.xicap
+    CHECK(!up->pass());     // sends it
+    CHECK(!up->pass());     // closes it
+    CHECK(!make()->pass()); // a restart writes nothing again
+    REQUIRE(asked.size() == 1);
+    CHECK(asked[0] == std::pair{ file, uint64_t{ 500 } });
+    REQUIRE(fs::exists(dir / "a-rest.xicap"));
+    CHECK(server.creates == 2);
+    CHECK(server.uploads.rbegin()->second.data == readAll(dir / "a-rest.xicap"));
+    CHECK(server.uploads.rbegin()->second.closed);
+    for (const auto& s : make()->status())
+    {
+        CHECK(!s.ended); // nothing left only on this PC
+        CHECK(s.sent == s.size);
+    }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a tail that cannot be written stays on this PC and counts as not in Vault, and a refused upload has none")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    append(dir / "a.xicap", std::string(500, 'x'));
+    append(dir / "b.xicap", std::string(500, 'x'));
+    CHECK(!uploader(dir, server)->pass());
+    append(dir / "a.xicap", std::string(100, 'y'));
+    append(dir / "b.xicap", std::string(100, 'y'));
+    server.uploads.begin()->second.cutOff = true;
+    server.foreignEnd                     = server.uploads.rbegin()->first; // b: Mogsafe-Ended: refused
+    int  calls                            = 0;
+    auto up                               = uploader(dir, server);
+    up->continueTail([&](const fs::path&, uint64_t, const fs::path&) -> std::optional<std::string>
+                     {
+                         ++calls;
+                         return "xicap cannot yet";
+                     });
+    CHECK(!up->pass());
+    std::ignore = up->pass();
+    std::ignore = up->pass();
+    CHECK(calls == 1); // tried once a run, not every pass
+    const auto status = up->status();
+    REQUIRE(status.size() == 2);
+    CHECK(status[0].ended);
+    CHECK(status[0].sent == 500);
+    CHECK(!status[1].ended);
+    CHECK(!fs::exists(dir / "a-rest.xicap"));
     fs::remove_all(dir);
 }
 

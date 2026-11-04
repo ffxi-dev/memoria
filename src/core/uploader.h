@@ -29,6 +29,11 @@ struct UploadOptions
     std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
 };
 
+// Writes the frames of capture past its first held bytes, the most Mogsafe kept before it cut the upload off, to out as a
+// new capture that continues it, signed by the install's key. Answers why not, if it could not. xicap's library will
+// supply it; until then cut-off tails stay on this PC.
+using TailWriter = std::function<std::optional<std::string>(const std::filesystem::path& capture, uint64_t held, const std::filesystem::path& out)>;
+
 struct UploadStatus
 {
     std::string name;
@@ -50,7 +55,8 @@ public:
     auto operator=(const Uploader&) -> Uploader& = delete;
 
     auto start() -> void;
-    auto pass() -> std::optional<std::string>; // the first error, if any
+    auto continueTail(TailWriter writer) -> void; // before start()
+    auto pass() -> std::optional<std::string>;    // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;  // every capture in the folder, whichever client sends it
     [[nodiscard]] auto uploading() const -> bool;                    // false while another client sharing the folder sends its captures
@@ -63,10 +69,12 @@ private:
     {
         std::string                           url;
         bool                                  closed{};
-        bool                                  ended{};   // Mogsafe answered 410: cut off or refused
-        bool                                  cutOff{};  // ended as cut off: Vault keeps the first sent bytes
-        uint64_t                              refused{}; // size at the last refused close
-        std::string                           reason;    // why Mogsafe refused it for good, kept in the state file
+        bool                                  ended{};      // Mogsafe answered 410: cut off or refused
+        bool                                  cutOff{};     // ended as cut off: Vault keeps the first sent bytes
+        bool                                  rescued{};    // its tail went to a -rest.xicap capture of its own
+        bool                                  restFailed{}; // the tail writer failed this run: tried again after a restart
+        uint64_t                              refused{};    // size at the last refused close
+        std::string                           reason;       // why Mogsafe refused it for good, kept in the state file
         uint64_t                              size{};
         uint64_t                              sent{};
         std::chrono::steady_clock::time_point seen{}; // when size last changed
@@ -78,6 +86,7 @@ private:
     auto send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
     auto close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>;
     auto end(File& f, const HttpResponse& res) -> void;
+    auto rest(const std::filesystem::path& path, File& f) -> std::optional<std::string>;
     auto allowed() -> bool;
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
     auto load() -> void;
@@ -87,6 +96,7 @@ private:
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
     Tus                   tus_; // upload thread only, but for unauthorized()
+    TailWriter            tail_;
 
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
