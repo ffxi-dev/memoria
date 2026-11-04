@@ -2453,38 +2453,40 @@ TEST_CASE("an anonymous capture names no player: not in its file name, header, p
     xicap::Pseudonymizer p(key);
     const auto           paths = captures(dir);
     REQUIRE(paths.size() == 1);
-    xicap::Reader r(paths[0]);
-    CHECK(r.policy().name == "xicap-anonymous");
-    CHECK(std::string(r.character().characterName.data()) == p.name("Nouurs"));
-    CHECK(r.character().characterId == p.playerId(0x0AB61C));
-    CHECK(r.character().contentId >= 0x80000000u);
-    CHECK_FALSE(r.characterMismatch());
-    CHECK(r.verify().signedToEnd);
-    std::array<uint8_t, 64> secret{};
-    std::array<uint8_t, 32> install{};
-    auto                    seed = opts.seed;
-    crypto_ed25519_key_pair(secret.data(), install.data(), seed.data());
-    CHECK(r.signingKey() != install); // nothing links it to the install's other captures
-
-    // Every file Memoria left, by name and by content, every packet read back, and every live frame.
     std::string all;
-    for (const auto& e : fs::recursive_directory_iterator(dir))
     {
-        all += e.path().filename().string() + "/";
-        if (e.is_regular_file())
+        xicap::Reader r(paths[0]);
+        CHECK(r.policy().name == "xicap-anonymous");
+        CHECK(std::string(r.character().characterName.data()) == p.name("Nouurs"));
+        CHECK(r.character().characterId == p.playerId(0x0AB61C));
+        CHECK(r.character().contentId >= 0x80000000u);
+        CHECK_FALSE(r.characterMismatch());
+        CHECK(r.verify().signedToEnd);
+        std::array<uint8_t, 64> secret{};
+        std::array<uint8_t, 32> install{};
+        auto                    seed = opts.seed;
+        crypto_ed25519_key_pair(secret.data(), install.data(), seed.data());
+        CHECK(r.signingKey() != install); // nothing links it to the install's other captures
+
+        // Every file Memoria left, by name and by content, every packet read back, and every live frame.
+        for (const auto& e : fs::recursive_directory_iterator(dir))
         {
-            std::ifstream in(e.path(), std::ios::binary);
-            all.append(std::istreambuf_iterator<char>(in), {});
+            all += e.path().filename().string() + "/";
+            if (e.is_regular_file())
+            {
+                std::ifstream in(e.path(), std::ios::binary);
+                all.append(std::istreambuf_iterator<char>(in), {});
+            }
         }
-    }
-    xicap::ReadPacket packet{};
-    size_t            packets = 0;
-    while (r.next(packet))
-    {
-        all.append(reinterpret_cast<const char*>(packet.data.data()), packet.data.size());
-        ++packets;
-    }
-    CHECK(packets == 2);
+        xicap::ReadPacket packet{};
+        size_t            packets = 0;
+        while (r.next(packet))
+        {
+            all.append(reinterpret_cast<const char*>(packet.data.data()), packet.data.size());
+            ++packets;
+        }
+        CHECK(packets == 2);
+    } // closes the reader, which Windows needs before the folder goes
     for (const auto& m : live)
     {
         all.append(m.begin(), m.end());
