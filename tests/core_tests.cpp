@@ -2407,36 +2407,6 @@ TEST_CASE("at unload a hung connection holds the game for the time allowed, no l
     fs::remove_all(dir);
 }
 
-TEST_CASE("a file left by a killed client whose upload the server ended is kept and never sent again")
-{
-    const auto  dir  = tempDir();
-    const auto  file = dir / "a.xicap";
-    FakeMogsafe server;
-    append(file, std::string(500, 'x'));
-    CHECK(!uploader(dir, server)->pass());
-    append(file, std::string(100, 'x')); // written before the kill, never sent
-
-    server.uploads.begin()->second.cutOff = true;
-    auto up                               = uploader(dir, server);
-    CHECK(!up->pass()); // 410
-    CHECK(up->ended("a.xicap"));
-    CHECK(!up->pass());
-    CHECK(!uploader(dir, server)->pass()); // a restart remembers
-    CHECK(server.creates == 1);
-    CHECK(server.received == 500);
-    CHECK(fs::file_size(file) == 600);
-    for (const auto& status : { up->status(), uploader(dir, server)->status() }) // this client, and one reading the state file
-    {
-        REQUIRE(status.size() == 1);
-        CHECK(status[0].ended); // nothing left to send: the last 100 bytes stay only on this PC
-        CHECK(status[0].sent == 500);
-        CHECK(status[0].size == 600);
-        CHECK(status[0].error.empty());
-    }
-    CHECK(uploader(dir, server)->ended("a.xicap")); // another client reads it from disk
-    fs::remove_all(dir);
-}
-
 TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from Vault")
 {
     const auto  dir = tempDir();
@@ -2454,44 +2424,63 @@ TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from V
     fs::remove_all(dir);
 }
 
+namespace
+{
+
+// A complete capture of three packets, the first alone in its frame. Returns where that frame ends.
+auto twoFrames(const fs::path& path) -> uint64_t
+{
+    {
+        xicap::Writer w(path, { .character = { .name = "Nouurs" } });
+        w.write(outPacket(gamePacket(T0 + 1)));
+        w.flush();
+        w.write(outPacket(gamePacket(T0 + 2)));
+        w.write(outPacket(gamePacket(T0 + 3)));
+        w.close();
+    }
+    xicap::Reader r(path);
+    xicap::Packet p;
+    r.next(p);
+    return r.bytesRead();
+}
+
+} // namespace
+
 TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, once")
 {
-    const auto  dir  = tempDir();
-    const auto  file = dir / "a.xicap";
+    const auto dir    = tempDir();
+    const auto file   = dir / "a.xicap";
+    const auto source = dir / "source" / "a.xicap";
+    fs::create_directories(source.parent_path());
+    const auto  held  = static_cast<std::ptrdiff_t>(twoFrames(source));
+    const auto  bytes = readAll(source);
     FakeMogsafe server;
-    append(file, std::string(500, 'x'));
+    append(file, std::string(bytes.begin(), bytes.begin() + held));
     CHECK(!uploader(dir, server)->pass());
-    append(file, std::string(100, 'y') + TRAILER); // a long outage, then the recorder rolled over and closed the file
+    append(file, std::string(bytes.begin() + held, bytes.end())); // a long outage, or a killed client, then the file was closed
     server.uploads.begin()->second.cutOff = true;
 
-    // Stands in for xicap: the frames past held, as a capture of their own that a closed upload accepts.
-    std::vector<std::pair<fs::path, uint64_t>> asked;
-    const auto                                 rest = [&](const fs::path& capture, uint64_t held, const fs::path& out) -> std::optional<std::string>
-    {
-        asked.emplace_back(capture, held);
-        const auto bytes = readAll(capture);
-        std::ofstream(out, std::ios::binary) << std::string(CAPTURE_HEADER_SIZE, 'h') << std::string(bytes.begin() + static_cast<std::ptrdiff_t>(held), bytes.end());
-        return std::nullopt;
-    };
-    const auto make = [&]
-    {
-        auto up = uploader(dir, server);
-        up->continueTail(rest);
-        return up;
-    };
-    auto up = make();
-    CHECK(!up->pass());     // 410: ended
-    CHECK(!up->pass());     // writes a-rest.xicap
-    CHECK(!up->pass());     // sends it
-    CHECK(!up->pass());     // closes it
-    CHECK(!make()->pass()); // a restart writes nothing again
-    REQUIRE(asked.size() == 1);
-    CHECK(asked[0] == std::pair{ file, uint64_t{ 500 } });
-    REQUIRE(fs::exists(dir / "a-rest.xicap"));
+    auto up = uploader(dir, server);
+    CHECK(!up->pass()); // 410: ended
+    CHECK(!up->pass()); // writes a-rest.xicap
+    CHECK(!up->pass()); // sends it
+    CHECK(!up->pass()); // closes it
+    const auto rest = dir / "a-rest.xicap";
+    REQUIRE(fs::exists(rest));
+    const auto written = fs::last_write_time(rest);
+    CHECK(!uploader(dir, server)->pass()); // a restart writes nothing again
+    CHECK(fs::last_write_time(rest) == written);
+    const auto tail = readCapture(rest);
+    CHECK(tail.complete);
+    CHECK(tail.packets == 2);
+    CHECK(tail.previous == readCapture(file).id);
+    CHECK(tail.name == "Nouurs");
     CHECK(server.creates == 2);
-    CHECK(server.uploads.rbegin()->second.data == readAll(dir / "a-rest.xicap"));
+    CHECK(std::ssize(server.uploads.begin()->second.data) == held); // the cut-off file never goes again
+    CHECK(uploader(dir, server)->ended("a.xicap"));                 // another client reads it from disk
+    CHECK(server.uploads.rbegin()->second.data == readAll(rest));
     CHECK(server.uploads.rbegin()->second.closed);
-    for (const auto& s : make()->status())
+    for (const auto& s : uploader(dir, server)->status())
     {
         CHECK(!s.ended); // nothing left only on this PC
         CHECK(s.sent == s.size);
@@ -2510,23 +2499,17 @@ TEST_CASE("a tail that cannot be written stays on this PC and counts as not in V
     append(dir / "b.xicap", std::string(100, 'y'));
     server.uploads.begin()->second.cutOff = true;
     server.foreignEnd                     = server.uploads.rbegin()->first; // b: Mogsafe-Ended: refused
-    int  calls                            = 0;
     auto up                               = uploader(dir, server);
-    up->continueTail([&](const fs::path&, uint64_t, const fs::path&) -> std::optional<std::string>
-                     {
-                         ++calls;
-                         return "xicap cannot yet";
-                     });
     CHECK(!up->pass());
-    std::ignore = up->pass();
-    std::ignore = up->pass();
-    CHECK(calls == 1); // tried once a run, not every pass
+    CHECK(up->pass().has_value()); // not a capture: xicap cannot read it
+    CHECK(!up->pass());            // tried once a run, not every pass
     const auto status = up->status();
     REQUIRE(status.size() == 2);
     CHECK(status[0].ended);
     CHECK(status[0].sent == 500);
     CHECK(!status[1].ended);
     CHECK(!fs::exists(dir / "a-rest.xicap"));
+    CHECK(!fs::exists(dir / "a-rest.tmp"));
     fs::remove_all(dir);
 }
 
@@ -2596,21 +2579,25 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
                     }));
     const auto second = rec.status().capture;
     rec.stop();
-    CHECK(!up->pass()); // sends the new capture
-    CHECK(!up->pass()); // closes it
+    for (int i = 0; i < 3; ++i)
+    {
+        CHECK(!up->pass()); // the new capture and the first one's tail: written, sent, closed
+    }
 
     CHECK(told == 1);
     CHECK(second != first);
-    CHECK(server.creates == 2);
+    CHECK(server.creates == 3);
     CHECK(cut.data.size() == had);
-    CHECK(server.uploads.rbegin()->second.data == readAll(second));
-    CHECK(server.uploads.rbegin()->second.closed);
-    const auto old = readCapture(first);
-    const auto now = readCapture(second);
+    const auto old  = readCapture(first);
+    const auto now  = readCapture(second);
+    const auto tail = readCapture(fs::path(first).replace_filename(first.stem().string() + "-rest.xicap"));
     CHECK(old.complete);
     CHECK(old.packets == 2);
+    CHECK(tail.packets == 1); // the packet Mogsafe refused
+    CHECK(tail.previous == old.id);
     CHECK(now.packets == 1);
     CHECK(now.previous == old.id);
+    CHECK(std::ranges::all_of(server.uploads | std::views::drop(1) | std::views::values, &FakeMogsafe::Upload::closed));
     CHECK(!now.atLogin);
     fs::remove_all(dir);
 }

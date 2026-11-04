@@ -1,6 +1,7 @@
 #include "core/uploader.h"
 
 #include <picosha2.h>
+#include <xicap/transcode.h>
 
 #include <algorithm>
 #include <format>
@@ -399,11 +400,11 @@ auto Uploader::end(File& f, const HttpResponse& res) -> void
 }
 
 // Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
-// kept go to <name>-rest.xicap, which uploads as a capture of its own. held may be below what Mogsafe holds, if an
+// kept go to <name>-rest.xicap, which uploads as a capture of its own. sent may be below what Mogsafe holds, if an
 // append's answer was lost: then a few packets reach Vault twice, never none.
 auto Uploader::rest(const std::filesystem::path& path, File& f) -> std::optional<std::string>
 {
-    if (!tail_ || f.restFailed)
+    if (f.restFailed)
     {
         return std::nullopt;
     }
@@ -426,27 +427,23 @@ auto Uploader::rest(const std::filesystem::path& path, File& f) -> std::optional
     const auto out = path.parent_path() / (path.stem().string() + "-rest.xicap");
     if (size > f.sent && !std::filesystem::exists(out, ec))
     {
-        const auto tmp   = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap: no pass sends it half written
-        auto       error = tail_(path, f.sent, tmp);
-        if (!error)
+        const auto tmp = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap: no pass sends it half written
+        try
         {
-            std::filesystem::rename(tmp, out, ec);
-            error = ec ? std::optional(ec.message()) : std::nullopt;
+            if (xicap::continueFrom(path, f.sent, tmp) > 0)
+            {
+                std::filesystem::rename(tmp, out);
+            }
         }
-        if (error)
+        catch (const std::exception& error)
         {
             std::filesystem::remove(tmp, ec);
             f.restFailed = true;
-            return "cannot write the cut-off tail: " + *error;
+            return std::format("cannot write the cut-off tail: {}", error.what());
         }
     }
     f.rescued = true;
     return std::nullopt;
-}
-
-auto Uploader::continueTail(TailWriter writer) -> void
-{
-    tail_ = std::move(writer);
 }
 
 auto Uploader::allowed() -> bool
