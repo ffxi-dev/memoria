@@ -283,6 +283,7 @@ auto Recorder::config(const Login& who, xicap::StartContext start, const xicap::
     config.startContext      = start;
     config.previousCaptureId = previous;
     config.signingSeed       = options_.seed;
+    config.policy            = policy_;
     config.captureId         = randomCaptureId();
     return config;
 }
@@ -300,6 +301,7 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
             previous_ = parseHex(id).value_or(xicap::CaptureId{});
         }
     }
+    policy_         = options_.policy ? options_.policy() : xicap::defaultExclusionPolicy();
     auto       cfg  = config(who, who.midSession ? xicap::StartContext::MidSession : xicap::StartContext::Login, previous_);
     const auto path = options_.dir / fileName(timestamp, who.character, cfg.captureId);
     login_          = who;
@@ -339,7 +341,7 @@ auto Recorder::write(const Event& event) -> void
                   session.write(packet);
               });
     writer_->write(packet);
-    live_.push(packet);
+    live_.push(packet, policy_);
     std::lock_guard lock(statusMutex_);
     status_.packets++;
     (event.clientToServer ? status_.packetsOut : status_.packetsIn)++;

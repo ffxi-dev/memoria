@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**Modes (new)**
+- Memoria records in your account's privacy mode, chosen on Vault's Memoria page: default cuts chat as before, everything keeps all chat, other players' included. A change applies from the next capture. An unlinked install sets its own with `/memoria mode`. `/memoria status` shows the mode. Anonymous mode comes later.
+
 ## 0.6.0-rc.3
 
 **Captures**
