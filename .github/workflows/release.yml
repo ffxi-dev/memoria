@@ -31,7 +31,7 @@ jobs:
         id: sum
         run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       # lsb has no gh CLI, so the release goes through the API with this action.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: out/Memoria.dll
           body: SHA-256 ${{ steps.sum.outputs.sha256 }}
