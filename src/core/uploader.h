@@ -60,11 +60,12 @@ public:
     auto finish(const std::string& name, std::chrono::milliseconds limit) -> void;
     auto pass() -> std::optional<std::string>; // the first error, if any
 
-    [[nodiscard]] auto status() const -> std::vector<UploadStatus>;  // every capture in the folder, whichever client sends it
-    [[nodiscard]] auto uploading() const -> bool;                    // false while another client sharing the folder sends its captures
-    [[nodiscard]] auto saveError() const -> std::string;             // why the last save of upload progress failed, if it did
-    [[nodiscard]] auto unauthorized() -> bool;                       // true once each time Mogsafe refuses the token on disk, which it then deletes
-    [[nodiscard]] auto ended(const std::string& name) const -> bool; // Mogsafe ended this file's upload before it closed: its bytes never go again
+    [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
+    [[nodiscard]] auto uploading() const -> bool;                                 // false while another client sharing the folder sends its captures
+    [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did
+    [[nodiscard]] auto unauthorized() -> bool;                                    // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed: its bytes never go again
+    [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
 private:
     struct File
@@ -95,6 +96,7 @@ private:
     auto load() -> void;
     auto save() -> std::optional<std::string>;
     auto saved() const -> std::map<std::string, File>;
+    auto file(const std::string& name) const -> File; // from memory while this client sends, else from the state file
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;

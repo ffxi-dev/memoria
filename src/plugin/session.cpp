@@ -726,11 +726,26 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
             say("/memoria session start <file.xicap>");
             return;
         }
+        // Linked, Vault keeps the session as a range of the recording, from captain's notes: no second file. Unlinked, the file is the only copy.
+        if (linked())
+        {
+            sessionInVault_ = clock_.nowMs();
+            say("session recorded in Vault, as part of this recording");
+            return;
+        }
         recorder_->sessionStart(clock_.nowMs(), std::u8string(path.begin(), path.end()));
         say(std::format("session to {}", path));
     }
     else if (sub == "session" && args.size() > 2 && args[2] == "stop")
     {
+        if (const auto from = std::exchange(sessionInVault_, std::nullopt))
+        {
+            const auto capture = recorder_->status().capture;
+            const auto id      = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
+            say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
+                           : "Session in Vault: " + paint(Color::Cyan, captureLink(server_, id, *from, clock_.nowMs())));
+            return;
+        }
         recorder_->sessionStop(clock_.nowMs());
         say("session closed");
     }

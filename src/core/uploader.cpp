@@ -521,19 +521,29 @@ auto Uploader::unauthorized() -> bool
     return tus_.unauthorized();
 }
 
-auto Uploader::ended(const std::string& name) const -> bool
+auto Uploader::file(const std::string& name) const -> File
 {
     {
         std::lock_guard lock(mutex_);
         if (uploading_ && loaded_)
         {
             const auto it = files_.find(name);
-            return it != files_.end() && it->second.ended;
+            return it == files_.end() ? File{} : it->second;
         }
     }
-    const auto files = saved(); // another client sharing the folder sends it
-    const auto it    = files.find(name);
-    return it != files.end() && it->second.ended;
+    auto files = saved(); // another client sharing the folder sends it
+    return files[name];
+}
+
+auto Uploader::ended(const std::string& name) const -> bool
+{
+    return file(name).ended;
+}
+
+auto Uploader::recordingId(const std::string& name) const -> std::string
+{
+    const auto url = file(name).url;
+    return url.substr(url.find_last_of('/') + 1);
 }
 
 auto Uploader::uploading() const -> bool

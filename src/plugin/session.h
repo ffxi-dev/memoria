@@ -128,6 +128,7 @@ private:
     xicap::CharacterIdentity           character_{};
     bool                               loggedIn_{ false };
     bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
+    std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
     uint32_t                           loggedInAs_{ 0 };
     std::optional<ChunkKey>            lastChunk_[2]; // per direction
     std::jthread                       reminder_;

@@ -884,6 +884,21 @@ TEST_CASE("a client that is not uploading reports what the uploading one sent")
     CHECK(status[0].size == 600);
 }
 
+TEST_CASE("a recording's Mogsafe id is the end of its upload's URL, in every client sharing the install")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    auto        sender = uploader(dir, server);
+    auto        other  = uploader(dir, server);
+    CHECK(sender->recordingId("a.xicap").empty()); // no upload yet
+    append(dir / "a.xicap", std::string(500, 'x'));
+    CHECK(!sender->pass());
+    CHECK(sender->recordingId("a.xicap") == "1");
+    CHECK(other->recordingId("a.xicap") == "1"); // read from uploads.txt
+    CHECK(sender->recordingId("b.xicap").empty());
+    fs::remove_all(dir);
+}
+
 TEST_CASE("a restart resumes the same upload")
 {
     const auto  dir  = tempDir();
@@ -1110,6 +1125,11 @@ TEST_CASE("live goes on only while the install shares: not paused, and the same 
     fs::remove(config / "token"); // /memoria unlink
     CHECK_FALSE(sharing(config, "t1"));
     fs::remove_all(dir);
+}
+
+TEST_CASE("a session's link opens the recording's page on its range, as Mogsafe reads it")
+{
+    CHECK(captureLink("https://mogsafe.test", "kQ3x9", 1'790'000'000'000, 1'790'000'060'500) == "https://mogsafe.test/captures/kQ3x9?from=1790000000000&to=1790000060500");
 }
 
 TEST_CASE("only the refused token is deleted")
