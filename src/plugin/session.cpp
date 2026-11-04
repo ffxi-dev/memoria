@@ -214,10 +214,17 @@ Session::~Session()
     stopLive();
     closing_.clear(); // joins
     client::search::remove();
+    std::filesystem::path capture;
     if (recorder_)
     {
-        recorder_->stop();
+        capture = recorder_->status().capture;
+        recorder_->stop(); // writes the footer
         recorder_.reset();
+    }
+    // Mogsafe ends a silent recording after 5 minutes: without its last bytes and footer now, Vault keeps it cut off.
+    if (uploader_ && !capture.empty())
+    {
+        uploader_->finish(capture.filename().string(), std::chrono::seconds(3));
     }
     uploader_.reset();
     if (uploadMutex_)

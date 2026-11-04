@@ -56,7 +56,9 @@ public:
 
     auto start() -> void;
     auto continueTail(TailWriter writer) -> void; // before start()
-    auto pass() -> std::optional<std::string>;    // the first error, if any
+    // At unload, once the recorder closed name: sends its last bytes and closes its upload, waiting at most limit. Sends nothing after.
+    auto finish(const std::string& name, std::chrono::milliseconds limit) -> void;
+    auto pass() -> std::optional<std::string>; // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;  // every capture in the folder, whichever client sends it
     [[nodiscard]] auto uploading() const -> bool;                    // false while another client sharing the folder sends its captures
@@ -82,7 +84,8 @@ private:
     };
 
     auto run() -> void;
-    auto step(const std::filesystem::path& path, File& f) -> std::optional<std::string>;
+    auto step(const std::filesystem::path& path, File& f, std::chrono::milliseconds idle) -> std::optional<std::string>;
+    auto last(const std::string& name) -> void;
     auto send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
     auto close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>;
     auto end(File& f, const HttpResponse& res) -> void;
@@ -102,12 +105,16 @@ private:
     std::map<std::string, File> files_; // by file name
     std::string                 saveError_;
     bool                        dirty_{}; // upload thread only: memory holds what the state file lacks
+    bool                        last_{};  // upload thread only: finish() is sending the last bytes
     std::atomic<bool>           loaded_{ false };
 
     std::thread             thread_;
     std::mutex              wakeMutex_;
     std::condition_variable wake_;
     std::atomic<bool>       stopping_{ false };
+    std::atomic<bool>       finishing_{ false };
+    std::string             finish_;     // the file finish() names, under wakeMutex_
+    bool                    finished_{}; // under wakeMutex_
     std::atomic<bool>       uploading_{ false };
 };
 

@@ -112,12 +112,75 @@ auto Uploader::run() -> void
         std::unique_lock lock(wakeMutex_);
         if (wake_.wait_for(lock, wait, [this]
                            {
-                               return stopping_.load();
+                               return stopping_ || finishing_;
                            }))
         {
+            if (finishing_ && !stopping_)
+            {
+                const auto name = finish_;
+                lock.unlock();
+                try
+                {
+                    last(name);
+                }
+                catch (const std::exception&)
+                {
+                }
+                lock.lock();
+                finished_ = true;
+                wake_.notify_all();
+            }
             return;
         }
     }
+}
+
+auto Uploader::finish(const std::string& name, std::chrono::milliseconds limit) -> void
+{
+    if (!thread_.joinable())
+    {
+        return;
+    }
+    std::unique_lock lock(wakeMutex_);
+    finish_    = name;
+    finishing_ = true;
+    wake_.notify_all();
+    wake_.wait_for(lock, limit, [this]
+                   {
+                       return finished_;
+                   });
+}
+
+// Up to three steps: the last bytes, then the close the footer allows. The game waits on it, so finish() bounds it.
+auto Uploader::last(const std::string& name) -> void
+{
+    if (!uploading_ || !allowed())
+    {
+        return; // another client sharing the folder sends it
+    }
+    if (!loaded_)
+    {
+        load();
+        loaded_ = true;
+    }
+    File f;
+    {
+        std::lock_guard lock(mutex_);
+        f = files_[name];
+    }
+    last_ = true;
+    for (int i = 0; i < 3 && !f.closed && !f.ended && !stopping_; ++i)
+    {
+        if (step(options_.dir / name, f, std::chrono::milliseconds(0)))
+        {
+            break;
+        }
+    }
+    {
+        std::lock_guard lock(mutex_);
+        files_[name] = f;
+    }
+    std::ignore = save();
 }
 
 auto Uploader::pass() -> std::optional<std::string>
@@ -132,7 +195,7 @@ auto Uploader::pass() -> std::optional<std::string>
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (stopping_ || !allowed())
+        if (stopping_ || finishing_ || !allowed())
         {
             break;
         }
@@ -146,7 +209,7 @@ auto Uploader::pass() -> std::optional<std::string>
             std::lock_guard lock(mutex_);
             f = files_[name];
         }
-        const auto error = step(entry.path(), f);
+        const auto error = step(entry.path(), f, options_.idle);
         if (error)
         {
             f.error = *error;
@@ -166,7 +229,7 @@ auto Uploader::pass() -> std::optional<std::string>
     return first;
 }
 
-auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional<std::string>
+auto Uploader::step(const std::filesystem::path& path, File& f, std::chrono::milliseconds idle) -> std::optional<std::string>
 {
     if (f.closed || f.ended)
     {
@@ -256,7 +319,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
     {
         return send(path, f, *offset, size);
     }
-    if (now - f.seen >= options_.idle && f.refused != size)
+    if (now - f.seen >= idle && f.refused != size)
     {
         return close(path, f, size);
     }
@@ -267,7 +330,7 @@ auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset,
 {
     const auto sent = tus_.append(path, f.url, offset, size, [this](uint64_t)
                                   {
-                                      return !stopping_ && allowed();
+                                      return !stopping_ && (!finishing_ || last_) && allowed(); // finish() ends a pass, not its own sending
                                   });
     if (!sent)
     {

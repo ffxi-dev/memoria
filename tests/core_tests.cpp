@@ -2369,6 +2369,78 @@ TEST_CASE("a capture Mogsafe refused stays refused, with its reason, after a res
     fs::remove_all(dir);
 }
 
+TEST_CASE("at unload the last bytes and the footer reach Mogsafe, and the game waits no longer than allowed")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" });
+    append(file, std::string(500, 'x'));
+    // Passes an hour apart and a close only after an hour idle: only finish() can send the end in time.
+    UploadOptions options{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .every = std::chrono::hours(1), .idle = std::chrono::hours(1) };
+    auto          up = std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
+    up->start();
+    REQUIRE(waitFor([&]
+                    {
+                        const auto status = up->status();
+                        return !status.empty() && status[0].sent == 500;
+                    }));
+    append(file, std::string(100, 'y') + "XCPF"); // the recorder's last frame and footer, at unload
+    const auto before = std::chrono::steady_clock::now();
+    up->finish("a.xicap", std::chrono::seconds(3));
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(3));
+    up.reset();
+    REQUIRE(server.uploads.size() == 1);
+    CHECK(server.uploads.begin()->second.data == readAll(file));
+    CHECK(server.uploads.begin()->second.closed);
+    CHECK(server.creates == 1);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("at unload a hung connection holds the game for the time allowed, no longer")
+{
+    class Hung final : public Http
+    {
+    public:
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            std::unique_lock lock(mutex_);
+            wake_.wait_for(lock, std::chrono::seconds(60), [this]
+                           {
+                               return cancelled_;
+                           });
+            return std::unexpected("cancelled");
+        }
+
+        auto cancel() -> void override
+        {
+            {
+                std::lock_guard lock(mutex_);
+                cancelled_ = true;
+            }
+            wake_.notify_all();
+        }
+
+    private:
+        std::mutex              mutex_;
+        std::condition_variable wake_;
+        bool                    cancelled_{ false };
+    };
+    const auto dir = tempDir();
+    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "sruon" });
+    append(dir / "a.xicap", std::string(500, 'x') + "XCPF");
+    auto up = std::make_unique<Uploader>(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config" }, std::make_unique<Hung>());
+    up->start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50)); // the first pass hangs in its create
+    const auto before = std::chrono::steady_clock::now();
+    up->finish("a.xicap", std::chrono::milliseconds(300));
+    up.reset();
+    const auto took = std::chrono::steady_clock::now() - before;
+    CHECK(took >= std::chrono::milliseconds(300));
+    CHECK(took < std::chrono::milliseconds(1500));
+    fs::remove_all(dir);
+}
+
 TEST_CASE("a file left by a killed client whose upload the server ended is kept and never sent again")
 {
     const auto  dir  = tempDir();
