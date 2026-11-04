@@ -96,7 +96,15 @@ TEST_CASE("the queue drops packets past its limit, never markers")
     queue.drain(out);
     REQUIRE(out.size() == 4);
     CHECK(out.back().kind == Event::Kind::Login);
-    CHECK(queue.push(packet(100))); // draining frees the room
+    CHECK_FALSE(queue.push(packet(100))); // the writer still holds that batch
+    queue.drain(out);                     // and frees it here
+    CHECK(out.empty());
+    CHECK(queue.push(packet(100)));
+    CHECK(queue.push(packet(100)));
+    queue.drain(out);
+    CHECK(out.size() == 2);
+    CHECK(queue.push(packet(100))); // two in hand, one queued: full
+    CHECK_FALSE(queue.push(packet(100)));
 }
 
 TEST_CASE("the install key is created once and never replaced")
@@ -559,8 +567,8 @@ TEST_CASE("dropped packets leave a note in the capture")
         {
             rec.packet(gamePacket(T0 + 1 + i));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        rec.packet(gamePacket(T0 + 100)); // carries the note
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // one drain takes the full batch, the next frees it
+        rec.packet(gamePacket(T0 + 100));                            // carries the note
         rec.stop();
         CHECK(rec.status().dropped > 0);
     }

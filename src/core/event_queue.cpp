@@ -24,12 +24,14 @@ auto EventQueue::push(Event event) -> bool
     return true;
 }
 
+// out is the batch the writer took last time: its bytes count until this call frees them, so the queue and the batch
+// in hand together stay under maxBytes.
 auto EventQueue::drain(std::vector<Event>& out) -> void
 {
     out.clear();
     std::lock_guard lock(mutex_);
     out.swap(events_);
-    bytes_ = 0;
+    bytes_ -= std::exchange(taken_, bytes_ - taken_);
 }
 
 auto EventQueue::takeDropped() -> uint64_t
