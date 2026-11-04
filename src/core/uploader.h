@@ -32,11 +32,6 @@ struct UploadOptions
 // xicap's header, which Mogsafe wants whole in a file's first append.
 inline constexpr uint64_t CAPTURE_HEADER_SIZE = 160;
 
-// Writes the frames of capture past its first held bytes, the most Mogsafe kept before it cut the upload off, to out as a
-// new capture that continues it. Answers why not, if it could not. xicap's library will supply it; until then cut-off
-// tails stay on this PC.
-using TailWriter = std::function<std::optional<std::string>(const std::filesystem::path& capture, uint64_t held, const std::filesystem::path& out)>;
-
 struct UploadStatus
 {
     std::string name;
@@ -58,7 +53,6 @@ public:
     auto operator=(const Uploader&) -> Uploader& = delete;
 
     auto start() -> void;
-    auto continueTail(TailWriter writer) -> void; // before start()
     // At unload, once the recorder closed name: sends its last bytes and closes its upload, waiting at most limit. Sends nothing after.
     auto finish(const std::string& name, std::chrono::milliseconds limit) -> void;
     auto pass() -> std::optional<std::string>; // the first error, if any
@@ -78,7 +72,7 @@ private:
         bool                                  ended{};      // Mogsafe answered 410: cut off or refused
         bool                                  cutOff{};     // ended as cut off: Vault keeps the first sent bytes
         bool                                  rescued{};    // its tail went to a -rest.xicap capture of its own
-        bool                                  restFailed{}; // the tail writer failed this run: tried again after a restart
+        bool                                  restFailed{}; // writing the tail failed this run: tried again after a restart
         uint64_t                              refused{};    // size at the last refused close
         std::string                           reason;       // why Mogsafe refused it for good, kept in the state file
         uint64_t                              size{};
@@ -104,7 +98,6 @@ private:
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
     Tus                   tus_; // upload thread only, but for unauthorized()
-    TailWriter            tail_;
 
     mutable std::mutex          mutex_;
     std::map<std::string, File> files_; // by file name
