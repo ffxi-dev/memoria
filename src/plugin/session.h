@@ -80,15 +80,15 @@ private:
 
     auto record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto say(const std::string& text) -> void;
-    auto post(std::string text) -> void; // say, from any thread: printed on the next frame
+    auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
     auto status() -> void;
     auto startUploads() -> void;
     auto link() -> void;
     auto unlink(const std::string& why) -> void;
     auto linked() const -> std::optional<Linked>; // read each time: clients sharing the install share its token
-    auto greet() -> void;                         // starts the two below on reminder_
-    auto remind() -> void;                        // on reminder_
-    auto offerImport() -> void;                   // on reminder_
+    auto greet() -> void;
+    auto remind() -> void;
+    auto offerImport() -> void;
     auto startImport(bool asked) -> void;
     auto importLine() const -> std::string;
     auto hello() -> std::string;
@@ -116,7 +116,7 @@ private:
     bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
     std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
     uint32_t                           loggedInAs_{ 0 };
-    std::optional<ChunkKey>            lastChunk_[2];      // per direction
+    std::optional<ChunkKey>            lastChunk_[2];      // the last chunk seen in each direction
     std::atomic<bool>                  saveChat_{ false }; // for the next capture: the linked account's choice
     std::atomic<bool>                  fetchingChat_{ false };
     std::jthread                       chatFetch_;

@@ -147,7 +147,7 @@ auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
 auto __cdecl nextPageHook(void* connection) -> int
 {
     const int result = nextPage_(connection);
-    if (result == 0) // queued
+    if (result == 0) // the request was queued
     {
         record(true, NEXT_PAGE.data(), NEXT_PAGE.size());
     }
@@ -273,7 +273,7 @@ auto version() -> std::string
                    ? version
                    : std::string{};
     }
-    catch (...) // /EHa
+    catch (...)
     {
         return {};
     }
@@ -313,7 +313,7 @@ auto character(Login& who) -> std::string
         who.character.world = std::string(world, strnlen(world, WORLD_NAME_SIZE));
         return {};
     }
-    catch (...) // /EHa
+    catch (...)
     {
         return "cannot read the character list";
     }

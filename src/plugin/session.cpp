@@ -116,18 +116,18 @@ auto Session::start(std::optional<LateLogin> late) -> void
 
 Session::~Session()
 {
-    linker_    = {}; // stops and joins
+    linker_    = {};
     chatFetch_ = {};
     reminder_  = {};
-    importer_.reset(); // cancels its request and joins
+    importer_.reset();
     stopLive();
-    closing_.clear(); // joins
+    closing_.clear();
     client::search::remove();
     std::filesystem::path capture;
     if (recorder_)
     {
         capture = recorder_->status().capture;
-        recorder_->stop(); // writes the trailer
+        recorder_->stop();
         recorder_.reset();
     }
     // Mogsafe ends a silent recording after 5 minutes: without its last bytes and trailer now, Vault keeps it cut off.

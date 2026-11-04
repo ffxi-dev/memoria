@@ -54,7 +54,7 @@ private:
     std::filesystem::path            config_;
     std::string                      installToken_;
     LiveFeed&                        feed_;
-    uint64_t                         owner_; // of the feed
+    uint64_t                         owner_; // the id the feed gave this link
     std::function<void(std::string)> post_;
 
     mutable std::mutex          mutex_;

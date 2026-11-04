@@ -35,7 +35,7 @@ struct ImportOptions
 
 struct ImportProgress
 {
-    size_t      index{}; // from 1; 0 while looking
+    size_t      index{}; // counts from 1; 0 while the scan runs
     size_t      count{};
     std::string character;
     uint64_t    sent{};
