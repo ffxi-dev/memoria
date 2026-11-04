@@ -11,7 +11,7 @@ When Mogsafe answers `410` for an upload, Memoria SHALL never send that file's b
 
 #### Scenario: A killed client's file
 - **WHEN** the game starts again after a kill and Mogsafe has ended the last recording's upload
-- **THEN** Memoria marks the file ended in `uploads.txt`, sends none of it, keeps it on disk, and `/memoria status` counts nothing left to send
+- **THEN** Memoria marks the file ended in `uploads.txt`, sends none of it, keeps it on disk, and `/memoria status` counts nothing left to send and says how many bytes of it Vault never got
 
 #### Scenario: A lost close answer
 - **WHEN** Mogsafe closed a complete capture but its answer never arrived

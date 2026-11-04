@@ -2226,11 +2226,32 @@ TEST_CASE("a file left by a killed client whose upload the server ended is kept 
     CHECK(server.creates == 1);
     CHECK(server.received == 500);
     CHECK(fs::file_size(file) == 600);
+    for (const auto& status : { up->status(), uploader(dir, server)->status() }) // this client, and one reading the state file
+    {
+        REQUIRE(status.size() == 1);
+        CHECK(status[0].ended); // nothing left to send: the last 100 bytes stay only on this PC
+        CHECK(status[0].sent == 500);
+        CHECK(status[0].size == 600);
+        CHECK(status[0].error.empty());
+    }
+    CHECK(uploader(dir, server)->ended("a.xicap")); // another client reads it from disk
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from Vault")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    append(dir / "a.xicap", std::string(500, 'x'));
+    auto up               = uploader(dir, server);
+    server.forced["HEAD"] = { 410 }; // Mogsafe-Ended: refused, a recording it already holds
+    CHECK(!up->pass());
+    CHECK(!up->pass());
+    CHECK(up->ended("a.xicap"));
     const auto status = up->status();
     REQUIRE(status.size() == 1);
-    CHECK(status[0].sent == status[0].size); // nothing left to send
-    CHECK(status[0].error.empty());
-    CHECK(uploader(dir, server)->ended("a.xicap")); // another client reads it from disk
+    CHECK(!status[0].ended);
+    CHECK(status[0].sent == status[0].size);
     fs::remove_all(dir);
 }
 

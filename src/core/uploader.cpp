@@ -329,7 +329,8 @@ auto Uploader::end(File& f, const HttpResponse& res) -> void
         f.closed = true;
         return;
     }
-    f.ended = true;
+    f.ended  = true;
+    f.cutOff = header(res, "mogsafe-ended") != "refused" && !header(res, "mogsafe-ended").empty();
     f.url.clear();
 }
 
@@ -343,7 +344,7 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     return tus_.request(method, url, std::move(headers), body);
 }
 
-// One line per file: name, url, closed (1, 0, or ended), refused, bytes the server holds, and why Mogsafe refused it, separated by tabs.
+// One line per file: name, url, closed (1, 0, cut_off, or ended for refused), refused, bytes the server holds, and why Mogsafe refused it, separated by tabs.
 auto Uploader::saved() const -> std::map<std::string, File>
 {
     std::map<std::string, File> files;
@@ -357,7 +358,7 @@ auto Uploader::saved() const -> std::map<std::string, File>
         {
             std::getline(fields, sent, '\t');
             std::getline(fields, reason);
-            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended", .refused = parseU64(refused).value_or(0), .reason = reason, .sent = parseU64(sent).value_or(0) };
+            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended" || closed == "cut_off", .cutOff = closed == "cut_off", .refused = parseU64(refused).value_or(0), .reason = reason, .sent = parseU64(sent).value_or(0) };
         }
     }
     return files;
@@ -377,8 +378,9 @@ auto Uploader::save() -> std::optional<std::string>
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.ended ? "ended"
-                                                                                                  : "0",
+            text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.cutOff ? "cut_off"
+                                                                                      : f.ended    ? "ended"
+                                                                                                   : "0",
                                 f.refused,
                                 f.sent,
                                 f.reason);
@@ -449,7 +451,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         const auto& f       = files[entry.path().filename().string()];
         const auto  size    = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
         const bool  refused = !f.closed && f.refused == size && !f.reason.empty();
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || f.ended ? size : f.sent, .size = size, .refused = refused, .error = refused ? f.reason : f.error });
+        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && !f.cutOff) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff, .error = refused ? f.reason : f.error });
     }
     return out;
 }

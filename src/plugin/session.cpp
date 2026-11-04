@@ -610,11 +610,19 @@ auto Session::status() -> void
     // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
     const auto  files  = uploader_->status();
     uint64_t    behind = 0;
+    uint64_t    kept   = 0; // in recordings Mogsafe cut off: on this PC only
+    int         cut    = 0;
     const auto* failed = static_cast<const UploadStatus*>(nullptr);
     for (const auto& u : files)
     {
         if (u.refused)
         {
+            continue;
+        }
+        if (u.ended)
+        {
+            kept += u.size > u.sent ? u.size - u.sent : 0;
+            cut += u.size > u.sent ? 1 : 0;
             continue;
         }
         behind += u.size > u.sent ? u.size - u.sent : 0;
@@ -635,6 +643,10 @@ auto Session::status() -> void
     else
     {
         say("Uploads: " + paint(Color::Green, "all sent") + account);
+    }
+    if (kept > 0)
+    {
+        say(paint(Color::Yellow, std::format("Not in Vault: {} of {} {} the server ended early.", sizeText(kept), cut, cut == 1 ? "recording" : "recordings")) + " It stays on this PC.");
     }
     if (const auto error = uploader_->saveError(); !error.empty())
     {
