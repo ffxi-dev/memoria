@@ -153,4 +153,9 @@ auto sharing(const std::filesystem::path& config, const std::string& token) -> b
     return link && link->token == token;
 }
 
+auto captureLink(const std::string& server, const std::string& id, uint64_t fromMs, uint64_t toMs) -> std::string
+{
+    return std::format("{}/captures/{}?from={}&to={}", server, id, fromMs, toMs);
+}
+
 } // namespace memoria

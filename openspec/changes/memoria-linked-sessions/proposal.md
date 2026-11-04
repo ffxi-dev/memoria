@@ -7,7 +7,7 @@ The owner decided on 2026-11-04 that a `/cap` session is a named time range of t
 ## What Changes
 
 - `/memoria session start <file>` writes the session file only when the install is not linked. Linked, it writes nothing and says the session is in Vault.
-- `/memoria session stop` on a linked install prints the recording's Mogsafe link, `<server>/captures/<id>`, where `<id>` ends the recording's upload URL. Before the recording has an upload it says the session reaches Vault once the recording uploads.
+- `/memoria session stop` on a linked install prints the recording's Mogsafe link on the session's range, `<server>/captures/<id>?from=<start>&to=<stop>` in Unix ms as the capture page reads it, where `<id>` ends the recording's upload URL. Before the recording has an upload it says the session reaches Vault once the recording uploads.
 - `Uploader::recordingId` gives that id, from memory in the client that sends and from `uploads.txt` in the others.
 
 ## Capabilities
@@ -20,4 +20,4 @@ The owner decided on 2026-11-04 that a `/cap` session is a named time range of t
 ## Impact
 
 - **Memoria:** `src/core/uploader.*`, `src/plugin/session.*`, core tests.
-- **Mogsafe:** none; a range parameter on the capture page, once it has one, can join the link.
+- **Mogsafe:** none; its capture page already opens on `?from=&to=`.

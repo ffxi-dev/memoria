@@ -1127,6 +1127,11 @@ TEST_CASE("live goes on only while the install shares: not paused, and the same 
     fs::remove_all(dir);
 }
 
+TEST_CASE("a session's link opens the recording's page on its range, as Mogsafe reads it")
+{
+    CHECK(captureLink("https://mogsafe.test", "kQ3x9", 1'790'000'000'000, 1'790'000'060'500) == "https://mogsafe.test/captures/kQ3x9?from=1790000000000&to=1790000060500");
+}
+
 TEST_CASE("only the refused token is deleted")
 {
     const auto dir  = tempDir();
