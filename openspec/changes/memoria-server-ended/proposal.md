@@ -2,7 +2,7 @@
 
 ## Why
 
-Players kill game clients all the time. Mogsafe kept a dead client's upload "recording" for 24 hours, and its `/cap` sessions with it. The owner decided on 2026-11-03 that Mogsafe ends a recording after 5 silent minutes and Memoria starts a new one instead (vault's `end-silent-recordings`). Memoria answered an ended upload by sending the whole file again as a new capture, which would now duplicate every packet Mogsafe already kept.
+Players kill game clients all the time. Mogsafe kept a dead client's upload "recording" for 24 hours, and its `/cap` sessions with it. Mogsafe now ends a recording after 5 silent minutes, and Memoria starts a new one instead. Memoria answered an ended upload by sending the whole file again as a new capture, which would now duplicate every packet Mogsafe already kept.
 
 ## What Changes
 
@@ -20,5 +20,5 @@ Players kill game clients all the time. Mogsafe kept a dead client's upload "rec
 
 ## Impact
 
-- **Memoria:** `src/core/uploader.*`, `src/core/recorder.*`, `src/plugin/session.cpp` (shared by the Ashita and Windower hosts), core tests.
-- **Mogsafe:** vault's `end-silent-recordings`. What a client recorded after the last byte Mogsafe kept stays only in the old local file.
+- **Memoria:** `src/core/uploader.*`, `src/core/recorder.*`, `src/plugin/session.cpp`, core tests.
+- **Mogsafe:** ends silent recordings. What a client recorded after the last byte Mogsafe kept stayed only in the old local file, until `memoria-cut-off-tail` sent it as a capture of its own.

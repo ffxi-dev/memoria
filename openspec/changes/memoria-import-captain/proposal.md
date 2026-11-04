@@ -9,7 +9,7 @@ Players who used captain before Memoria have old capture folders, each with a `m
 - Memoria finds captain capture folders not yet uploaded under `<Ashita>/addons/captain/captures/`.
 - Once, at a login or link while the install is linked and such folders exist, Memoria says in chat: "Run /memoria import to upload existing Captain captures". It never says it again on that install.
 - `/memoria import` uploads them to Mogsafe in the background as captain imports, with the install's token, so they belong to the linked account. Chat shows each capture's result; `/memoria status` shows progress.
-- A folder whose captain also ran SearchLog sends its `SearchLog/search.log` ahead of `full.log` in the same upload, as vault's `import-search-traffic` asks, so the search server's traffic reaches Vault in the same capture. A folder Vault already holds without its search log gains it.
+- A folder whose captain also ran SearchLog sends its `SearchLog/search.log` ahead of `full.log` in the same upload, so the search server's traffic reaches Vault in the same capture. A folder Vault already holds without its search log gains it.
 - The first release waits for the search log: no folder moves aside without it.
 - An upload stopped by a crash, a restart, or a network failure resumes; one asked for and not finished resumes at the next start.
 - Once Mogsafe holds a log, whether this import sent it or it was there already, Memoria moves its folder to `<Ashita>/addons/captain/captures-uploaded/`, which neither Memoria nor captain reads.

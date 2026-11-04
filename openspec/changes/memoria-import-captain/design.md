@@ -3,8 +3,8 @@
 ## Context
 
 - Captain writes each capture to `<Ashita>/addons/captain/captures/<session>/<character>/`: `manifest.txt` from `/cap start` and, from its PacketLogger, `PacketLogger/full.log` plus per-opcode logs. Since captain bundled Memoria, PacketLogger sits in `addons/extras/`, which captain does not load, so new sessions hold `memoria.xicap` and no `full.log`. Captain never lists `captures/`; its addons write their own data under `captures/<addon>/`.
-- Mogsafe's `/v1/uploads/` already takes captain imports from an install token. `bearer` turns the token into `clerk:<user id>` and the install's key; `created` checks the import's metadata (`importMeta`) and answers `409` with `Mogsafe-Capture` when a log with the same CRC-32 and size is converting or complete; the signing-key check in `accept` runs only for xicap closes, and conversion signs with Mogsafe's own key. A log may be plain, raw deflate (`encoding=deflate`), or zstd, which Mogsafe spots by its magic. With `crc32` and `size` set, the close needs no hash and conversion checks the plain log against them. An import idle for 24 hours is deleted.
-- Captain's SearchLog wrote the search server's plaintext messages to `<character>/SearchLog/search.log`, beside `PacketLogger/full.log`, in 52 of the owner's folders. Since vault's `import-search-traffic`, a captain upload may carry it ahead of `full.log`: `search_bytes` says where `full.log` starts, `search_crc32` and `search_size` describe the plain search log, and each part may be zstd on its own. A create whose `full.log` Mogsafe archived without a search log, from the same account, answers `201` with `Mogsafe-Replaces` instead of `409`, and the capture gains its search log under the same id.
+- Mogsafe's `/v1/uploads/` already takes captain imports from an install token. The token stands for the linked account. Mogsafe checks the import's metadata and answers `409` with `Mogsafe-Capture` when a log with the same CRC-32 and size is converting or complete. A log may be plain, raw deflate (`encoding=deflate`), or zstd, which Mogsafe spots by its magic. With `crc32` and `size` set, the close needs no hash and conversion checks the plain log against them. An import idle for 24 hours is deleted.
+- Captain's SearchLog wrote the search server's plaintext messages to `<character>/SearchLog/search.log`, beside `PacketLogger/full.log`, in many players' folders. A captain upload may carry it ahead of `full.log`: `search_bytes` says where `full.log` starts, `search_crc32` and `search_size` describe the plain search log, and each part may be zstd on its own. A create whose `full.log` Mogsafe archived without a search log, from the same account, answers `201` with `Mogsafe-Replaces` instead of `409`, and the capture gains its search log under the same id.
 - Memoria's `Uploader` (`src/core/uploader.cpp`) already speaks this tus dialect for `.xicap` files: 1 MiB appends, the upload URL saved before the first byte, token and pause files read before each chunk, `401` deletes the token. Clients sharing an install share `config/memoria/` and `captures/memoria/`, and a named mutex picks the one that uploads.
 
 ## Goals / Non-Goals
@@ -74,9 +74,9 @@ A named mutex `Local\Memoria-import-<hash of the captures path>` is taken for th
 ### Chat
 
 - Start: "Uploading 4 captain captures (3.1 GB) in the background."
-- Each capture: "Captain 2/4 2026-8-4_23_54/Audithor: uploaded." or "uploaded with its search log.", "uploaded with its search log, replacing <capture id>.", "already in Vault (<capture id>).", "refused: <reason>.", "still being written; skipped.", "in Vault, but its folder could not move: <error>."
+- Each capture: "Captain 2/4 2026-8-4_23_54/Bob: uploaded." or "uploaded with its search log.", "uploaded with its search log, replacing <capture id>.", "already in Vault (<capture id>).", "refused: <reason>.", "still being written; skipped.", "in Vault, but its folder could not move: <error>."
 - End: "Captain import done: 2 uploaded, 1 already in Vault, 1 refused. Uploaded folders are in addons/captain/captures-uploaded."
-- `/memoria status` adds `Import: 2/4 Audithor, 340/900 MB sent` while a run lasts, and `/memoria import` during a run prints the same line.
+- `/memoria status` adds `Import: 2/4 Bob, 340/900 MB sent` while a run lasts, and `/memoria import` during a run prints the same line.
 
 ## Risks / Trade-offs
 
@@ -88,11 +88,11 @@ A named mutex `Local\Memoria-import-<hash of the captures path>` is taken for th
 
 ## Migration Plan
 
-Ship in a Memoria release once Mogsafe takes search logs (vault's `import-search-traffic`), so no folder moves aside without its search log; nothing else on the server changes. Rolling back to an older Memoria leaves `imports.txt` and staged files unused and moved folders where they are; the abandoned upload is deleted by Mogsafe's sweep after 24 hours.
+Ship in a Memoria release once Mogsafe takes search logs, so no folder moves aside without its search log; nothing else on the server changes. Rolling back to an older Memoria leaves `imports.txt` and staged files unused and moved folders where they are; the abandoned upload is deleted by Mogsafe's sweep after 24 hours.
 
 ## Open Questions
 
-None. The owner settled them on 2026-11-02:
+None. These were settled before the work started:
 - `/memoria import` scans only `<Ashita>/addons/captain/captures/`; old installs go through Mogsafe's `/import` page.
 - Uploaded folders move to `addons/captain/captures-uploaded/`.
 - Memoria's own changes live in its `openspec/` (task 4.1).
@@ -108,8 +108,8 @@ Where the code differs from the decisions above, and why:
 - **The reminder counts only logs not changed in the last 10 minutes**, so it never points at a capture the import would skip.
 - **A `full.log` that cannot be read** is reported ("cannot read its full.log; skipped") and the run goes on. A staging failure ends the run with its error, without a summary.
 - **The failed move test** puts a file where `captures-uploaded` goes, so the move fails on any file system, Wine included; a file held open in the folder takes the same report path but is not tested.
-- The plugin's byte formatter moved to the core as `sizeText`, for the import's chat lines.
+- The plugin's byte formatter moved to the core as `sizeText` (`src/core/units.h`), for the import's chat lines.
 - **The search log is staged before the create**, since the create gives its length, and the upload's stage starts with it. A missing search stage with an upload created and nothing staged starts a new upload. `Mogsafe-Replaces` is read from the create only, so an upload resumed after a restart says "uploaded with its search log." without the capture it replaced.
 - **A `search.log` that cannot be read** skips the folder ("cannot read its search.log; skipped"), as for `full.log`: sending `full.log` alone would leave the capture without it.
 
-Recorded runs (tasks 3.x, 4.2) are still to do; capture ids go here.
+The plugin's part (tasks 3.x) shipped in 0.6.0-rc.1, covered by core tests and CI's build. The in-game runs those tasks and 4.2 to 4.3 ask for were never written down.

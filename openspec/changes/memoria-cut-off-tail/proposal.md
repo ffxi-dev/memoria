@@ -2,7 +2,7 @@
 
 ## Why
 
-Mogsafe ends a live recording after 5 minutes without bytes and refuses its bytes from then on (vault's `end-silent-recordings`, `refuse-duplicate-captures`). After a long network gap, everything the client recorded since Mogsafe's last byte stayed only on the PC: an hour's outage lost an hour from Vault. The owner decided on 2026-11-04: send that tail as a new capture that names the old one.
+Mogsafe ends a live recording after 5 minutes without bytes and refuses its bytes from then on. After a long network gap, everything the client recorded since Mogsafe's last byte stayed only on the PC: an hour's outage lost an hour from Vault. The tail now goes up as a new capture that names the old one.
 
 ## What Changes
 

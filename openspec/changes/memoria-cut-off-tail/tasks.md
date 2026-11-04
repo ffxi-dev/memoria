@@ -3,7 +3,7 @@
 ## 1. Memoria
 
 - [x] 1.1 A cut-off file that stopped changing gets `<name>-rest.xicap` once, marked `rest` in `uploads.txt`, and uploads; a failed write waits for a restart; verify core tests with a stand-in writer
-- [x] 1.2 The uploader writes the tail with xicap's `continueFrom`, and the stand-in goes; verify core tests on real captures (vault `drop-signing` 4.3)
+- [x] 1.2 The uploader writes the tail with xicap's `continueFrom`, and the stand-in goes; verify core tests on real captures
 
 ## 2. xicap
 
