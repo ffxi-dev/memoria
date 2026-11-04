@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <optional>
 #include <tuple>
@@ -64,6 +65,37 @@ auto find(const char* pattern) -> uintptr_t
     return Ashita::Memory::FindPattern(base, nt->OptionalHeader.SizeOfImage, pattern, 0, 0);
 }
 
+auto network() -> xicap::Network
+{
+    // Square Enix's retail zone servers, 124.150.152.0/21.
+    constexpr uint32_t RETAIL_FIRST = 0x7C969800;
+    constexpr uint32_t RETAIL_LAST  = 0x7C969FFF;
+
+    // The zone server's IPv4 address (credits: atom0s, via captain).
+    static const uintptr_t sig = find("8B0D????????8D04808B8481????????C3");
+    if (sig == 0)
+    {
+        return xicap::Network::Unknown;
+    }
+    try
+    {
+        const auto ip = std::byteswap(read32(read32(read32(sig + 2))));
+        if (ip == 0)
+        {
+            return xicap::Network::Unknown;
+        }
+        if (ip >= RETAIL_FIRST && ip <= RETAIL_LAST)
+        {
+            return xicap::Network::Retail;
+        }
+        return xicap::Network::Private;
+    }
+    catch (...) // /EHa: a bad read is an access violation
+    {
+        return xicap::Network::Unknown;
+    }
+}
+
 namespace search
 {
 namespace
@@ -115,7 +147,7 @@ auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
 auto __cdecl nextPageHook(void* connection) -> int
 {
     const int result = nextPage_(connection);
-    if (result == 0) // queued
+    if (result == 0) // the request was queued
     {
         record(true, NEXT_PAGE.data(), NEXT_PAGE.size());
     }
@@ -241,7 +273,7 @@ auto version() -> std::string
                    ? version
                    : std::string{};
     }
-    catch (...) // /EHa
+    catch (...)
     {
         return {};
     }
@@ -281,7 +313,7 @@ auto character(Login& who) -> std::string
         who.character.world = std::string(world, strnlen(world, WORLD_NAME_SIZE));
         return {};
     }
-    catch (...) // /EHa
+    catch (...)
     {
         return "cannot read the character list";
     }

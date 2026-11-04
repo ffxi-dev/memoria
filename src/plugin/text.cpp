@@ -5,6 +5,29 @@
 namespace memoria
 {
 
+auto count(uint64_t n) -> std::string
+{
+    auto text = std::to_string(n);
+    for (auto at = static_cast<std::ptrdiff_t>(text.size()) - 3; at > 0; at -= 3)
+    {
+        text.insert(static_cast<size_t>(at), ",");
+    }
+    return text;
+}
+
+auto duration(uint64_t seconds) -> std::string
+{
+    if (seconds < 60)
+    {
+        return std::format("{} s", seconds);
+    }
+    if (seconds < 3600)
+    {
+        return std::format("{} min", seconds / 60);
+    }
+    return std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
+}
+
 auto utf8FromShiftJis(std::string_view text) -> std::string
 {
     constexpr UINT SHIFT_JIS = 932;

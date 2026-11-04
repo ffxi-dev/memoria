@@ -17,6 +17,9 @@ using InternetHandle = std::unique_ptr<void, CloseInternetHandle>; // HINTERNET
 
 auto wide(std::string_view ascii) -> std::wstring;
 
+// A WinHTTP session that names Memoria and its version as the user agent.
+auto openSession() -> InternetHandle;
+
 struct OpenRequest
 {
     InternetHandle connection;
@@ -30,7 +33,7 @@ auto openRequest(void* session, std::string_view method, const std::string& url)
 class WinHttp final : public Http
 {
 public:
-    explicit WinHttp(const std::string& agent);
+    WinHttp();
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override;
     auto cancel() -> void override;

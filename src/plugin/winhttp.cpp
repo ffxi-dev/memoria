@@ -104,6 +104,11 @@ auto wide(std::string_view ascii) -> std::wstring
     return { ascii.begin(), ascii.end() };
 }
 
+auto openSession() -> InternetHandle
+{
+    return InternetHandle(WinHttpOpen(L"Memoria/" MEMORIA_VERSION_TEXT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+}
+
 auto openRequest(void* session, std::string_view method, const std::string& url) -> std::expected<OpenRequest, std::string>
 {
     const auto     wurl = wide(url);
@@ -128,8 +133,8 @@ auto openRequest(void* session, std::string_view method, const std::string& url)
     return open;
 }
 
-WinHttp::WinHttp(const std::string& agent)
-: session_(WinHttpOpen(wide(agent).c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0))
+WinHttp::WinHttp()
+: session_(openSession())
 {
     if (session_)
     {

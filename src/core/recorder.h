@@ -39,10 +39,7 @@ struct RecorderStatus
     std::filesystem::path capture;
     std::filesystem::path session;
     uint64_t              packets{}; // in the open capture, as are the counts below
-    uint64_t              packetsIn{};
-    uint64_t              packetsOut{};
-    uint64_t              bytesIn{};
-    uint64_t              bytesOut{};
+    uint64_t              bytes{};
     uint64_t              search{};
     uint64_t              firstMs{};
     uint64_t              lastMs{};
@@ -59,7 +56,9 @@ public:
     ~Recorder();
 
     Recorder(const Recorder&)                    = delete;
+    Recorder(Recorder&&)                         = delete;
     auto operator=(const Recorder&) -> Recorder& = delete;
+    auto operator=(Recorder&&) -> Recorder&      = delete;
 
     // These only queue: safe on the game thread.
     auto packet(Event event) -> void;

@@ -2,13 +2,13 @@
 
 #include "core/http.h"
 #include "core/tus.h"
+#include "core/upload_state.h"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -42,7 +42,7 @@ struct UploadStatus
     std::string error;
 };
 
-// A port of Mogsafe's upload/upload.go: sends what each .xicap gained since the server's offset, and closes it with its hash once the server accepts it as complete.
+// Sends what each .xicap in the folder gained since Mogsafe's offset, and closes its upload with the file's hash once the capture is complete.
 class Uploader
 {
 public:
@@ -50,7 +50,9 @@ public:
     ~Uploader();
 
     Uploader(const Uploader&)                    = delete;
+    Uploader(Uploader&&)                         = delete;
     auto operator=(const Uploader&) -> Uploader& = delete;
+    auto operator=(Uploader&&) -> Uploader&      = delete;
 
     auto start() -> void;
     // At unload, once the recorder closed name: sends its last bytes and closes its upload, waiting at most limit. Sends nothing after.
@@ -58,53 +60,34 @@ public:
     auto pass() -> std::optional<std::string>; // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
-    [[nodiscard]] auto uploading() const -> bool;                                 // false while another client sharing the folder sends its captures
     [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did
     [[nodiscard]] auto unauthorized() -> bool;                                    // true once each time Mogsafe refuses the token on disk, which it then deletes
     [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed: its bytes never go again
     [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
 private:
-    struct File
-    {
-        std::string                           url;
-        bool                                  closed{};
-        bool                                  ended{};      // Mogsafe answered 410: cut off or refused
-        bool                                  cutOff{};     // ended as cut off: Vault keeps the first sent bytes
-        bool                                  rescued{};    // its tail went to a -rest.xicap capture of its own
-        bool                                  restFailed{}; // writing the tail failed this run: tried again after a restart
-        uint64_t                              refused{};    // size at the last refused close
-        std::string                           reason;       // why Mogsafe refused it for good, kept in the state file
-        uint64_t                              size{};
-        uint64_t                              sent{};
-        std::chrono::steady_clock::time_point seen{}; // when size last changed
-        std::string                           error;
-    };
-
     auto run() -> void;
-    auto step(const std::filesystem::path& path, File& f, std::chrono::milliseconds idle) -> std::optional<std::string>;
+    auto step(const std::filesystem::path& path, UploadFile& f, std::chrono::milliseconds idle) -> std::optional<std::string>;
     auto last(const std::string& name) -> void;
-    auto send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
-    auto close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>;
-    auto end(File& f, const HttpResponse& res) -> void;
-    auto rest(const std::filesystem::path& path, File& f) -> std::optional<std::string>;
-    auto allowed() -> bool;
-    auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
+    auto send(const std::filesystem::path& path, UploadFile& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
+    auto close(const std::filesystem::path& path, UploadFile& f, uint64_t size) -> std::optional<std::string>;
+    auto end(UploadFile& f, const HttpResponse& res) -> void;
+    auto rest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>;
     auto load() -> void;
     auto save() -> std::optional<std::string>;
-    auto saved() const -> std::map<std::string, File>;
-    auto file(const std::string& name) const -> File; // from memory while this client sends, else from the state file
+    auto saved() const -> UploadFiles;
+    auto file(const std::string& name) const -> UploadFile; // from memory while this client sends, else from the state file
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
     Tus                   tus_; // upload thread only, but for unauthorized()
 
-    mutable std::mutex          mutex_;
-    std::map<std::string, File> files_; // by file name
-    std::string                 saveError_;
-    bool                        dirty_{}; // upload thread only: memory holds what the state file lacks
-    bool                        last_{};  // upload thread only: finish() is sending the last bytes
-    std::atomic<bool>           loaded_{ false };
+    mutable std::mutex mutex_;
+    UploadFiles        files_;
+    std::string        saveError_;
+    bool               dirty_{}; // upload thread only: memory holds what the state file lacks
+    bool               last_{};  // upload thread only: finish() is sending the last bytes
+    std::atomic<bool>  loaded_{ false };
 
     std::thread             thread_;
     std::mutex              wakeMutex_;

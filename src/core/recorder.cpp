@@ -322,20 +322,17 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
         mark(xicap::MarkerKind::Login);
     }
     std::lock_guard lock(statusMutex_);
-    status_.capture    = path;
-    status_.packets    = 0;
-    status_.packetsIn  = 0;
-    status_.packetsOut = 0;
-    status_.bytesIn    = 0;
-    status_.bytesOut   = 0;
-    status_.search     = 0;
-    status_.firstMs    = timestamp;
-    status_.lastMs     = timestamp;
+    status_.capture = path;
+    status_.packets = 0;
+    status_.bytes   = 0;
+    status_.search  = 0;
+    status_.firstMs = timestamp;
+    status_.lastMs  = timestamp;
 }
 
 auto Recorder::write(const Event& event) -> void
 {
-    const xicap::OutPacket packet{
+    const auto packet = xicap::OutPacket{
         .timestamp  = event.timestamp,
         .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
         .data       = std::as_bytes(std::span{ event.data }),
@@ -351,9 +348,11 @@ auto Recorder::write(const Event& event) -> void
     live_.push(packet, policy_);
     std::lock_guard lock(statusMutex_);
     status_.packets++;
-    (event.clientToServer ? status_.packetsOut : status_.packetsIn)++;
-    (event.clientToServer ? status_.bytesOut : status_.bytesIn) += event.data.size();
-    status_.search += event.channel == static_cast<uint8_t>(xicap::Channel::Search) ? 1 : 0;
+    status_.bytes += event.data.size();
+    if (event.channel == std::to_underlying(xicap::Channel::Search))
+    {
+        status_.search++;
+    }
     status_.lastMs = event.timestamp;
 }
 

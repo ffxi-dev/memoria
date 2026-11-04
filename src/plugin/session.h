@@ -1,19 +1,19 @@
 #pragma once
 
-#include "core/captain.h"
 #include "core/chat.h"
 #include "core/clock.h"
+#include "core/importer.h"
 #include "core/link.h"
 #include "core/recorder.h"
 #include "core/uploader.h"
 #include "plugin/live.h"
+#include "plugin/text.h"
 
 #include <Windows.h>
 
 #include <array>
 #include <atomic>
 #include <filesystem>
-#include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -26,20 +26,7 @@
 namespace memoria
 {
 
-// Ashita's chat colours, as its chat.lua names them: 0x1E, then a colour number; 0x1E 0x01 goes back to normal.
-enum class Color : uint8_t
-{
-    Green  = 2,
-    Cyan   = 6,
-    Grey   = 67,
-    Red    = 68,
-    Yellow = 104,
-};
-
-inline auto paint(Color c, std::string_view text) -> std::string
-{
-    return std::format("\x1E{}{}\x1E\x01", static_cast<char>(c), text);
-}
+inline constexpr auto CAPTURE_AGENT = "Memoria " MEMORIA_VERSION_TEXT;
 
 // What a framework gives the session: where its files go, and how it talks to the player.
 struct Host
@@ -66,7 +53,9 @@ public:
     ~Session(); // stops every thread and unhooks the client
 
     Session(const Session&)                    = delete;
+    Session(Session&&)                         = delete;
     auto operator=(const Session&) -> Session& = delete;
+    auto operator=(Session&&) -> Session&      = delete;
 
     auto start(std::optional<LateLogin> late) -> void;
 
@@ -90,17 +79,16 @@ private:
     };
 
     auto record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
-    auto network() -> xicap::Network;
     auto say(const std::string& text) -> void;
-    auto post(std::string text) -> void; // say, from any thread: printed on the next frame
+    auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
     auto status() -> void;
     auto startUploads() -> void;
     auto link() -> void;
     auto unlink(const std::string& why) -> void;
     auto linked() const -> std::optional<Linked>; // read each time: clients sharing the install share its token
-    auto greet() -> void;                         // starts the two below on reminder_
-    auto remind() -> void;                        // on reminder_
-    auto offerImport() -> void;                   // on reminder_
+    auto greet() -> void;
+    auto remind() -> void;
+    auto offerImport() -> void;
     auto startImport(bool asked) -> void;
     auto importLine() const -> std::string;
     auto hello() -> std::string;
@@ -108,9 +96,6 @@ private:
     auto refreshChat() -> void; // asks Mogsafe whether the linked account saves chat, off the game thread
 
     Host                               host_;
-    std::filesystem::path              config_;
-    std::filesystem::path              captures_;
-    std::filesystem::path              captain_;
     std::string                        server_ = "https://mogsafe.sruon.dev";
     std::mutex                         inboxMutex_;
     std::vector<std::string>           inbox_;
@@ -131,7 +116,7 @@ private:
     bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
     std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
     uint32_t                           loggedInAs_{ 0 };
-    std::optional<ChunkKey>            lastChunk_[2];      // per direction
+    std::optional<ChunkKey>            lastChunk_[2];      // the last chunk seen in each direction
     std::atomic<bool>                  saveChat_{ false }; // for the next capture: the linked account's choice
     std::atomic<bool>                  fetchingChat_{ false };
     std::jthread                       chatFetch_;

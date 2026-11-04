@@ -55,8 +55,7 @@ Tus::Tus(std::string server, std::filesystem::path config, Http& http)
 
 auto Tus::allowed() -> bool
 {
-    std::error_code ec;
-    if (std::filesystem::exists(config_ / "paused", ec) || ec)
+    if (paused(config_))
     {
         return false;
     }
@@ -87,8 +86,7 @@ auto Tus::location(const HttpResponse& res) const -> std::string
     return onServer(header(res, "location"));
 }
 
-// Only the path: behind its tunnel Mogsafe names an http:// Location, and the token goes nowhere but HTTPS to Mogsafe,
-// even for a URL saved before this rule.
+// Only the path: behind its tunnel Mogsafe names an http:// Location, and the token goes nowhere but HTTPS to Mogsafe.
 auto Tus::onServer(std::string_view url) const -> std::string
 {
     if (const auto scheme = url.find("://"); scheme != std::string_view::npos)

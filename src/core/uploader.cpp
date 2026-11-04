@@ -7,7 +7,6 @@
 #include <format>
 #include <fstream>
 #include <ranges>
-#include <sstream>
 #include <utility>
 
 namespace memoria
@@ -15,13 +14,12 @@ namespace memoria
 namespace
 {
 
-constexpr uint64_t CHUNK_SIZE = Tus::CHUNK_SIZE;
-constexpr auto     STATE_FILE = "uploads.txt";
+constexpr auto STATE_FILE = "uploads.txt";
 // Failures slow the uploader to at most 12 passes' wait, a minute at the default 5 s. Mogsafe ends a recording that
 // sends nothing for 5 minutes, and one file it keeps refusing fails every pass.
 constexpr int MAX_WAIT_PASSES = 12;
 
-// A refusal's body as one line of the state file.
+// A refusal's body, kept as one line of the state file.
 auto oneLine(std::string text) -> std::string
 {
     std::ranges::replace_if(text, [](char c)
@@ -33,36 +31,34 @@ auto oneLine(std::string text) -> std::string
     return last == std::string::npos ? std::string{} : text.substr(0, last + 1);
 }
 
-auto readRange(const std::filesystem::path& path, uint64_t offset, uint64_t n) -> std::optional<std::vector<uint8_t>>
-{
-    std::ifstream        in(path, std::ios::binary);
-    std::vector<uint8_t> buf(n);
-    if (!in.seekg(static_cast<std::streamoff>(offset)) || !in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(n)))
-    {
-        return std::nullopt;
-    }
-    return buf;
-}
-
 // Only the first size bytes: the file may still be growing.
 auto sha256(const std::filesystem::path& path, uint64_t size, const std::atomic<bool>& stopping) -> std::optional<std::string>
 {
+    std::ifstream                in(path, std::ios::binary);
+    std::vector<char>            chunk(Tus::CHUNK_SIZE);
     picosha2::hash256_one_by_one hasher;
-    for (uint64_t offset = 0; offset < size; offset += CHUNK_SIZE)
+    for (uint64_t left = size; left > 0;)
     {
-        if (stopping)
+        const auto n = std::min<uint64_t>(left, chunk.size());
+        if (stopping || !in.read(chunk.data(), static_cast<std::streamsize>(n)))
         {
             return std::nullopt;
         }
-        const auto chunk = readRange(path, offset, std::min(size - offset, CHUNK_SIZE));
-        if (!chunk)
-        {
-            return std::nullopt;
-        }
-        hasher.process(chunk->begin(), chunk->end());
+        hasher.process(chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(n));
+        left -= n;
     }
     hasher.finish();
     return picosha2::get_hash_hex_string(hasher);
+}
+
+// Notes when the file's size last changed, which tells when it went quiet.
+auto watch(UploadFile& f, uint64_t size, std::chrono::steady_clock::time_point now) -> void
+{
+    if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
+    {
+        f.size = size;
+        f.seen = now;
+    }
 }
 
 } // namespace
@@ -154,7 +150,7 @@ auto Uploader::finish(const std::string& name, std::chrono::milliseconds limit) 
 // Up to three steps: the last bytes, then the close the trailer allows. The game waits on it, so finish() bounds it.
 auto Uploader::last(const std::string& name) -> void
 {
-    if (!uploading_ || !allowed())
+    if (!uploading_ || !tus_.allowed())
     {
         return; // another client sharing the folder sends it
     }
@@ -163,7 +159,7 @@ auto Uploader::last(const std::string& name) -> void
         load();
         loaded_ = true;
     }
-    File f;
+    UploadFile f;
     {
         std::lock_guard lock(mutex_);
         f = files_[name];
@@ -195,7 +191,7 @@ auto Uploader::pass() -> std::optional<std::string>
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (stopping_ || finishing_ || !allowed())
+        if (stopping_ || finishing_ || !tus_.allowed())
         {
             break;
         }
@@ -204,7 +200,7 @@ auto Uploader::pass() -> std::optional<std::string>
             continue;
         }
         const auto name = entry.path().filename().string();
-        File       f;
+        UploadFile f;
         {
             std::lock_guard lock(mutex_);
             f = files_[name];
@@ -229,7 +225,7 @@ auto Uploader::pass() -> std::optional<std::string>
     return first;
 }
 
-auto Uploader::step(const std::filesystem::path& path, File& f, std::chrono::milliseconds idle) -> std::optional<std::string>
+auto Uploader::step(const std::filesystem::path& path, UploadFile& f, std::chrono::milliseconds idle) -> std::optional<std::string>
 {
     if (f.closed || f.ended)
     {
@@ -242,18 +238,14 @@ auto Uploader::step(const std::filesystem::path& path, File& f, std::chrono::mil
         return ec.message();
     }
     const auto now = std::chrono::steady_clock::now();
-    if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
-    {
-        f.size = size;
-        f.seen = now;
-    }
+    watch(f, size, now);
     if (size < CAPTURE_HEADER_SIZE)
     {
         return std::nullopt;
     }
     if (f.url.empty())
     {
-        const auto res = request("POST", options_.server + "/v1/uploads/", { { "Upload-Defer-Length", "1" } });
+        const auto res = tus_.request("POST", options_.server + "/v1/uploads/", { { "Upload-Defer-Length", "1" } });
         if (!res)
         {
             return res.error();
@@ -281,7 +273,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f, std::chrono::mil
         }
     }
 
-    const auto res = request("HEAD", f.url, {});
+    const auto res = tus_.request("HEAD", f.url, {});
     if (!res)
     {
         return res.error();
@@ -326,11 +318,11 @@ auto Uploader::step(const std::filesystem::path& path, File& f, std::chrono::mil
     return std::nullopt;
 }
 
-auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset, uint64_t size) -> std::optional<std::string>
+auto Uploader::send(const std::filesystem::path& path, UploadFile& f, uint64_t offset, uint64_t size) -> std::optional<std::string>
 {
     const auto sent = tus_.append(path, f.url, offset, size, [this](uint64_t)
                                   {
-                                      return !stopping_ && (!finishing_ || last_) && allowed(); // finish() ends a pass, not its own sending
+                                      return !stopping_ && (!finishing_ || last_) && tus_.allowed(); // finish() ends a pass, not its own sending
                                   });
     if (!sent)
     {
@@ -349,7 +341,7 @@ auto Uploader::send(const std::filesystem::path& path, File& f, uint64_t offset,
     return std::nullopt;
 }
 
-auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) -> std::optional<std::string>
+auto Uploader::close(const std::filesystem::path& path, UploadFile& f, uint64_t size) -> std::optional<std::string>
 {
     const auto hash = sha256(path, size, stopping_);
     if (!hash)
@@ -357,7 +349,7 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
         return "cannot read the capture";
     }
     const auto body = std::format(R"({{"sha256":"{}"}})", *hash);
-    const auto res  = request("POST", f.url + "/close", { { "Content-Type", "application/json" } }, std::span(reinterpret_cast<const uint8_t*>(body.data()), body.size()));
+    const auto res  = tus_.request("POST", f.url + "/close", { { "Content-Type", "application/json" } }, std::span(reinterpret_cast<const uint8_t*>(body.data()), body.size()));
     if (!res)
     {
         return res.error();
@@ -387,7 +379,7 @@ auto Uploader::close(const std::filesystem::path& path, File& f, uint64_t size) 
 
 // Mogsafe answered 410. A complete capture whose close answer was lost is closed; any other ended upload is dropped,
 // and its file never sent again: a recording still running goes on in a new file and upload.
-auto Uploader::end(File& f, const HttpResponse& res) -> void
+auto Uploader::end(UploadFile& f, const HttpResponse& res) -> void
 {
     if (header(res, "mogsafe-ended") == "complete")
     {
@@ -402,7 +394,7 @@ auto Uploader::end(File& f, const HttpResponse& res) -> void
 // Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
 // kept go to <name>-rest.xicap, which uploads as a capture of its own. sent may be below what Mogsafe holds, if an
 // append's answer was lost: then a few packets reach Vault twice, never none.
-auto Uploader::rest(const std::filesystem::path& path, File& f) -> std::optional<std::string>
+auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>
 {
     if (f.restFailed)
     {
@@ -415,11 +407,7 @@ auto Uploader::rest(const std::filesystem::path& path, File& f) -> std::optional
         return ec.message();
     }
     const auto now = std::chrono::steady_clock::now();
-    if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
-    {
-        f.size = size;
-        f.seen = now;
-    }
+    watch(f, size, now);
     if (size > f.sent && now - f.seen < options_.idle)
     {
         return std::nullopt;
@@ -446,34 +434,9 @@ auto Uploader::rest(const std::filesystem::path& path, File& f) -> std::optional
     return std::nullopt;
 }
 
-auto Uploader::allowed() -> bool
+auto Uploader::saved() const -> UploadFiles
 {
-    return tus_.allowed();
-}
-
-auto Uploader::request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
-{
-    return tus_.request(method, url, std::move(headers), body);
-}
-
-// One line per file: name, url, closed (1, 0, cut_off, rest once its tail went up on its own, or ended for refused), refused, bytes the server holds, and why Mogsafe refused it, separated by tabs.
-auto Uploader::saved() const -> std::map<std::string, File>
-{
-    std::map<std::string, File> files;
-    std::ifstream               in(options_.dir / STATE_FILE);
-    std::string                 line;
-    while (std::getline(in, line))
-    {
-        std::istringstream fields(line);
-        std::string        name, url, closed, refused, sent, reason;
-        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, closed, '\t') && std::getline(fields, refused, '\t'))
-        {
-            std::getline(fields, sent, '\t');
-            std::getline(fields, reason);
-            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended" || closed == "cut_off" || closed == "rest", .cutOff = closed == "cut_off" || closed == "rest", .rescued = closed == "rest", .refused = parseU64(refused).value_or(0), .reason = reason, .sent = parseU64(sent).value_or(0) };
-        }
-    }
-    return files;
+    return readUploads(options_.dir / STATE_FILE);
 }
 
 auto Uploader::load() -> void
@@ -485,21 +448,12 @@ auto Uploader::load() -> void
 
 auto Uploader::save() -> std::optional<std::string>
 {
-    std::string text;
+    UploadFiles files;
     {
         std::lock_guard lock(mutex_);
-        for (const auto& [name, f] : files_)
-        {
-            text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.rescued ? "rest"
-                                                                                      : f.cutOff    ? "cut_off"
-                                                                                      : f.ended     ? "ended"
-                                                                                                    : "0",
-                                f.refused,
-                                f.sent,
-                                f.reason);
-        }
+        files = files_;
     }
-    const auto error = replaceFile(options_.dir / STATE_FILE, text);
+    const auto error = writeUploads(options_.dir / STATE_FILE, files);
     dirty_           = error.has_value();
     std::lock_guard lock(mutex_);
     saveError_ = error.value_or("");
@@ -517,14 +471,14 @@ auto Uploader::unauthorized() -> bool
     return tus_.unauthorized();
 }
 
-auto Uploader::file(const std::string& name) const -> File
+auto Uploader::file(const std::string& name) const -> UploadFile
 {
     {
         std::lock_guard lock(mutex_);
         if (uploading_ && loaded_)
         {
             const auto it = files_.find(name);
-            return it == files_.end() ? File{} : it->second;
+            return it == files_.end() ? UploadFile{} : it->second;
         }
     }
     auto files = saved(); // another client sharing the folder sends it
@@ -542,15 +496,10 @@ auto Uploader::recordingId(const std::string& name) const -> std::string
     return url.substr(url.find_last_of('/') + 1);
 }
 
-auto Uploader::uploading() const -> bool
-{
-    return uploading_;
-}
-
 auto Uploader::status() const -> std::vector<UploadStatus>
 {
     // Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk are the truth.
-    std::map<std::string, File> files;
+    UploadFiles files;
     {
         std::lock_guard lock(mutex_);
         if (uploading_ && loaded_)

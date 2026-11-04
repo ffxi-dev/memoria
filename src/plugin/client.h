@@ -10,6 +10,9 @@ namespace memoria::client
 
 auto find(const char* pattern) -> uintptr_t; // first match in FFXiMain.dll, or 0
 
+// Retail or private, from the zone server's address; unknown before the client has one.
+auto network() -> xicap::Network;
+
 // Search server traffic in plaintext: FFXiMain encrypts requests and decrypts replies itself (credits: captain's SearchLog).
 namespace search
 {

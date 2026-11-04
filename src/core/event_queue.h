@@ -51,7 +51,7 @@ class EventQueue
 public:
     explicit EventQueue(size_t maxBytes);
 
-    auto push(Event event) -> bool; // false: dropped
+    auto push(Event event) -> bool; // false when the packet was dropped
     auto drain(std::vector<Event>& out) -> void;
     auto takeDropped() -> uint64_t;
 
