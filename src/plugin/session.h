@@ -97,8 +97,9 @@ private:
     auto link() -> void;
     auto unlink(const std::string& why) -> void;
     auto linked() const -> std::optional<Linked>; // read each time: clients sharing the install share its token
-    auto remind() -> void;
-    auto offerImport() -> void;
+    auto greet() -> void;                         // starts the two below on reminder_
+    auto remind() -> void;                        // on reminder_
+    auto offerImport() -> void;                   // on reminder_
     auto startImport(bool asked) -> void;
     auto importLine() const -> std::string;
     auto hello() -> std::string;

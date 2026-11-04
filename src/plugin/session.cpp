@@ -238,8 +238,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
             character_      = who;
             loggedIn_       = true;
             loggedInAs_     = who.characterId;
-            remind();
-            offerImport();
+            greet();
             recorder_->login(clock_.nowMs(), { .character = who, .network = network(), .clientVersion = client::lobby::version() });
             if (live_)
             {
@@ -332,7 +331,7 @@ auto Session::frame() -> void
         {
             startImport(false);
         }
-        offerImport();
+        greet();
     }
     if (importer_ && importer_->unauthorized())
     {
@@ -399,6 +398,21 @@ auto Session::post(std::string text) -> void
     inbox_.push_back(std::move(text));
 }
 
+// At a login or link. The reminders read and write files, so they run on a thread of their own: a packet hook never waits on the disk.
+auto Session::greet() -> void
+{
+    if (reminding_.exchange(true))
+    {
+        return;
+    }
+    reminder_ = std::jthread([this]
+                             {
+                                 remind();
+                                 offerImport();
+                                 reminding_ = false;
+                             });
+}
+
 // Once a day while unlinked: the date of the last reminder is kept across restarts.
 auto Session::remind() -> void
 {
@@ -411,27 +425,18 @@ auto Session::remind() -> void
         return;
     }
     std::ofstream(path, std::ios::trunc) << today;
-    say(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
+    post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
 }
 
-// Once per install, ever: while linked and captain captures wait, at login or link.
+// Once per install, ever: while linked and captain captures wait.
 auto Session::offerImport() -> void
 {
     std::error_code ec;
-    if (reminding_ || !linked() || std::filesystem::exists(config_ / "import-reminded", ec))
+    // Clients logging in together race to create the reminded file; only the winner speaks.
+    if (linked() && !std::filesystem::exists(config_ / "import-reminded", ec) && remindImport(config_, captain_ / "captures"))
     {
-        return;
+        post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }
-    reminding_ = true;
-    reminder_  = std::jthread([this]
-                              {
-                                 // Clients logging in together race to create the reminded file; only the winner speaks.
-                                 if (remindImport(config_, captain_ / "captures"))
-                                 {
-                                     post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
-                                 }
-                                 reminding_ = false;
-                              });
 }
 
 // Clients sharing an install import through the one whose importer holds the named mutex.
