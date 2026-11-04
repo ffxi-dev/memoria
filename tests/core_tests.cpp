@@ -631,6 +631,7 @@ public:
     int                                     patches{};
     uint64_t                                received{};        // bytes accepted by appends
     int                                     crashAtPatch = -1; // the game dies during this PATCH, before any answer
+    int                                     cutAtPatch   = -1; // this PATCH keeps half its body, then the connection drops
     std::function<void()>                   onPatch;
     std::function<void()>                   onCreate;
 
@@ -723,13 +724,20 @@ public:
         }
         if (method == "PATCH")
         {
-            if (patches++ == crashAtPatch)
+            const auto patch = patches++;
+            if (patch == crashAtPatch)
             {
                 throw std::runtime_error("the game crashed");
             }
             if (get("Upload-Offset") != std::to_string(u.data.size()))
             {
                 return HttpResponse{ .status = 409 };
+            }
+            if (patch == cutAtPatch)
+            {
+                u.data.insert(u.data.end(), body.begin(), body.begin() + static_cast<std::ptrdiff_t>(body.size() / 2));
+                received += body.size() / 2;
+                return std::unexpected("connection reset");
             }
             u.data.insert(u.data.end(), body.begin(), body.end());
             received += body.size();
@@ -2461,5 +2469,299 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     CHECK(now.packets == 1);
     CHECK(now.previous == old.id);
     CHECK(now.start == xicap::StartContext::MidSession);
+    fs::remove_all(dir);
+}
+
+// Faults a player's PC can throw at a recording: each test says what Memoria must keep.
+
+TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uploads whole")
+{
+    const auto dir = tempDir();
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        for (uint64_t i = 0; i < 6; ++i)
+        {
+            rec.packet(gamePacket(T0 + 1 + i * 3));
+            rec.packet(gamePacket(T0 + 2 + i * 3));
+            rec.logout(T0 + 3 + i * 3); // ends the frame
+            rec.login(T0 + 3 + i * 3, who("Nouurs", 1));
+        }
+        rec.stop();
+    }
+    const auto bytes = readAll(captures(dir)[0]);
+    const auto cut   = dir / "cut" / "a.xicap";
+    fs::create_directories(cut.parent_path());
+    const auto write = [&](size_t n)
+    {
+        std::ofstream(cut, std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(n));
+    };
+    uint64_t most   = 0;
+    bool     opened = false;
+    for (size_t n = xicap::HEADER_SIZE; n < bytes.size(); ++n)
+    {
+        write(n);
+        uint64_t packets = 0;
+        try
+        {
+            xicap::Reader     r(cut);
+            xicap::ReadPacket p{};
+            opened = true;
+            CHECK_FALSE(r.complete());
+            while (r.next(p))
+            {
+                ++packets;
+            }
+        }
+        catch (const xicap::Error& error)
+        {
+            INFO(n << ": " << error.what());
+            CHECK_FALSE(opened); // a cut that reads its start reads at every longer cut too
+        }
+        CHECK(packets >= most); // a longer cut never reads less
+        most = std::max(most, packets);
+    }
+    CHECK(opened);
+    CHECK(most == 12); // a cut inside the footer still reads every packet
+
+    // Killed mid-frame: the uploader sends every byte, and stops at a close Mogsafe refuses until the file changes.
+    write(bytes.size() / 2);
+    FakeMogsafe server;
+    auto        up = uploader(cut.parent_path(), server);
+    CHECK(!up->pass());
+    CHECK(!up->pass()); // close refused: no footer
+    const auto requests = server.requests;
+    CHECK(!up->pass());
+    CHECK(server.requests == requests + 1); // a HEAD, no close
+    CHECK(server.uploads.begin()->second.data == readAll(cut));
+    CHECK(up->status()[0].sent == up->status()[0].size);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an append cut off mid-body resumes from the bytes the server kept")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    server.cutAtPatch = 1;
+    append(file, noise(3 * Tus::CHUNK_SIZE + 77));
+    auto up = uploader(dir, server);
+    CHECK(up->pass().has_value());
+    CHECK(server.uploads.begin()->second.data.size() == Tus::CHUNK_SIZE * 3 / 2);
+    CHECK(!up->pass());
+    CHECK(server.creates == 1);
+    CHECK(server.uploads.begin()->second.data == readAll(file));
+    fs::remove_all(dir);
+}
+
+TEST_CASE("any failed answer at any step is retried, and the upload ends whole")
+{
+    for (const auto* method : { "POST", "HEAD", "PATCH" })
+    {
+        for (const int status : { 0, 408, 429, 500, 502, 503 }) // 0: no answer at all
+        {
+            INFO(method << " " << status);
+            const auto  dir  = tempDir();
+            const auto  file = dir / "a.xicap";
+            FakeMogsafe server;
+            auto        up = uploader(dir, server);
+            append(file, std::string(500, 'x'));
+            if (status == 0)
+            {
+                server.down = true;
+            }
+            else
+            {
+                server.forced[method] = { status, status };
+            }
+            CHECK(up->pass().has_value());
+            server.down = false;
+            for (int i = 0; i < 3; ++i)
+            {
+                std::ignore = up->pass();
+            }
+            append(file, "XCPF");
+            if (status != 0)
+            {
+                server.forced["POST"] = { status }; // the close fails once too
+            }
+            for (int i = 0; i < 4; ++i)
+            {
+                std::ignore = up->pass();
+            }
+            CHECK(server.creates == 1);
+            REQUIRE(server.uploads.size() == 1);
+            CHECK(server.uploads.begin()->second.data == readAll(file));
+            CHECK(server.uploads.begin()->second.closed);
+            CHECK(!up->pass());
+            fs::remove_all(dir);
+        }
+    }
+}
+
+TEST_CASE("an upload thread never spins: a dead server or an ended upload costs a few requests a second at most")
+{
+    enum class Fault : uint8_t
+    {
+        Down,
+        Error,
+        Ended,
+        Duplicate,
+    };
+    for (const auto fault : { Fault::Down, Fault::Error, Fault::Ended, Fault::Duplicate })
+    {
+        INFO(static_cast<int>(fault));
+        const auto  dir = tempDir();
+        FakeMogsafe server;
+        append(dir / "a.xicap", std::string(500, 'x'));
+        CHECK(!uploader(dir, server)->pass());
+        append(dir / "a.xicap", std::string(100, 'x'));
+        auto& u = server.uploads.begin()->second;
+        switch (fault)
+        {
+            case Fault::Down:
+                server.down = true;
+                break;
+            case Fault::Error:
+                server.forced["HEAD"] = std::vector(1000, 500);
+                break;
+            case Fault::Ended:
+                u.cutOff = true;
+                break;
+            case Fault::Duplicate: // Mogsafe refuses, at its first append, a capture it holds, then ends the upload
+                server.forced["PATCH"] = { 409 };
+                break;
+        }
+        UploadOptions options{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .every = std::chrono::milliseconds(20), .idle = std::chrono::milliseconds(0) };
+        auto          up = std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
+        if (fault == Fault::Duplicate)
+        {
+            CHECK(up->pass().has_value()); // the 409
+            u.cutOff = true;
+        }
+        const auto before = server.requests;
+        up->start();
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        up.reset();
+        const auto requests = server.requests - before;
+        CHECK(requests <= 30);
+        if (fault == Fault::Ended || fault == Fault::Duplicate)
+        {
+            CHECK(requests <= 1); // one 410, then never again
+            CHECK(u.data.size() == 500);
+        }
+        fs::remove_all(dir);
+    }
+}
+
+TEST_CASE("a server holding more than the file on disk gets nothing, and no request loops")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+    append(file, std::string(600, 'x'));
+    CHECK(!up->pass());
+    fs::resize_file(file, 500); // a power cut lost the file's tail, already sent
+    CHECK(!up->pass());         // its close is refused
+    const auto requests = server.requests;
+    CHECK(!up->pass());
+    CHECK(server.requests == requests + 1); // a HEAD
+    CHECK(server.uploads.begin()->second.data.size() == 600);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("timestamps that step back or leap ahead lose no packet")
+{
+    const auto         dir  = tempDir();
+    constexpr uint64_t DAYS = 50ULL * 24 * 3600 * 1000; // past 2^32 ms: a PC asleep for 50 days
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        for (const auto t : { T0 + 10, T0 + 5, T0 + 5, T0 + DAYS, T0 + DAYS + 1, T0 + 1 })
+        {
+            rec.packet(gamePacket(t));
+        }
+        rec.stop();
+    }
+    xicap::Reader     r(captures(dir)[0]);
+    xicap::ReadPacket p{};
+    uint64_t          last = 0;
+    int               n    = 0;
+    while (r.next(p))
+    {
+        CHECK(p.timestamp >= last);
+        last = p.timestamp;
+        ++n;
+    }
+    CHECK(n == 6);
+    CHECK(r.complete());
+    CHECK(r.verify().signedToEnd);
+    CHECK(last == T0 + DAYS + 1);
+}
+
+TEST_CASE("a three-day session stays one capture, whole and signed")
+{
+    const auto         dir     = tempDir();
+    constexpr uint64_t PACKETS = 50'000;
+    constexpr uint64_t STEP    = 3ULL * 24 * 3600 * 1000 / PACKETS; // past two midnights
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        for (uint64_t i = 0; i < PACKETS; ++i)
+        {
+            rec.packet(gamePacket(T0 + 1 + i * STEP, static_cast<uint16_t>(0x00D + i % 64)));
+        }
+        rec.stop();
+        CHECK(rec.status().dropped == 0);
+    }
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 1);
+    const auto read = readCapture(files[0]);
+    CHECK(read.packets == PACKETS);
+    CHECK(read.complete);
+    CHECK(read.signedToEnd);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("sessions: a stop without a start, a start over a running one, and a character change")
+{
+    const auto dir = tempDir();
+    const auto a   = dir / "sessions" / "a.xicap";
+    const auto b   = dir / "sessions" / "b.xicap";
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Nouurs", 1));
+        rec.sessionStop(T0 + 1); // nothing to stop
+        rec.packet(gamePacket(T0 + 2));
+        rec.sessionStart(T0 + 3, a);
+        rec.packet(gamePacket(T0 + 4));
+        rec.sessionStart(T0 + 5, b); // ends a
+        rec.packet(gamePacket(T0 + 6));
+        rec.login(T0 + 7, who("Mule", 2)); // ends b with Nouurs' capture
+        rec.packet(gamePacket(T0 + 8));
+        rec.sessionStop(T0 + 9);
+        rec.stop();
+        CHECK(rec.status().error.empty());
+        CHECK(rec.status().sessionError.empty());
+    }
+    const auto first  = readCapture(a);
+    const auto second = readCapture(b);
+    CHECK(first.complete);
+    CHECK(second.complete);
+    CHECK(first.packets == 1);
+    CHECK(second.packets == 1);
+    const auto files = captures(dir);
+    REQUIRE(files.size() == 2);
+    auto nouurs = readCapture(files[0]);
+    auto mule   = readCapture(files[1]);
+    if (nouurs.name != "Nouurs")
+    {
+        std::swap(nouurs, mule);
+    }
+    CHECK(nouurs.packets == 3);
+    CHECK(mule.packets == 1);
+    CHECK(first.previous == nouurs.id);
+    CHECK(second.previous == nouurs.id);
     fs::remove_all(dir);
 }
