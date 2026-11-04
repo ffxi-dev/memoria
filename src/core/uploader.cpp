@@ -168,7 +168,7 @@ auto Uploader::step(const std::filesystem::path& path, File& f) -> std::optional
 {
     if (f.closed || f.ended)
     {
-        return std::nullopt;
+        return f.cutOff && !f.rescued ? rest(path, f) : std::nullopt;
     }
     std::error_code ec;
     const auto      size = std::filesystem::file_size(path, ec);
@@ -334,6 +334,57 @@ auto Uploader::end(File& f, const HttpResponse& res) -> void
     f.url.clear();
 }
 
+// Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
+// kept go to <name>-rest.xicap, which uploads as a capture of its own. held may be below what Mogsafe holds, if an
+// append's answer was lost: then a few packets reach Vault twice, never none.
+auto Uploader::rest(const std::filesystem::path& path, File& f) -> std::optional<std::string>
+{
+    if (!tail_ || f.restFailed)
+    {
+        return std::nullopt;
+    }
+    std::error_code ec;
+    const auto      size = std::filesystem::file_size(path, ec);
+    if (ec)
+    {
+        return ec.message();
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
+    {
+        f.size = size;
+        f.seen = now;
+    }
+    if (size > f.sent && now - f.seen < options_.idle)
+    {
+        return std::nullopt;
+    }
+    const auto out = path.parent_path() / (path.stem().string() + "-rest.xicap");
+    if (size > f.sent && !std::filesystem::exists(out, ec))
+    {
+        const auto tmp   = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap: no pass sends it half written
+        auto       error = tail_(path, f.sent, tmp);
+        if (!error)
+        {
+            std::filesystem::rename(tmp, out, ec);
+            error = ec ? std::optional(ec.message()) : std::nullopt;
+        }
+        if (error)
+        {
+            std::filesystem::remove(tmp, ec);
+            f.restFailed = true;
+            return "cannot write the cut-off tail: " + *error;
+        }
+    }
+    f.rescued = true;
+    return std::nullopt;
+}
+
+auto Uploader::continueTail(TailWriter writer) -> void
+{
+    tail_ = std::move(writer);
+}
+
 auto Uploader::allowed() -> bool
 {
     return tus_.allowed();
@@ -344,7 +395,7 @@ auto Uploader::request(const std::string& method, const std::string& url, HttpHe
     return tus_.request(method, url, std::move(headers), body);
 }
 
-// One line per file: name, url, closed (1, 0, cut_off, or ended for refused), refused, bytes the server holds, and why Mogsafe refused it, separated by tabs.
+// One line per file: name, url, closed (1, 0, cut_off, rest once its tail went up on its own, or ended for refused), refused, bytes the server holds, and why Mogsafe refused it, separated by tabs.
 auto Uploader::saved() const -> std::map<std::string, File>
 {
     std::map<std::string, File> files;
@@ -358,7 +409,7 @@ auto Uploader::saved() const -> std::map<std::string, File>
         {
             std::getline(fields, sent, '\t');
             std::getline(fields, reason);
-            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended" || closed == "cut_off", .cutOff = closed == "cut_off", .refused = parseU64(refused).value_or(0), .reason = reason, .sent = parseU64(sent).value_or(0) };
+            files[name] = { .url = url, .closed = closed == "1", .ended = closed == "ended" || closed == "cut_off" || closed == "rest", .cutOff = closed == "cut_off" || closed == "rest", .rescued = closed == "rest", .refused = parseU64(refused).value_or(0), .reason = reason, .sent = parseU64(sent).value_or(0) };
         }
     }
     return files;
@@ -378,9 +429,10 @@ auto Uploader::save() -> std::optional<std::string>
         std::lock_guard lock(mutex_);
         for (const auto& [name, f] : files_)
         {
-            text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.cutOff ? "cut_off"
-                                                                                      : f.ended    ? "ended"
-                                                                                                   : "0",
+            text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, f.closed ? "1" : f.rescued ? "rest"
+                                                                                      : f.cutOff    ? "cut_off"
+                                                                                      : f.ended     ? "ended"
+                                                                                                    : "0",
                                 f.refused,
                                 f.sent,
                                 f.reason);
@@ -451,7 +503,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         const auto& f       = files[entry.path().filename().string()];
         const auto  size    = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
         const bool  refused = !f.closed && f.refused == size && !f.reason.empty();
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && !f.cutOff) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff, .error = refused ? f.reason : f.error });
+        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && (!f.cutOff || f.rescued)) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff && !f.rescued, .error = refused ? f.reason : f.error });
     }
     return out;
 }
