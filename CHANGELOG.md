@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0-rc.4
 
 **Captures**
 - Memoria writes xicap format 5 (xicap 7.1), which has no signatures: Vault knows who sent a capture from the install's upload token. It needs Mogsafe with xicap 7. Chat text is zeroed in place, so chat packets keep their length.
