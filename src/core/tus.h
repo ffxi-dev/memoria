@@ -31,10 +31,10 @@ public:
     // Read before each step and chunk: another client sharing the install may have paused, unlinked, or linked again.
     auto allowed() -> bool;
 
-    // Adds the tus version and the token; a 401 deletes the token and is an error.
+    // Adds the tus version and the token, and sends to the server's origin whatever origin url names; a 401 deletes the token and is an error.
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
 
-    // The upload's URL from a create's Location.
+    // The upload's URL from a create's Location, on the server's origin.
     [[nodiscard]] auto location(const HttpResponse& res) const -> std::string;
 
     // Sends path's bytes from offset to size in 1 MiB appends, while go(offset) holds.
@@ -43,6 +43,8 @@ public:
     [[nodiscard]] auto unauthorized() -> bool; // true once each time Mogsafe refuses the token on disk, which it then deletes
 
 private:
+    [[nodiscard]] auto onServer(std::string_view url) const -> std::string;
+
     std::string           server_;
     std::filesystem::path config_;
     Http&                 http_;
