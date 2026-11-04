@@ -136,7 +136,9 @@ Session::Session(Host host)
 
 auto Session::start(std::optional<LateLogin> late) -> void
 {
-    const auto seed = loadOrCreateSeed(config_ / "key");
+    std::error_code ec;
+    const bool      hadKey = std::filesystem::exists(config_ / "key", ec);
+    const auto      seed   = loadOrCreateSeed(config_ / "key");
     if (!seed)
     {
         startError_ = seed.error();
@@ -144,6 +146,12 @@ auto Session::start(std::optional<LateLogin> late) -> void
         return; // stay loaded so /memoria status can say why
     }
     seed_ = *seed;
+    // Vault takes an install's captures only signed by the key it linked: a token kept from a lost key would send captures it refuses.
+    if (const auto link = linked(); !hadKey && link)
+    {
+        removeLink(config_ / "token", link->token);
+        say(paint(Color::Yellow, "The signing key was missing, so Memoria made a new one.") + " Run " + paint(Color::Cyan, "/memoria link") + " to link it; your captures stay on this PC until then.");
+    }
     if (auto config = readIni(config_ / "upload.ini"); config && (*config)["server"].starts_with("https://"))
     {
         server_ = (*config)["server"];
