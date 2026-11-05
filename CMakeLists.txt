@@ -49,6 +49,7 @@ add_library(memoria_core STATIC
     src/core/captain/captain.cpp
     src/core/captain/compress.cpp
     src/core/captain/importer.cpp
+    src/core/captain/upload.cpp
     src/core/capture/clock.cpp
     src/core/capture/event_queue.cpp
     src/core/capture/packets.cpp
@@ -58,6 +59,7 @@ add_library(memoria_core STATIC
     src/core/live/live.cpp
     src/core/tus.cpp
     src/core/units.cpp
+    src/core/upload/ended.cpp
     src/core/upload/upload_state.cpp
     src/core/upload/uploader.cpp
     src/core/worker.cpp

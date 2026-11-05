@@ -29,6 +29,9 @@ struct UploadFile
 
 using UploadFiles = std::map<std::string, UploadFile>; // by file name
 
+// Notes when the file's size last changed, which tells when it went quiet.
+auto watch(UploadFile& f, uint64_t size, std::chrono::steady_clock::time_point now) -> void;
+
 auto readUploads(const std::filesystem::path& path) -> UploadFiles;
 
 // Why the file was not replaced, if it was not.

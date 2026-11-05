@@ -74,6 +74,15 @@ auto readUploads(const std::filesystem::path& path) -> UploadFiles
     return files;
 }
 
+auto watch(UploadFile& f, const uint64_t size, const std::chrono::steady_clock::time_point now) -> void
+{
+    if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
+    {
+        f.size = size;
+        f.seen = now;
+    }
+}
+
 auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>
 {
     std::string text;
