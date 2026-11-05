@@ -2,11 +2,7 @@
 
 #ifdef _WIN32
 #include <Windows.h>
-#include <fcntl.h>
-#include <io.h>
 #include <sddl.h>
-#include <share.h>
-#include <sys/stat.h>
 
 #include <memory>
 #include <vector>
@@ -62,43 +58,45 @@ auto userSid() -> std::wstring
 #endif
 
 // Not std::ios::noreplace: Wine, which runs the tests, has no fopen "x" mode.
-auto createNew(const std::filesystem::path& path, const bool secret) -> bool
+auto createNew(const std::filesystem::path& path, const bool secret, const std::string_view text) -> bool
 {
 #ifdef _WIN32
+    PSECURITY_DESCRIPTOR sd{ nullptr };
     if (secret)
     {
         // Full access for this user alone, nothing inherited from the folder, which other users of the PC may read.
-        const auto           sid = userSid();
-        PSECURITY_DESCRIPTOR sd{ nullptr };
+        const auto sid = userSid();
         if (sid.empty() || !::ConvertStringSecurityDescriptorToSecurityDescriptorW((L"D:P(A;;FA;;;" + sid + L")").c_str(), SDDL_REVISION_1, &sd, nullptr))
         {
             return false;
         }
-        const std::unique_ptr<void, LocalFreer> owned(sd);
-        SECURITY_ATTRIBUTES                     sa{ .nLength = sizeof(sa), .lpSecurityDescriptor = sd, .bInheritHandle = FALSE };
-        const HANDLE                            file{ ::CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr) };
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            return false;
-        }
-        ::CloseHandle(file);
-        return true;
     }
-    int fd{ -1 };
-    if (_wsopen_s(&fd, path.c_str(), _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0)
+    const std::unique_ptr<void, LocalFreer> owned(sd);
+    SECURITY_ATTRIBUTES                     sa{ .nLength = sizeof(sa), .lpSecurityDescriptor = sd, .bInheritHandle = FALSE };
+    const HANDLE                            file{ ::CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr) };
+    if (file == INVALID_HANDLE_VALUE)
     {
         return false;
     }
-    _close(fd);
+    DWORD      written{ 0 };
+    const bool ok{ text.empty() || (::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file)) };
+    return ::CloseHandle(file) && ok;
 #else
     const int fd{ ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, secret ? 0600 : 0644) };
     if (fd < 0)
     {
         return false;
     }
-    ::close(fd);
+    bool ok{ true };
+    for (size_t at = 0; ok && at < text.size();)
+    {
+        const auto n = ::write(fd, text.data() + at, text.size() - at);
+        ok           = n > 0;
+        at += ok ? static_cast<size_t>(n) : 0;
+    }
+    ok = ok && (text.empty() || ::fsync(fd) == 0);
+    return ::close(fd) == 0 && ok;
 #endif
-    return true;
 }
 
 auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::path& to) -> bool

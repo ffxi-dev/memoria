@@ -18,6 +18,16 @@ namespace memoria::plugin
 // Opens an https URL in the default browser. Blocks while Windows starts it, so call it off the game thread.
 auto browse(const std::string& url) -> void;
 
+struct LiveOptions
+{
+    std::string                      server;
+    std::filesystem::path            config; // the token and paused files: a pause or unlink in any client sharing the install ends the link
+    std::string                      installToken;
+    std::string                      hello;
+    std::function<void(std::string)> post; // a chat line, from the live thread
+    std::function<void(std::string)> open; // shows the link's page; the session hands it to a thread of its own, since a browser can take seconds to start
+};
+
 struct Socket
 {
     InternetHandle connection;
@@ -30,9 +40,7 @@ struct Socket
 class Live
 {
 public:
-    // config holds the token and paused files: a pause or unlink in any client sharing the install ends the link.
-    // open shows the link's page; the session hands it to a thread of its own, since a browser can take seconds to start.
-    Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post, std::function<void(std::string)> open);
+    Live(LiveOptions options, live::Feed& feed);
     ~Live(); // aborts, then joins: the game waits for the step in flight to finish or time out, then the WebSocket close
 
     Live(const Live&)                    = delete;
@@ -49,14 +57,10 @@ public:
     [[nodiscard]] auto status() const -> std::string;
 
 private:
-    // Each step of a request, and the WebSocket close, gets this long: Mogsafe answers in well under a second, and no
-    // call is cut short from another thread, so unload waits for the step in flight. WinHTTP counts a request's timeouts
-    // in 4 s ticks, so less would still wait 4 s.
-    static constexpr auto TIMEOUT = std::chrono::milliseconds(4000);
-
     auto run(const std::stop_token& stop) -> void;
     auto upgrade(void* session, const std::string& url, const std::string& headers, const std::stop_token& stop) -> Socket;
     auto stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t;
+    auto receive(void* ws) -> void;
     auto wait(const std::stop_token& stop, std::chrono::milliseconds time) -> void;
     auto helloNow() const -> std::string;
 
@@ -82,8 +86,8 @@ private:
     std::atomic<uint64_t>  dropped_{ 0 };
     std::atomic<bool>      finished_{ false };
     std::atomic<bool>      aborted_{ false };
-    WinHttp                http_{ HttpTimeouts{ .resolve = TIMEOUT, .connect = TIMEOUT, .send = TIMEOUT, .receive = TIMEOUT } };
-    std::jthread           thread_; // last: started once the rest is ready
+    WinHttp                http_{ QUICK_TIMEOUTS }; // also each step of the socket and its close: no call is cut short from another thread, so unload waits for the step in flight
+    std::jthread           thread_;                 // last: started once the rest is ready
 };
 
 } // namespace memoria::plugin

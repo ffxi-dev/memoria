@@ -278,12 +278,10 @@ TEST_CASE("a live link stopped during a slow start answer ends within its timeou
     Server     server(trickle("HTTP/1.1 201 Created\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{", std::string(10, ' ') + "}", 450ms));
     const auto dir = tempDir();
     live::Feed feed;
-    auto       link = std::make_unique<plugin::Live>(server.url(), dir, "t0ken", feed, "{}", [](std::string)
-                                                     {
-                                                     },
-                                                     [](const std::string&)
-                                                     {
-                                                     });
+    const auto quiet = [](const std::string&)
+    {
+    };
+    auto link = std::make_unique<plugin::Live>(plugin::LiveOptions{ .server = server.url(), .config = dir, .installToken = "t0ken", .hello = "{}", .post = quiet, .open = quiet }, feed);
     REQUIRE(server.waitForRequest());
     const auto start = std::chrono::steady_clock::now();
     link.reset();
@@ -295,7 +293,7 @@ TEST_CASE("an uploader, an importer and the worker each join within their reques
 {
     Server     server(stall);
     const auto dir = tempDir();
-    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
+    saveLink(dir / "config", { .token = "t0ken", .account = "player" });
 
     SECTION("the uploader")
     {
@@ -375,18 +373,25 @@ TEST_CASE("a live link upgrades, streams, stays connected while nobody watches, 
                       }
                              });
     const auto        dir = tempDir();
-    saveLink(dir / "token", { .token = "t0ken", .account = "player" }); // the link lives while the install shares this token
+    saveLink(dir, { .token = "t0ken", .account = "player" }); // the link lives while the install shares this token
     live::Feed               feed;
     std::mutex               mutex;
     std::vector<std::string> said;
-    auto                     link    = std::make_unique<plugin::Live>(server.url(), dir, "t0ken", feed, "{}", [&](std::string text)
-                                                                      {
-                                                   const std::scoped_lock lock(mutex);
-                                                   said.push_back(std::move(text));
+    auto                     link    = std::make_unique<plugin::Live>(plugin::LiveOptions{
+                                                                          .server       = server.url(),
+                                                                          .config       = dir,
+                                                                          .installToken = "t0ken",
+                                                                          .hello        = "{}",
+                                                                          .post         = [&](std::string text)
+                                                                          {
+                                                       const std::scoped_lock lock(mutex);
+                                                       said.push_back(std::move(text));
+                                                                          },
+                                                                          .open = [](const std::string&)
+                                                                          {
+                                                                          }, // opens no browser
                                                                       },
-                                                                      [](const std::string&)
-                                                                      {
-                                                                      }); // opens no browser
+                                                                      feed);
     const bool               greeted = waitFor([&]
                                                {
                                      return hello.load();

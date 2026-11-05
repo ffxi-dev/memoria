@@ -1,8 +1,8 @@
 #include "core/captain/importer.h"
 
-#include "core/account/link.h"
 #include "core/captain/compress.h"
 #include "core/file.h"
+#include "core/install.h"
 #include "core/units.h"
 
 #include <algorithm>
@@ -470,7 +470,7 @@ auto Importer::ready() -> bool
             return true;
         }
         // The token decides, not the paused file, which /memoria upload on may delete between the two reads.
-        if (!account::loadLink(options_.config / "token"))
+        if (!loadLink(options_.config))
         {
             return false;
         }

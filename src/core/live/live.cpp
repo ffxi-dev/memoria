@@ -1,5 +1,7 @@
 #include "core/live/live.h"
 
+#include "core/install.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include <cstring>
 #include <format>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace memoria::live
@@ -26,7 +29,7 @@ auto append(std::vector<uint8_t>& out, const T value) -> void
 
 } // namespace
 
-auto start(Http& http, const std::string& server, const std::string& installToken) -> std::expected<Link, std::string>
+auto start(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<Link, std::string>
 try
 {
     const auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
@@ -34,16 +37,25 @@ try
     {
         return std::unexpected(res.error());
     }
-    const auto body = nlohmann::json::parse(res->body, nullptr, false);
-    if (res->status != 201 || !body.is_object() || body.value("token", "").empty() || !body.value("url", "").starts_with("https://"))
+    if (res->status == 401)
+    {
+        std::ignore = removeLink(config, installToken);
+        return std::unexpected("Vault no longer accepts this install");
+    }
+    if (res->status != 201)
     {
         return std::unexpected(std::format("Mogsafe answered {}", res->status));
+    }
+    const auto body = nlohmann::json::parse(res->body, nullptr, false);
+    if (!body.is_object() || body.value("token", "").empty() || !body.value("url", "").starts_with("https://"))
+    {
+        return std::unexpected(MALFORMED);
     }
     return Link{ .token = body.value("token", ""), .url = body.value("url", "") };
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
-    return std::unexpected("Mogsafe sent a malformed answer");
+    return std::unexpected(MALFORMED);
 }
 
 auto hello(const std::string_view character, const std::string_view world, const std::string_view clientVersion, const std::string_view agent) -> std::string

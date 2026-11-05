@@ -5,6 +5,7 @@
 #include "core/captain/importer.h"
 #include "core/capture/clock.h"
 #include "core/capture/recorder.h"
+#include "core/install.h"
 #include "core/upload/uploader.h"
 #include "plugin/live.h"
 #include "plugin/text.h"
@@ -93,9 +94,9 @@ private:
     auto startUploads() -> void;
     auto link() -> void;
     auto waitForLink(const std::stop_token& stop) -> void;
-    auto cancelLink() -> bool; // true when a link was being made
-    auto unlink(const std::string& why) -> void;
-    auto linked() const -> std::optional<account::Linked>; // read each time: clients sharing the install share its token
+    auto cancelLink() -> bool;                     // true when a link was being made
+    auto unlinked(const std::string& why) -> void; // the token is gone: stops live and says so
+    auto linked() const -> std::optional<Linked>;  // read each time: clients sharing the install share its token
     auto greet() -> void;
     auto remind() -> void;
     auto offerImport() -> void;
@@ -109,7 +110,7 @@ private:
     std::string                            server_{ "https://mogsafe.sruon.dev" };
     std::mutex                             inboxMutex_;
     std::vector<std::string>               inbox_;
-    std::optional<account::Linked>         arrived_;   // from the link thread
+    std::optional<Linked>                  arrived_;   // from the link thread
     std::mutex                             linkMutex_; // the link thread saves a token only while no unlink cancels it
     std::atomic<bool>                      linking_{ false };
     capture::Clock                         clock_;

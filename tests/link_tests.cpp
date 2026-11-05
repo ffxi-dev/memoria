@@ -1,28 +1,7 @@
-#ifdef _WIN32
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#endif
-
 #include "support.h"
 
 using namespace memoria;
 using namespace memoria::test;
-
-namespace
-{
-
-// Wine, which runs these tests on Linux, keeps no DACL on a file: the permission checks run on Windows itself.
-auto keepsPermissions() -> bool
-{
-#ifdef _WIN32
-    return ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") == nullptr;
-#else
-    return true;
-#endif
-}
-
-} // namespace
 
 namespace
 {
@@ -102,69 +81,6 @@ TEST_CASE("an expired or refused link says why")
     CHECK(pollLink(mogsafe, "https://mogsafe.test", "p0ll").error() == "linking is not open to you yet");
 }
 
-TEST_CASE("the link is kept across restarts")
-{
-    const auto dir  = tempDir();
-    const auto path = dir / "config" / "memoria" / "token";
-    CHECK(!loadLink(path));
-    REQUIRE(saveLink(path, { .token = "t0ken", .account = "player" }));
-    const auto link = loadLink(path);
-    REQUIRE(link);
-    CHECK(link->token == "t0ken");
-    CHECK(link->account == "player");
-    CHECK((!keepsPermissions() || ownerOnly(path)));
-    REQUIRE(saveLink(path, { .token = "n3w", .account = "player" })); // replaced whole, still private
-    CHECK(loadLink(path)->token == "n3w");
-    CHECK((!keepsPermissions() || ownerOnly(path)));
-    CHECK(std::distance(fs::directory_iterator(path.parent_path()), fs::directory_iterator{}) == 1);
-    fs::remove_all(dir);
-}
-
-TEST_CASE("a link that cannot be written says so")
-{
-    const auto dir = tempDir();
-    touch(dir / "config"); // a file where the folder should be
-    CHECK_FALSE(saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" }));
-    fs::remove_all(dir);
-}
-
-TEST_CASE("live goes on only while the install shares: not paused, and the same token")
-{
-    const auto dir    = tempDir();
-    const auto config = dir / "config";
-    REQUIRE(saveLink(config / "token", { .token = "t0ken", .account = "player" }));
-    CHECK(sharing(config, "t0ken"));
-    touch(config / "paused"); // /memoria upload off, in any client
-    CHECK_FALSE(sharing(config, "t0ken"));
-    fs::remove(config / "paused");
-    CHECK(sharing(config, "t0ken"));
-    REQUIRE(saveLink(config / "token", { .token = "t1", .account = "player" })); // linked again
-    CHECK_FALSE(sharing(config, "t0ken"));
-    fs::remove(config / "token"); // /memoria unlink
-    CHECK_FALSE(sharing(config, "t1"));
-    fs::remove_all(dir);
-}
-
-TEST_CASE("a session's link opens the recording's page on its range, as Mogsafe reads it")
-{
-    CHECK(captureLink("https://mogsafe.test", "kQ3x9", 1'790'000'000'000, 1'790'000'060'500) == "https://mogsafe.test/captures/kQ3x9?from=1790000000000&to=1790000060500");
-}
-
-TEST_CASE("only the refused token is deleted")
-{
-    const auto dir  = tempDir();
-    const auto path = dir / "token";
-    CHECK(!removeLink(path, "t0ken"));
-    REQUIRE(saveLink(path, { .token = "n3w", .account = "player" }));
-    CHECK(!removeLink(path, "t0ken"));
-    REQUIRE(loadLink(path));
-    CHECK(loadLink(path)->token == "n3w");
-    CHECK(removeLink(path, "n3w"));
-    CHECK(!fs::exists(path));
-    CHECK(fs::is_empty(dir));
-    fs::remove_all(dir);
-}
-
 TEST_CASE("a link code that would poll at once or never expire is refused")
 {
     struct Start final : Http
@@ -184,37 +100,6 @@ TEST_CASE("a link code that would poll at once or never expire is refused")
         mogsafe.body = bad;
         CHECK(!startLink(mogsafe, "https://mogsafe.test").has_value());
     }
-}
-
-TEST_CASE("a token taken by mistake goes back without replacing one saved meanwhile, where hard links fail")
-{
-    const auto dir  = tempDir();
-    const auto path = dir / "token";
-    const auto olds = [&]
-    {
-        return std::ranges::count_if(fs::directory_iterator(dir), [](const auto& e)
-                                     {
-                                         return e.path().extension() == ".old";
-                                     });
-    };
-    REQUIRE(saveLink(path, { .token = "a", .account = "player" }));
-    CHECK(!removeLink(path, "t0ken", [](const fs::path&, const fs::path&)
-                      {
-                          return false; // no hard links here
-                      }));
-    REQUIRE(loadLink(path));
-    CHECK(loadLink(path)->token == "a");
-    CHECK(olds() == 0);
-
-    CHECK(!removeLink(path, "t0ken", [&](const fs::path&, const fs::path&)
-                      {
-                          saveLink(path, { .token = "n3w", .account = "player" }); // another client links meanwhile
-                          return false;
-                      }));
-    REQUIRE(loadLink(path));
-    CHECK(loadLink(path)->token == "n3w");
-    CHECK(olds() == 1); // the taken token stays in its file
-    fs::remove_all(dir);
 }
 
 TEST_CASE("an approval that comes with a stop is dropped, so no token is published after an unlink")

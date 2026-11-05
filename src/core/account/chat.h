@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/account/link.h"
 #include "core/http.h"
+#include "core/install.h"
 
 #include <xicap/enums/chat.h>
 
@@ -24,9 +24,9 @@ class ChatChoice
 public:
     [[nodiscard]] auto chat(const std::optional<Linked>& link) const -> xicap::Chat;
 
-    // Asks Mogsafe about the token in tokenFile. An answer for a token replaced while it was asked is dropped, and the new
-    // token is asked in turn.
-    auto refresh(Http& http, const std::string& server, const std::filesystem::path& tokenFile) -> void;
+    // Asks Mogsafe about the install's token in config. An answer for a token replaced while it was asked is dropped, and
+    // the new token is asked in turn.
+    auto refresh(Http& http, const std::string& server, const std::filesystem::path& config) -> void;
 
 private:
     mutable std::mutex mutex_;

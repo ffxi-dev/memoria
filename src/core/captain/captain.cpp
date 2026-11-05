@@ -1,7 +1,6 @@
 #include "core/captain/captain.h"
 
-#include "core/account/link.h"
-#include "core/file.h"
+#include "core/install.h"
 #include "core/tus.h"
 
 #include <algorithm>
@@ -36,25 +35,34 @@ auto findCaptain(const std::filesystem::path& root, const std::chrono::seconds q
     namespace fs = std::filesystem;
     std::vector<CaptainCapture> out;
     std::error_code             ec;
-    const auto                  now = fs::file_time_type::clock::now();
+    const auto                  now    = fs::file_time_type::clock::now();
+    const auto                  sizeOf = [](const fs::path& path) -> std::optional<uint64_t>
+    {
+        std::error_code failed;
+        const auto      size = fs::file_size(path, failed);
+        return failed ? std::nullopt : std::optional<uint64_t>(size);
+    };
     for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec); !ec && !stop && it != fs::recursive_directory_iterator(); it.increment(ec))
     {
-        const auto log = it->path() / "PacketLogger" / "full.log";
-        if (!it->is_directory(ec) || !fs::is_regular_file(it->path() / "manifest.txt", ec) || !fs::is_regular_file(log, ec))
+        std::error_code probe; // the walk's own error_code says only whether the walk can go on
+        const auto      log = it->path() / "PacketLogger" / "full.log";
+        if (!it->is_directory(probe) || !fs::is_regular_file(it->path() / "manifest.txt", probe) || !fs::is_regular_file(log, probe))
         {
             continue;
         }
         it.disable_recursion_pending();
-        const auto changed = fs::last_write_time(log, ec);
-        const bool growing{ ec || now - changed < quiet };
-        const auto search = it->path() / "SearchLog" / "search.log";
+        const auto changed    = fs::last_write_time(log, probe);
+        const bool quietLong  = !probe && now - changed >= quiet;
+        const auto search     = it->path() / "SearchLog" / "search.log";
+        const auto size       = sizeOf(log);
+        const auto searchSize = fs::is_regular_file(search, probe) ? sizeOf(search) : std::optional<uint64_t>(0);
         out.push_back({
             .dir        = it->path(),
             .folder     = it->path().lexically_relative(root).generic_string(),
             .character  = it->path().filename().string(),
-            .size       = fs::file_size(log, ec),
-            .searchSize = fs::is_regular_file(search, ec) ? fs::file_size(search, ec) : 0,
-            .growing    = growing,
+            .size       = size.value_or(0),
+            .searchSize = searchSize.value_or(0),
+            .growing    = !quietLong || !size || !searchSize,
         });
     }
     std::ranges::sort(out, {}, &CaptainCapture::folder);
@@ -119,8 +127,7 @@ auto moveAside(const std::filesystem::path& root, const std::filesystem::path& u
 
 auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root, const std::atomic<bool>& stop) -> bool
 {
-    std::error_code ec;
-    if (!account::loadLink(config / "token") || std::filesystem::exists(config / "import-reminded", ec))
+    if (!loadLink(config) || importReminded(config))
     {
         return false;
     }
@@ -129,7 +136,7 @@ auto remindImport(const std::filesystem::path& config, const std::filesystem::pa
                                         {
                                             return !c.growing;
                                         }) &&
-           createNew(config / "import-reminded");
+           claimImportReminder(config);
 }
 
 } // namespace memoria::captain

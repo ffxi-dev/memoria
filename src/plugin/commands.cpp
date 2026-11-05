@@ -1,6 +1,5 @@
 #include "plugin/session.h"
 
-#include "core/file.h"
 #include "core/units.h"
 #include "plugin/client.h"
 #include "plugin/text.h"
@@ -8,14 +7,24 @@
 #include <algorithm>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <ranges>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 namespace memoria::plugin
 {
+namespace
+{
+
+// A recording's page on Mogsafe, opened on the range fromMs to toMs (Unix ms), as Mogsafe's capture page reads ?from=&to=.
+auto recordingPage(const std::string& server, const std::string& id, const uint64_t fromMs, const uint64_t toMs) -> std::string
+{
+    return std::format("{}/captures/{}?from={}&to={}", server, id, fromMs, toMs);
+}
+
+} // namespace
 
 auto Session::importLine() const -> std::string
 {
@@ -99,7 +108,7 @@ auto Session::status() -> void
         say(importLine());
     }
     const auto link = linked();
-    if (!link || account::paused(host_.config))
+    if (!link || paused(host_.config))
     {
         say("Uploads: " + paint(Color::Yellow, link ? "paused: /memoria upload on" : "not linked: /memoria link"));
         return;
@@ -224,7 +233,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
             {
                 const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
                 say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
-                               : "Session in Vault: " + paint(Color::Cyan, account::captureLink(server_, id, fromMs, now)));
+                               : "Session in Vault: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
             };
             sayLink(first, from->fromMs);
             if (!current.capture.empty() && current.capture != first)
@@ -249,7 +258,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
         }
         else
         {
-            createNew(host_.config / "import-reminded");
+            std::ignore = claimImportReminder(host_.config);
             startImport(true);
         }
     }
@@ -279,7 +288,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     {
         say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
     }
-    else if (sub == "live" && account::paused(host_.config))
+    else if (sub == "live" && paused(host_.config))
     {
         say(paint(Color::Yellow, "Uploads are paused.") + " Run " + paint(Color::Cyan, "/memoria upload on") + " first.");
     }
@@ -290,18 +299,24 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     }
     else if (sub == "live" && link)
     {
-        live_ = std::make_unique<Live>(
-            server_, host_.config, link->token, recorder_->live(), hello(), [this](std::string text)
-            {
-                post(std::move(text));
-            },
-            [this](std::string url)
-            {
-                worker_.post([url = std::move(url)](const std::stop_token&)
-                             {
-                                 browse(url);
-                             });
-            });
+        live_ = std::make_unique<Live>(LiveOptions{
+                                           .server       = server_,
+                                           .config       = host_.config,
+                                           .installToken = link->token,
+                                           .hello        = hello(),
+                                           .post         = [this](std::string text)
+                                           {
+                                               post(std::move(text));
+                                           },
+                                           .open = [this](std::string url)
+                                           {
+                                               worker_.post([url = std::move(url)](const std::stop_token&)
+                                                            {
+                                                                browse(url);
+                                                            });
+                                           },
+                                       },
+                                       recorder_->live());
         say(paint(Color::Grey, "Asking Vault for a live link..."));
     }
     else if (sub == "unlink")
@@ -312,35 +327,28 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
             say(linking ? "Linking stopped." : "Not linked.");
             return;
         }
-        std::error_code ec;
-        if (!std::filesystem::remove(host_.config / "token", ec) && ec)
+        if (const auto error = unlink(host_.config))
         {
-            say(paint(Color::Red, "Still linked: cannot delete " + (host_.config / "token").string() + ": " + ec.message()));
+            say(paint(Color::Red, "Still linked: " + *error));
             return;
         }
-        unlink("Unlinked");
+        unlinked("Unlinked");
     }
     else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
     {
-        const auto      pausedFile = host_.config / "paused";
-        std::error_code ec;
-        if (args[2] == "off")
+        const bool off{ args[2] == "off" };
+        if (const auto error = setPaused(host_.config, off))
         {
-            if (!std::ofstream{ pausedFile })
-            {
-                say(paint(Color::Red, "Uploads still on: cannot create " + pausedFile.string()));
-                return;
-            }
+            say(paint(Color::Red, std::format("Uploads still {}: {}", off ? "on" : "paused", *error)));
+            return;
+        }
+        if (off)
+        {
             stopLive();
             say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
         }
         else
         {
-            if (!std::filesystem::remove(pausedFile, ec) && ec)
-            {
-                say(paint(Color::Red, "Uploads still paused: cannot delete " + pausedFile.string() + ": " + ec.message()));
-                return;
-            }
             say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
         }
     }

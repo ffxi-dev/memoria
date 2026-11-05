@@ -53,6 +53,7 @@ add_library(memoria_core STATIC
     src/core/capture/event_queue.cpp
     src/core/capture/recorder.cpp
     src/core/file.cpp
+    src/core/install.cpp
     src/core/live/live.cpp
     src/core/tus.cpp
     src/core/units.cpp
@@ -133,6 +134,7 @@ if(MEMORIA_BUILD_TESTS)
         tests/captain_tests.cpp
         tests/chat_tests.cpp
         tests/fault_tests.cpp
+        tests/install_tests.cpp
         tests/link_tests.cpp
         tests/live_tests.cpp
         tests/packets_tests.cpp

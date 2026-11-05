@@ -110,8 +110,8 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
 
 TEST_CASE("a capture keeps chat only while the token that chose it is the install's")
 {
-    const auto dir   = tempDir();
-    const auto token = dir / "token";
+    const auto dir    = tempDir();
+    const auto config = dir / "config";
     struct Account final : Http
     {
         std::map<std::string, bool> saveChat; // by token
@@ -133,16 +133,16 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
     ChatChoice choice;
     CHECK(choice.chat(std::nullopt) == xicap::Chat::Redact);
 
-    saveLink(token, { .token = "a", .account = "one" });
-    choice.refresh(mogsafe, "https://mogsafe.test", token);
-    CHECK(choice.chat(loadLink(token)) == xicap::Chat::Keep);
+    saveLink(config, { .token = "a", .account = "one" });
+    choice.refresh(mogsafe, "https://mogsafe.test", config);
+    CHECK(choice.chat(loadLink(config)) == xicap::Chat::Keep);
 
     SECTION("an unlink, or a link to another account, redacts before any answer")
     {
-        fs::remove(token);
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
-        saveLink(token, { .token = "b", .account = "two" });
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
+        fs::remove(config / "token");
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
+        saveLink(config, { .token = "b", .account = "two" });
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     SECTION("an answer for a token replaced while it was asked is dropped, and the new token is asked")
     {
@@ -150,22 +150,22 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
         mogsafe.saveChat["c"] = true;
         mogsafe.whileAsked    = [&]
         {
-            saveLink(token, { .token = "b", .account = "two" }); // relinked to an account that cuts chat
+            saveLink(config, { .token = "b", .account = "two" }); // relinked to an account that cuts chat
         };
         mogsafe.asked = 0;
-        choice.refresh(mogsafe, "https://mogsafe.test", token);
+        choice.refresh(mogsafe, "https://mogsafe.test", config);
         CHECK(mogsafe.asked == 2);
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     SECTION("an answer that comes after an unlink is dropped")
     {
         mogsafe.whileAsked = [&]
         {
-            fs::remove(token);
+            fs::remove(config / "token");
         };
-        choice.refresh(mogsafe, "https://mogsafe.test", token);
-        saveLink(token, { .token = "a2", .account = "one" });
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
+        choice.refresh(mogsafe, "https://mogsafe.test", config);
+        saveLink(config, { .token = "a2", .account = "one" });
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     fs::remove_all(dir);
 }

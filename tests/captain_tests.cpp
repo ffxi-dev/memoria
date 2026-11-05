@@ -58,7 +58,7 @@ struct Install
     Install()
     {
         fs::create_directories(captures);
-        saveLink(config / "token", { .token = "t0ken", .account = "player" });
+        saveLink(config, { .token = "t0ken", .account = "player" });
     }
 
     ~Install()
@@ -280,7 +280,7 @@ TEST_CASE("a refused token stops the import, unlinks, and the import resumes aft
     CHECK(Importer::pending(in.state));
 
     server.token = "t1";
-    saveLink(in.config / "token", { .token = "t1", .account = "player" });
+    saveLink(in.config, { .token = "t1", .account = "player" });
     in.importer(server)->run();
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
     CHECK(!Importer::pending(in.state));

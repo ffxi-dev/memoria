@@ -257,7 +257,7 @@ TEST_CASE("an uploader stops without waiting for a request in flight")
         bool                    cancelled_{ false };
     };
     const auto dir = tempDir();
-    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
+    saveLink(dir / "config", { .token = "t0ken", .account = "player" });
     append(dir / "a.xicap", std::string(500, 'x'));
     auto  stuck = std::make_unique<Stuck>();
     auto& http  = *stuck;
@@ -290,7 +290,7 @@ TEST_CASE("a refused token is forgotten, and sending stops until a new link")
     CHECK(!up->pass());
     CHECK(server.requests == requests);
 
-    saveLink(dir / "config" / "token", { .token = "revoked", .account = "player" });
+    saveLink(dir / "config", { .token = "revoked", .account = "player" });
     CHECK(!up->pass());
     CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
     fs::remove_all(dir);
@@ -323,7 +323,7 @@ TEST_CASE("pause, unlink, and a new link govern every client sharing the install
     CHECK(server.uploads.begin()->second.data.size() == 500);
 
     server.token = "t1"; // /memoria link in another client
-    saveLink(token, { .token = "t1", .account = "player" });
+    saveLink(dir / "config", { .token = "t1", .account = "player" });
     CHECK(!second->pass());
     CHECK(server.uploads.begin()->second.data == readAll(file));
     fs::remove_all(dir);
@@ -335,9 +335,9 @@ TEST_CASE("a refusal of an old token keeps the token another client just saved")
     class Relink final : public Http
     {
     public:
-        Relink(FakeMogsafe& to, fs::path token)
+        Relink(FakeMogsafe& to, fs::path config)
         : to_(to)
-        , token_(std::move(token))
+        , config_(std::move(config))
         {
         }
 
@@ -346,24 +346,24 @@ TEST_CASE("a refusal of an old token keeps the token another client just saved")
             if (to_.token == "t0ken")
             {
                 to_.token = "t1";
-                saveLink(token_, { .token = "t1", .account = "player" });
+                saveLink(config_, { .token = "t1", .account = "player" });
             }
             return to_.request(method, url, headers, body);
         }
 
     private:
         FakeMogsafe& to_;
-        fs::path     token_;
+        fs::path     config_;
     };
     const auto  dir = tempDir();
     FakeMogsafe server;
-    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
-    Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .idle = std::chrono::milliseconds(0) }, std::make_unique<Relink>(server, dir / "config" / "token"));
+    saveLink(dir / "config", { .token = "t0ken", .account = "player" });
+    Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .idle = std::chrono::milliseconds(0) }, std::make_unique<Relink>(server, dir / "config"));
     append(dir / "a.xicap", std::string(500, 'x'));
     CHECK(up.pass().has_value()); // 401 for the old token
     CHECK(!up.unauthorized());
-    REQUIRE(loadLink(dir / "config" / "token"));
-    CHECK(loadLink(dir / "config" / "token")->token == "t1");
+    REQUIRE(loadLink(dir / "config"));
+    CHECK(loadLink(dir / "config")->token == "t1");
     CHECK(!up.pass());
     CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
     fs::remove_all(dir);
@@ -399,7 +399,7 @@ TEST_CASE("at unload the last bytes and the trailer reach Mogsafe, and the game 
     const auto  dir  = tempDir();
     const auto  file = dir / "a.xicap";
     FakeMogsafe server;
-    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
+    saveLink(dir / "config", { .token = "t0ken", .account = "player" });
     append(file, std::string(500, 'x'));
     // Passes an hour apart and a close only after an hour idle: only finish() can send the end in time.
     UploadOptions options{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .every = std::chrono::hours(1), .idle = std::chrono::hours(1) };
@@ -452,7 +452,7 @@ TEST_CASE("at unload a hung connection holds the game for the time allowed, no l
         bool                    cancelled_{ false };
     };
     const auto dir = tempDir();
-    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
+    saveLink(dir / "config", { .token = "t0ken", .account = "player" });
     append(dir / "a.xicap", std::string(500, 'x') + TRAILER);
     auto up = std::make_unique<Uploader>(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config" }, std::make_unique<Hung>());
     up->start();
@@ -690,7 +690,7 @@ TEST_CASE("an upload another account made is skipped while this token stays, and
     CHECK(server.requests == requests); // the same token asks nothing
     server.foreign.clear();
     server.token = "n3w";
-    saveLink(dir / "config" / "token", { .token = "n3w", .account = "owner" });
+    saveLink(dir / "config", { .token = "n3w", .account = "owner" });
     CHECK(!up->pass());
     CHECK(server.requests > requests);
     CHECK(!up->status()[0].foreign);

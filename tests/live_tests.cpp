@@ -196,7 +196,7 @@ TEST_CASE("a malformed answer from Mogsafe is an error, never an exception that 
             http.answer = { .status = status, .body = body };
             CHECK_NOTHROW(std::ignore = startLink(http, "https://mogsafe.test"));
             CHECK_NOTHROW(std::ignore = pollLink(http, "https://mogsafe.test", "p"));
-            CHECK_NOTHROW(std::ignore = live::start(http, "https://mogsafe.test", "t0ken"));
+            CHECK_NOTHROW(std::ignore = live::start(http, "https://mogsafe.test", {}, "t0ken"));
         }
     }
     http.answer = { .status = 201, .body = R"({"code":null})" };
@@ -218,14 +218,21 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
             return HttpResponse{ .status = status, .body = R"({"token":"l1ve","url":"https://lens.example/live#l1ve","expires":1790000000000})" };
         }
     } mogsafe;
-    const auto link = live::start(mogsafe, "https://mogsafe.test", "t0ken");
+    const auto dir = tempDir();
+    REQUIRE(!saveLink(dir, { .token = "t0ken", .account = "player" }));
+    const auto link = live::start(mogsafe, "https://mogsafe.test", dir, "t0ken");
     REQUIRE(link.has_value());
     CHECK(mogsafe.auth == "Bearer t0ken");
     CHECK(link->token == "l1ve");
     CHECK(link->url == "https://lens.example/live#l1ve");
 
-    mogsafe.status = 401;
-    CHECK(live::start(mogsafe, "https://mogsafe.test", "t0ken").error() == "Mogsafe answered 401");
+    mogsafe.status = 500;
+    CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Mogsafe answered 500");
+    CHECK(loadLink(dir));
+    mogsafe.status = 401; // a refused token is deleted, as uploads do
+    CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Vault no longer accepts this install");
+    CHECK(!loadLink(dir));
+    fs::remove_all(dir);
 
     CHECK(live::viewers(R"({"viewers":2})") == 2);
     CHECK(!live::viewers(R"({"sender":true})"));

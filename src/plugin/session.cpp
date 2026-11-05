@@ -1,6 +1,6 @@
 #include "plugin/session.h"
 
-#include "core/file.h"
+#include "core/install.h"
 #include "plugin/client.h"
 #include "plugin/packets.h"
 #include "plugin/text.h"
@@ -26,26 +26,6 @@ namespace memoria::plugin
 namespace
 {
 
-// upload.ini's "server = https://..." line, which points Memoria at another Mogsafe.
-auto serverIn(const std::filesystem::path& ini) -> std::optional<std::string>
-{
-    const auto trim = [](std::string_view s)
-    {
-        const auto first = s.find_first_not_of(" \t\r");
-        return first == std::string_view::npos ? std::string{} : std::string(s.substr(first, s.find_last_not_of(" \t\r/") - first + 1));
-    };
-    std::ifstream in(ini);
-    for (std::string line; std::getline(in, line);)
-    {
-        const auto eq = line.find('=');
-        if (eq != std::string::npos && trim(line.substr(0, eq)) == "server" && trim(line.substr(eq + 1)).starts_with("https://"))
-        {
-            return trim(line.substr(eq + 1));
-        }
-    }
-    return std::nullopt;
-}
-
 Session* instance_ = nullptr; // for the search hooks, which take a plain function
 
 } // namespace
@@ -57,7 +37,7 @@ Session::Session(Host host)
 
 auto Session::start(const std::optional<LateLogin>& late) -> void
 {
-    server_ = serverIn(host_.config / "upload.ini").value_or(server_);
+    server_ = serverIn(host_.config).value_or(server_);
 
     try
     {
@@ -130,6 +110,7 @@ Session::~Session()
     }
     closing_.clear();
     client::search::remove();
+    instance_ = nullptr;
     std::vector<std::string> closed;
     if (recorder_)
     {
@@ -243,8 +224,8 @@ auto Session::frame() -> void
 {
     client::search::tick();
 
-    std::vector<std::string>       inbox;
-    std::optional<account::Linked> arrived;
+    std::vector<std::string> inbox;
+    std::optional<Linked>    arrived;
     {
         const std::scoped_lock lock(inboxMutex_);
         inbox.swap(inbox_);
@@ -266,7 +247,7 @@ auto Session::frame() -> void
     }
     if (importer_ && importer_->unauthorized())
     {
-        unlink("Vault no longer accepts this install");
+        unlinked("Vault no longer accepts this install");
     }
     if (importer_ && importer_->finished())
     {
@@ -282,7 +263,7 @@ auto Session::frame() -> void
     }
     if (uploader_ && uploader_->unauthorized())
     {
-        unlink("Vault no longer accepts this install");
+        unlinked("Vault no longer accepts this install");
     }
 }
 
@@ -431,9 +412,9 @@ auto Session::waitForLink(const std::stop_token& stop) -> void
     {
         return;
     }
-    if (!account::saveLink(host_.config / "token", *linked))
+    if (const auto error = saveLink(host_.config, *linked))
     {
-        post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
+        post(paint(Color::Red, "Not linked: " + *error + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
         return;
     }
     const std::scoped_lock inbox(inboxMutex_);
@@ -454,12 +435,12 @@ auto Session::cancelLink() -> bool
     return was;
 }
 
-auto Session::linked() const -> std::optional<account::Linked>
+auto Session::linked() const -> std::optional<Linked>
 {
-    return account::loadLink(host_.config / "token");
+    return loadLink(host_.config);
 }
 
-auto Session::unlink(const std::string& why) -> void
+auto Session::unlinked(const std::string& why) -> void
 {
     stopLive();
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
@@ -486,7 +467,7 @@ auto Session::refreshChat() -> void
                                                      {
                                                          http.cancel();
                                                      });
-                     chatChoice_.refresh(http, server_, host_.config / "token");
+                     chatChoice_.refresh(http, server_, host_.config);
                  });
 }
 

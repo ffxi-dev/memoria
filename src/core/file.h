@@ -11,8 +11,9 @@
 namespace memoria
 {
 
-// Creates an empty file, failing when anything is already there. A secret one only the user running the game can open.
-auto createNew(const std::filesystem::path& path, bool secret = false) -> bool;
+// Creates a file holding text, flushed to disk, failing when anything is already there. A secret one only the user
+// running the game can open.
+auto createNew(const std::filesystem::path& path, bool secret = false, std::string_view text = {}) -> bool;
 
 // Renames from to to, failing when to exists: unlike std::filesystem::rename, it never replaces a file.
 auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::path& to) -> bool;

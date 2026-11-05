@@ -19,6 +19,9 @@ struct HttpResponse
 
 using HttpHeaders = std::vector<std::pair<std::string, std::string>>;
 
+// What a Mogsafe call reports when the status is right but the body is not what it promised.
+inline constexpr auto MALFORMED = "Mogsafe sent a malformed answer";
+
 // The header's value, or empty; name in lower case.
 inline auto header(const HttpResponse& res, const std::string& name) -> std::string
 {

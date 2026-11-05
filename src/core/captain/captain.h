@@ -20,7 +20,7 @@ struct CaptainCapture
     std::string           character;    // the folder's name
     uint64_t              size{};       // of full.log
     uint64_t              searchSize{}; // of SearchLog/search.log; 0 when there is none, which sends none
-    bool                  growing{};    // full.log changed within the quiet time: PacketLogger may still be writing it
+    bool                  growing{};    // full.log changed within the quiet time, or a log's size could not be read: PacketLogger may still be writing it
 };
 
 inline const std::atomic<bool> NEVER_STOP{ false };
