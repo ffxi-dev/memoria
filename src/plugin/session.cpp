@@ -119,8 +119,16 @@ Session::~Session()
 {
     cancelLink();
     importer_.reset();
-    stopLive();
-    closing_.clear(); // each aborts its connection
+    if (live_)
+    {
+        live_->abort();
+        closing_.push_back(std::move(live_));
+    }
+    for (const auto& live : closing_)
+    {
+        live->abort();
+    }
+    closing_.clear();
     client::search::remove();
     std::vector<std::string> closed;
     if (recorder_)

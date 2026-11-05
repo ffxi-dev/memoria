@@ -217,7 +217,6 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     {
         if (const auto from = std::exchange(sessionInVault_, std::nullopt))
         {
-            // ponytail: a session that rotated more than once links its first and last recordings, not those between.
             const auto now     = clock_.nowMs();
             const auto current = recorder_->status();
             const auto first   = from->capture.empty() ? current.capture : from->capture;

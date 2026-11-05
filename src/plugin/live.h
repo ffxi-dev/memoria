@@ -2,6 +2,7 @@
 
 #include "core/live/live.h"
 #include "plugin/enums/live_state.h"
+#include "plugin/interruptible.h"
 #include "plugin/winhttp.h"
 
 #include <atomic>
@@ -51,7 +52,6 @@ private:
     auto run(const std::stop_token& stop) -> void;
     auto upgrade(void* session, const std::string& url, const std::string& headers) -> Socket;
     auto sendOff(void* session, const std::string& url, const std::string& headers) -> void;
-    auto hold(void* handle) -> bool;            // the handle abort() closes; false once aborted
     auto letGo(InternetHandle& handle) -> void; // a handle abort() closed is released, not closed twice
     auto stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t;
     auto wait(const std::stop_token& stop, std::chrono::milliseconds time) -> void;
@@ -73,15 +73,13 @@ private:
     bool                        closed_{ false }; // the server ended the connection
     uint16_t                    closeCode_{ 0 };
     bool                        offSent_{ false }; // live thread only
-    bool                        aborted_{ false };
-    void*                       inFlight_{ nullptr }; // the request or WebSocket a call is waiting on
-    void*                       closedByAbort_{ nullptr };
 
     std::atomic<LiveState> state_{ LiveState::Starting };
     std::atomic<int>       viewers_{ 0 };
     std::atomic<uint64_t>  dropped_{ 0 };
     std::atomic<bool>      finished_{ false };
     WinHttp                http_;
+    Interruptible          calls_;  // every WinHTTP call that waits on the network, so abort() can end it
     std::jthread           thread_; // last: started once the rest is ready
 };
 

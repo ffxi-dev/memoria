@@ -5,7 +5,6 @@
 namespace memoria::captain
 {
 
-// How one captain capture's import ended.
 enum class Outcome : uint8_t
 {
     Uploaded,

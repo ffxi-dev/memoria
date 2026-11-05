@@ -9,6 +9,7 @@
 #include <fstream>
 #include <random>
 #include <thread>
+#include <tuple>
 
 namespace memoria::account
 {
@@ -41,7 +42,7 @@ try
     {
         return std::unexpected(std::format("Mogsafe answered {}", status));
     }
-    const LinkCode code{
+    LinkCode code{
         .code     = body.value("code", ""),
         .poll     = body.value("poll", ""),
         .url      = body.value("url", ""),
@@ -136,7 +137,7 @@ auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool
     return false;
 }
 
-auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool
+auto removeLink(const std::filesystem::path& path, const std::string& token, const LinkBack& linkBack) -> bool
 {
     std::random_device random;
     const auto         taken = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.old", random(), random()));
@@ -150,12 +151,12 @@ auto removeLink(const std::filesystem::path& path, const std::string& token) -> 
     const bool refused{ link && link->token == token };
     if (!refused)
     {
-        // A hard link fails where a token was saved since the rename, so the newer one stays. Where it fails for another
-        // reason, the taken token goes back by name, keeping its permissions; it is never deleted while it is the only copy.
-        std::filesystem::create_hard_link(taken, path, ec);
-        if (ec && !std::filesystem::exists(path, ec))
+        // A hard link fails where a token was saved since the rename, so the newer one stays. Where links fail for another
+        // reason, a move that never replaces a file puts the taken token back; if that fails too, it stays in its file.
+        const bool linked{ linkBack ? linkBack(taken, path) : (std::filesystem::create_hard_link(taken, path, ec), !ec) };
+        if (!linked)
         {
-            std::filesystem::rename(taken, path, ec);
+            std::ignore = moveNoReplace(taken, path);
             return false;
         }
     }

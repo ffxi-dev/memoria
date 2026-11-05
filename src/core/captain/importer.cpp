@@ -26,7 +26,7 @@ namespace
 {
 
 constexpr auto   STATE_FILE   = "imports.txt";
-constexpr size_t MAX_MANIFEST = 64 * 1024; // it goes in a request header; captain's are under 1 KiB
+constexpr size_t MAX_MANIFEST = size_t{ 64 } * 1024; // it goes in a request header; captain's are under 1 KiB
 constexpr auto   MAX_WAIT     = std::chrono::milliseconds(std::chrono::minutes(5));
 
 auto base64(const std::string_view in) -> std::string
@@ -165,7 +165,7 @@ auto Importer::run() -> void
     std::map<Outcome, size_t> tally;
     for (size_t i = 0; i < found.size(); ++i)
     {
-        const auto c = found[i];
+        const auto& c = found[i];
         {
             const std::scoped_lock lock(mutex_);
             character_ = c.character;
@@ -267,6 +267,18 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         };
         if (e.url.empty())
         {
+            // A new create names the logs as they are now: no stage from an earlier create may go under it.
+            std::error_code ec;
+            fs::remove(staged, ec);
+            if (!ec && c.searchSize == 0)
+            {
+                fs::remove(searchStaged, ec);
+            }
+            if (ec)
+            {
+                say(prefix + "cannot remove an old stage: " + ec.message() + ". Import stopped.");
+                return Outcome::Failed;
+            }
             std::string search;
             if (c.searchSize > 0)
             {
@@ -281,9 +293,6 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                     say(prefix + "cannot read its search.log; skipped.");
                     return Outcome::Skipped;
                 }
-                // Staged again for each create, which names this search log: a stage from an earlier create may hold an older one.
-                std::error_code ec;
-                fs::remove(staged, ec);
                 if (const auto error = compressLog(searchLog, searchStaged, {}, stopping_))
                 {
                     if (stopping_)

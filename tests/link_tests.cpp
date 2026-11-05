@@ -185,3 +185,34 @@ TEST_CASE("a link code that would poll at once or never expire is refused")
         CHECK(!startLink(mogsafe, "https://mogsafe.test").has_value());
     }
 }
+
+TEST_CASE("a token taken by mistake goes back without replacing one saved meanwhile, where hard links fail")
+{
+    const auto dir  = tempDir();
+    const auto path = dir / "token";
+    const auto olds = [&]
+    {
+        return std::ranges::count_if(fs::directory_iterator(dir), [](const auto& e)
+                                     {
+                                         return e.path().extension() == ".old";
+                                     });
+    };
+    REQUIRE(saveLink(path, { .token = "a", .account = "player" }));
+    CHECK(!removeLink(path, "t0ken", [](const fs::path&, const fs::path&)
+                      {
+                          return false; // no hard links here
+                      }));
+    REQUIRE(loadLink(path));
+    CHECK(loadLink(path)->token == "a");
+    CHECK(olds() == 0);
+
+    CHECK(!removeLink(path, "t0ken", [&](const fs::path&, const fs::path&)
+                      {
+                          saveLink(path, { .token = "n3w", .account = "player" }); // another client links meanwhile
+                          return false;
+                      }));
+    REQUIRE(loadLink(path));
+    CHECK(loadLink(path)->token == "n3w");
+    CHECK(olds() == 1); // the taken token stays in its file
+    fs::remove_all(dir);
+}

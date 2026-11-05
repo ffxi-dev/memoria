@@ -433,3 +433,41 @@ TEST_CASE("a state file that cannot be saved stays as it was")
     CHECK(!fs::exists(dir / "uploads.txt.tmp"));
     fs::remove_all(dir);
 }
+
+TEST_CASE("a flush that fails is a failed save, and nothing that depends on it is sent")
+{
+    std::vector<SaveStep> steps{ SaveStep::Flush };
+#ifndef _WIN32
+    steps.push_back(SaveStep::FolderFlush); // Windows writes the folder through with the rename
+#endif
+    for (const auto step : steps)
+    {
+        INFO(std::to_underlying(step));
+        const auto dir  = tempDir();
+        const auto path = dir / "state.txt";
+        REQUIRE(!replaceFile(path, "old\n"));
+        failSave = [step](const SaveStep s)
+        {
+            return s == step;
+        };
+        CHECK(replaceFile(path, "new\n").has_value());
+        const auto kept = step == SaveStep::Flush ? std::vector<uint8_t>{ 'o', 'l', 'd', '\n' } : std::vector<uint8_t>{ 'n', 'e', 'w', '\n' };
+        CHECK(readAll(path) == kept); // a failed folder flush leaves the new state in place, not yet known on disk
+        CHECK(!fs::exists(dir / "state.txt.tmp"));
+
+        FakeMogsafe server;
+        auto        up = uploader(dir, server);
+        append(dir / "a.xicap", std::string(500, 'x'));
+        CHECK(up->pass().has_value());
+        CHECK(!up->saveError().empty());
+        CHECK(up->pass().has_value());
+        CHECK(server.creates == 1);
+        CHECK(server.received == 0); // no PATCH until the save holds
+        failSave = {};
+        CHECK(!up->pass());
+        CHECK(up->saveError().empty());
+        CHECK(server.received == 500);
+        fs::remove_all(dir);
+    }
+    failSave = {};
+}

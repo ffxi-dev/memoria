@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #endif
 
@@ -100,6 +101,17 @@ auto createNew(const std::filesystem::path& path, const bool secret) -> bool
     return true;
 }
 
+auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::path& to) -> bool
+{
+#ifdef _WIN32
+    return ::MoveFileExW(from.c_str(), to.c_str(), 0) != 0;
+#elifdef __linux__
+    return ::renameat2(AT_FDCWD, from.c_str(), AT_FDCWD, to.c_str(), RENAME_NOREPLACE) == 0;
+#else
+    return ::link(from.c_str(), to.c_str()) == 0 && ::unlink(from.c_str()) == 0;
+#endif
+}
+
 auto replaceFile(const std::filesystem::path& path, const std::string_view text) -> std::optional<std::string>
 {
     const auto tmp       = std::filesystem::path(path).concat(".tmp");
@@ -119,7 +131,7 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
         return unwritten(false);
     }
     DWORD      written{ 0 };
-    const bool flushed{ ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file) };
+    const bool flushed{ ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file) && !(failSave && failSave(SaveStep::Flush)) };
     if (!::CloseHandle(file) || !flushed)
     {
         return unwritten(true);
@@ -143,20 +155,20 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
         ok           = n > 0;
         at += ok ? static_cast<size_t>(n) : 0;
     }
-    ok = ok && ::fsync(fd) == 0;
+    ok = ok && ::fsync(fd) == 0 && !(failSave && failSave(SaveStep::Flush));
     if (::close(fd) != 0 || !ok)
     {
         return unwritten(true);
     }
     if (::rename(tmp.c_str(), path.c_str()) != 0)
     {
-        const auto error = std::format("cannot save {}: {}", path.filename().string(), std::strerror(errno));
+        auto error = std::format("cannot save {}: {}", path.filename().string(), std::strerror(errno));
         ::unlink(tmp.c_str());
         return error;
     }
     const auto dir = path.has_parent_path() ? path.parent_path() : std::filesystem::path(".");
     const int  dfd{ ::open(dir.c_str(), O_RDONLY | O_DIRECTORY) };
-    const bool synced{ dfd >= 0 && ::fsync(dfd) == 0 };
+    const bool synced{ dfd >= 0 && ::fsync(dfd) == 0 && !(failSave && failSave(SaveStep::FolderFlush)) };
     if (dfd >= 0)
     {
         ::close(dfd);

@@ -1,5 +1,6 @@
 #include "plugin/worker.h"
 
+#include <tuple>
 #include <utility>
 
 namespace memoria::plugin
@@ -40,11 +41,13 @@ auto Worker::run(const std::stop_token& stop) -> void
         Job job;
         {
             std::unique_lock lock(mutex_);
-            if (!wake_.wait(lock, stop, [this]
-                            {
-                                return !jobs_.empty();
-                            }))
+            std::ignore = wake_.wait(lock, stop, [this]
+                                     {
+                                         return !jobs_.empty();
+                                     });
+            if (stop.stop_requested())
             {
+                jobs_.clear(); // dropped: a stopping worker starts nothing
                 return;
             }
             job = std::move(jobs_.front());

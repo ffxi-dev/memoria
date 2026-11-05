@@ -182,12 +182,12 @@ TEST_CASE("every chat range is zeroed in the capture, the session file and the l
     constexpr auto toClient   = xicap::PacketDirection::ServerToClient;
     constexpr auto fromClient = xicap::PacketDirection::ClientToServer;
     const auto     ranges     = std::array{
-        Range{ 0x017, toClient, 0x17, 0 },
-        Range{ 0x0B5, fromClient, 0x06, 0 },
-        Range{ 0x0B6, fromClient, 0x15, 0 },
-        Range{ 0x0B7, fromClient, 0x15, 0 },
-        Range{ 0x0CC, toClient, 0x08, 128 },
-        Range{ 0x0E2, fromClient, 0x10, 128 },
+        Range{ .opcode = 0x017, .direction = toClient, .offset = 0x17, .length = 0 },
+        Range{ .opcode = 0x0B5, .direction = fromClient, .offset = 0x06, .length = 0 },
+        Range{ .opcode = 0x0B6, .direction = fromClient, .offset = 0x15, .length = 0 },
+        Range{ .opcode = 0x0B7, .direction = fromClient, .offset = 0x15, .length = 0 },
+        Range{ .opcode = 0x0CC, .direction = toClient, .offset = 0x08, .length = 128 },
+        Range{ .opcode = 0x0E2, .direction = fromClient, .offset = 0x10, .length = 128 },
     };
     constexpr size_t SIZE = 256;
     const auto       sent = [&](const Range& r)
@@ -202,6 +202,10 @@ TEST_CASE("every chat range is zeroed in the capture, the session file and the l
     };
     const auto zeroed = [&](const Range& r, const std::span<const uint8_t> data, const bool kept)
     {
+        if (data.size() != SIZE)
+        {
+            return false;
+        }
         const auto end = r.length == 0 ? SIZE : r.offset + r.length;
         for (size_t i = 4; i < SIZE; ++i)
         {
@@ -211,7 +215,7 @@ TEST_CASE("every chat range is zeroed in the capture, the session file and the l
                 return false;
             }
         }
-        return data.size() == SIZE;
+        return true;
     };
     for (const bool saveChat : { false, true })
     {

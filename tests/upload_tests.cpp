@@ -755,3 +755,32 @@ TEST_CASE("an unload during a long cut-off recovery returns at once, and the nex
     CHECK(fs::exists(dir / "a-rest.xicap"));
     fs::remove_all(dir);
 }
+
+TEST_CASE("a recording keeps its Vault id once its upload closes or the server ends it, here and after a restart")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+    append(dir / "a.xicap", std::string(500, 'x') + TRAILER); // a character change closed it
+    append(dir / "b.xicap", std::string(500, 'y'));           // the server will end it, and the recorder rotate
+    REQUIRE(!up->pass());
+    REQUIRE(!up->pass());
+    const auto a = up->recordingId("a.xicap");
+    const auto b = up->recordingId("b.xicap");
+    REQUIRE(!a.empty());
+    REQUIRE(!b.empty());
+    for (auto& [path, u] : server.uploads)
+    {
+        u.cutOff = !u.closed;
+    }
+    append(dir / "b.xicap", std::string(100, 'y'));
+    CHECK(!up->pass()); // 410: ended
+    CHECK(up->ended("b.xicap"));
+    CHECK(up->recordingId("a.xicap") == a);
+    CHECK(up->recordingId("b.xicap") == b);
+    up.reset();
+    const auto other = uploader(dir, server); // a restart, or another client, reads the state file
+    CHECK(other->recordingId("a.xicap") == a);
+    CHECK(other->recordingId("b.xicap") == b);
+    fs::remove_all(dir);
+}

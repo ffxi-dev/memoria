@@ -437,7 +437,8 @@ auto Uploader::close(const std::filesystem::path& path, UploadFile& f, const uin
 }
 
 // Mogsafe answered 410. A complete capture whose close answer was lost is closed; any other ended upload is dropped,
-// and its file never sent again: a recording still running goes on in a new file and upload.
+// and its file never sent again: a recording still running goes on in a new file and upload. Its URL stays: it names
+// the recording in Vault, which a session's link still points at.
 auto Uploader::end(UploadFile& f, const HttpResponse& res) -> void
 {
     if (header(res, "mogsafe-ended") == "complete")
@@ -447,7 +448,6 @@ auto Uploader::end(UploadFile& f, const HttpResponse& res) -> void
     }
     f.ended  = true;
     f.cutOff = header(res, "mogsafe-ended") != "refused" && !header(res, "mogsafe-ended").empty();
-    f.url.clear();
 }
 
 // Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
