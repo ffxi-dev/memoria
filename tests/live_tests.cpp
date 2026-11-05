@@ -230,7 +230,7 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
     CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Mogsafe answered 500");
     CHECK(loadLink(dir));
     mogsafe.status = 401; // a refused token is deleted, as uploads do
-    CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Vault no longer accepts this install");
+    CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Mogsafe no longer accepts this install");
     CHECK(!loadLink(dir));
     fs::remove_all(dir);
 

@@ -190,7 +190,7 @@ TEST_CASE("a captain import sends full.log compressed with its manifest, then mo
     CHECK(!fs::exists(in.state / "imports"));
     CHECK(in.said.front() == "Uploading 1 captain capture (7.8 KB) in the background.");
     CHECK(in.saidAny("Captain 1/1 2026-8-4_23_54/Mirabeth: uploaded."));
-    CHECK(in.said.back() == "Captain import done: 1 uploaded, 0 already in Vault, 0 refused. Uploaded folders are in addons/captain/captures-uploaded.");
+    CHECK(in.said.back() == "Captain import done: 1 uploaded, 0 already on Mogsafe, 0 refused. Uploaded folders are in addons/captain/captures-uploaded.");
 
     // Moved folders are never looked at again.
     const auto requests = server.requests;
@@ -210,7 +210,7 @@ TEST_CASE("a log already in Vault sends no bytes and moves")
     CHECK(server.creates == 0);
     CHECK(server.received == 0);
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
-    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: already in Vault (cap7)."));
+    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: already on Mogsafe (cap7)."));
 }
 
 TEST_CASE("a refused capture stays where it is and the next one goes")
@@ -230,7 +230,7 @@ TEST_CASE("a refused capture stays where it is and the next one goes")
     in.importer(server)->run();
     CHECK(in.saidAny("Captain 2/2 d/Mirabeth: refused: forced."));
     CHECK(fs::exists(in.captures / "d/Mirabeth"));
-    CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already in Vault, 2 refused."));
+    CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already on Mogsafe, 2 refused."));
 }
 
 TEST_CASE("an upload Mogsafe lost, at HEAD or at an append, starts over")
@@ -396,7 +396,7 @@ TEST_CASE("an import resumes from each point a crash can leave it at")
         in.importer(server)->run();
         CHECK(server.received == received);
         CHECK(server.creates == 1);
-        CHECK(in.saidAny("s/Mirabeth: already in Vault (cap1)."));
+        CHECK(in.saidAny("s/Mirabeth: already on Mogsafe (cap1)."));
         CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
         CHECK(fs::is_empty(in.state));
     }
@@ -470,7 +470,7 @@ TEST_CASE("a folder in Vault without its search log replaces its capture; withou
     CHECK(server.creates == 1);
     CHECK(searchParts(server.uploads.at("/v1/uploads/1")).first == "search");
     CHECK(in.saidAny("Captain 1/2 a/Hoa: uploaded with its search log, replacing cap7."));
-    CHECK(in.saidAny("Captain 2/2 b/Ijs: already in Vault (cap8)."));
+    CHECK(in.saidAny("Captain 2/2 b/Ijs: already on Mogsafe (cap8)."));
     CHECK(fs::exists(in.uploaded / "a/Hoa/SearchLog/search.log"));
     CHECK(fs::exists(in.uploaded / "b/Ijs"));
 }
@@ -572,13 +572,13 @@ TEST_CASE("a folder that cannot move stays, and the next import moves it")
     touch(in.uploaded); // a file where the folder goes
     FakeMogsafe server;
     in.importer(server)->run();
-    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: in Vault, but its folder could not move: "));
+    CHECK(in.saidAny("Captain 1/1 s/Mirabeth: on Mogsafe, but its folder could not move: "));
     CHECK(fs::exists(in.captures / "s/Mirabeth"));
-    CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already in Vault, 0 refused, 1 in Vault but not moved."));
+    CHECK(in.said.back().starts_with("Captain import done: 0 uploaded, 0 already on Mogsafe, 0 refused, 1 on Mogsafe but not moved."));
 
     fs::remove(in.uploaded);
     in.importer(server)->run();
-    CHECK(in.saidAny("already in Vault (cap1)."));
+    CHECK(in.saidAny("already on Mogsafe (cap1)."));
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 

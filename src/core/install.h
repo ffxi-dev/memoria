@@ -29,7 +29,7 @@ auto loadLink(const std::filesystem::path& config) -> std::optional<Linked>;
 using LinkBack = std::function<bool(const std::filesystem::path& from, const std::filesystem::path& to)>;
 
 // What every Mogsafe call says when Mogsafe refuses the install's token (a 401), after removeLink.
-inline constexpr auto REFUSED = "Vault no longer accepts this install";
+inline constexpr auto REFUSED = "Mogsafe no longer accepts this install";
 
 // expect() for a call made with the install's token: a 401 also deletes that token, as removeLink does, and is REFUSED.
 auto expect(std::expected<HttpResponse, std::string> res, int status, const std::filesystem::path& config, const std::string& token) -> std::expected<HttpResponse, std::string>;

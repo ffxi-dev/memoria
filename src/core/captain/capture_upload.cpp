@@ -293,7 +293,7 @@ auto Importer::create(const CaptainCapture& c, Entry& e, const std::string& pref
     if (res && res->status == 409)
     {
         forget(c, e);
-        return moveToUploaded(c, prefix, std::format("already in Vault ({}).", header(*res, "mogsafe-capture")), Outcome::InVault);
+        return moveToUploaded(c, prefix, std::format("already on Mogsafe ({}).", header(*res, "mogsafe-capture")), Outcome::InVault);
     }
     if (res && res->status >= 400 && res->status < 500)
     {
@@ -353,7 +353,7 @@ auto Importer::moveToUploaded(const CaptainCapture& c, const std::string& prefix
     const auto to = moveAside(options_.captures, options_.uploaded, c.dir);
     if (!to)
     {
-        post(prefix + "in Vault, but its folder could not move: " + to.error() + ".");
+        post(prefix + "on Mogsafe, but its folder could not move: " + to.error() + ".");
         return Outcome::NotMoved;
     }
     post(prefix + done);

@@ -63,7 +63,7 @@ auto Session::sayStatus() -> void
     }
     const auto chatText = [](const xicap::Chat chat)
     {
-        return chat == xicap::Chat::Keep ? paint(Color::Yellow, "chat saved") + " (set on Vault)" : std::string("chat cut");
+        return chat == xicap::Chat::Keep ? paint(Color::Yellow, "chat saved") + " (set on Mogsafe)" : std::string("chat cut");
     };
     const auto next = chatChoice_.chat(linked());
     client += " · " + chatText(s.capture.empty() ? next : s.chat);
@@ -133,7 +133,7 @@ auto Session::sayUploads() -> void
     }
     if (kept > 0)
     {
-        say(paint(Color::Yellow, std::format("Not in Vault: {} of {} {} the server ended early.", sizeText(kept), cut, cut == 1 ? "recording" : "recordings")) + " It stays on this PC.");
+        say(paint(Color::Yellow, std::format("Not on Mogsafe: {} of {} {} the server ended early.", sizeText(kept), cut, cut == 1 ? "recording" : "recordings")) + " It stays on this PC.");
     }
     if (foreign > 0)
     {
@@ -183,9 +183,9 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     {
         if (!std::exchange(privacyShown_, true))
         {
-            say("The link page asks you to accept Vault's privacy policy: " + paint(Color::Cyan, server_ + "/privacy"));
+            say("The link page asks you to accept Mogsafe's privacy policy: " + paint(Color::Cyan, server_ + "/privacy"));
         }
-        say(paint(Color::Grey, "Asking Vault for a link code..."));
+        say(paint(Color::Grey, "Asking Mogsafe for a link code..."));
         link();
     }
     else if (sub == "live" && arg == "off")
@@ -223,7 +223,7 @@ auto Session::startSession(const std::string_view path) -> void
     if (linked())
     {
         sessionInVault_ = VaultSession{ .fromMs = clock_.nowMs(), .capture = recorder_->status().capture };
-        say("Session recorded in Vault, as part of this recording.");
+        say("Session recorded on Mogsafe, as part of this recording.");
         return;
     }
     try
@@ -259,8 +259,8 @@ auto Session::stopSession() -> void
     const auto sayLink = [&](const std::filesystem::path& capture, const uint64_t fromMs)
     {
         const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
-        say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
-                       : "Session in Vault: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
+        say(id.empty() ? "Session on Mogsafe once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
+                       : "Session on Mogsafe: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
     };
     sayLink(first, from->fromMs);
     if (!current.capture.empty() && current.capture != first)
@@ -324,7 +324,7 @@ auto Session::goLive() -> void
                                        },
                                    },
                                    recorder_->live());
-    say(paint(Color::Grey, "Asking Vault for a live link..."));
+    say(paint(Color::Grey, "Asking Mogsafe for a live link..."));
 }
 
 auto Session::unlinkInstall() -> void

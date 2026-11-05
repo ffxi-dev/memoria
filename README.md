@@ -1,6 +1,6 @@
 # Memoria
 
-Memoria is an [Ashita v4](https://ashitaxi.com) plugin for the retail Final Fantasy XI client. Once loaded, it records every packet of every session to an [xicap](https://github.com/ffxi-dev/xicap) capture under `<Ashita>/captures/memoria/`. When you link it to an account on [Mogsafe](https://mogsafe.sruon.dev), Vault's capture archive, it also uploads each capture as it records. There is nothing to start or stop.
+Memoria is an [Ashita v4](https://ashitaxi.com) plugin for the retail Final Fantasy XI client. Once loaded, it records every packet of every session to an [xicap](https://github.com/ffxi-dev/xicap) capture under `<Ashita>/captures/memoria/`. When you link it to an account on [Mogsafe](https://mogsafe.sruon.dev), it also uploads each capture as it records. There is nothing to start or stop.
 
 ## Install
 
@@ -31,7 +31,7 @@ Chat text is zeroed in place, so chat packets keep their length. A linked accoun
 
 ## Uploads
 
-Memoria sends each capture to Mogsafe as it grows, and after a crash, a restart or a lost connection resumes from the bytes Mogsafe holds. When Mogsafe has cut a recording off, its tail goes up as a new capture that starts at a frame boundary, so a few packets may reach Vault twice. It closes a capture's upload once the capture is complete. At unload it gives the last bytes three seconds, then waits for any request still in flight to finish or time out: seconds as a rule, and up to a minute when Mogsafe is slow to answer an upload or import request.
+Memoria sends each capture to Mogsafe as it grows, and after a crash, a restart or a lost connection resumes from the bytes Mogsafe holds. When Mogsafe has cut a recording off, its tail goes up as a new capture that starts at a frame boundary, so a few packets may reach Mogsafe twice. It closes a capture's upload once the capture is complete. At unload it gives the last bytes three seconds, then waits for any request still in flight to finish or time out: seconds as a rule, and up to a minute when Mogsafe is slow to answer an upload or import request.
 
 Mogsafe ends a recording that has sent nothing for five minutes. The part it never got goes up later as a capture of its own that names the first.
 

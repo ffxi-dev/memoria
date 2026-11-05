@@ -141,14 +141,14 @@ auto Importer::run() -> void
         ++tally[result];
     }
 
-    std::string summary{ std::format("Captain import done: {} uploaded, {} already in Vault, {} refused", tally[Outcome::Uploaded], tally[Outcome::InVault], tally[Outcome::Refused]) };
+    std::string summary{ std::format("Captain import done: {} uploaded, {} already on Mogsafe, {} refused", tally[Outcome::Uploaded], tally[Outcome::InVault], tally[Outcome::Refused]) };
     if (tally[Outcome::Skipped] > 0)
     {
         summary += std::format(", {} skipped", tally[Outcome::Skipped]);
     }
     if (tally[Outcome::NotMoved] > 0)
     {
-        summary += std::format(", {} in Vault but not moved", tally[Outcome::NotMoved]);
+        summary += std::format(", {} on Mogsafe but not moved", tally[Outcome::NotMoved]);
     }
     if (!found.empty())
     {

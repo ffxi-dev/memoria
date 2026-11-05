@@ -317,7 +317,7 @@ auto Session::remind() -> void
 {
     if (!linked() && claimDailyReminder(host_.config))
     {
-        post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
+        post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them on Mogsafe.");
     }
 }
 

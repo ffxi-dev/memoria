@@ -24,7 +24,7 @@ auto Plugin::GetAuthor() const -> const char*
 
 auto Plugin::GetDescription() const -> const char*
 {
-    return "Records every packet of a retail session to xicap and uploads it to Vault.";
+    return "Records every packet of a retail session to xicap and uploads it to Mogsafe.";
 }
 
 auto Plugin::GetLink() const -> const char*
