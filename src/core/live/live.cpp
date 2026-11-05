@@ -105,11 +105,11 @@ auto Feed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> voi
     }
     catch (const std::exception&) // a packet too short to frame is a gap for viewers
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         dropped_++;
         return;
     }
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (!open_)
     {
         return;
@@ -132,7 +132,7 @@ auto Feed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> voi
 
 auto Feed::claim() -> uint64_t
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     open_ = false;
     messages_.clear();
     bytes_   = 0;
@@ -142,7 +142,7 @@ auto Feed::claim() -> uint64_t
 
 auto Feed::open(const uint64_t owner, const bool on) -> void
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (owner != owner_)
     {
         return;
@@ -157,7 +157,7 @@ auto Feed::open(const uint64_t owner, const bool on) -> void
 
 auto Feed::take(const uint64_t owner) -> std::vector<std::vector<uint8_t>>
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (owner != owner_)
     {
         return {};
@@ -168,7 +168,7 @@ auto Feed::take(const uint64_t owner) -> std::vector<std::vector<uint8_t>>
 
 auto Feed::takeDropped(const uint64_t owner) -> uint64_t
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (owner != owner_)
     {
         return 0;

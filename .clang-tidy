@@ -1,0 +1,17 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-throwing-static-initialization,
+  misc-const-correctness,
+  modernize-*,
+  performance-*,
+  readability-avoid-const-params-in-decls,
+  readability-non-const-parameter
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: '_deps'
+CheckOptions:
+  bugprone-exception-escape.CheckMain: false
+  modernize-use-default-member-init.UseAssignment: false
+  modernize-use-trailing-return-type.TransformLambdas: none

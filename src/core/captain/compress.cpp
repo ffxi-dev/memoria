@@ -22,7 +22,7 @@ auto compressLog(const std::filesystem::path& log, const std::filesystem::path& 
         return std::optional(std::move(why));
     };
 
-    std::unique_ptr<ZSTD_CCtx, decltype(&ZSTD_freeCCtx)> cctx(ZSTD_createCCtx(), &ZSTD_freeCCtx);
+    const std::unique_ptr<ZSTD_CCtx, decltype(&ZSTD_freeCCtx)> cctx(ZSTD_createCCtx(), &ZSTD_freeCCtx);
     ZSTD_CCtx_setParameter(cctx.get(), ZSTD_c_compressionLevel, 3);
     std::ifstream     in(log, std::ios::binary);
     std::vector<char> inBuf(ZSTD_CStreamInSize());
@@ -35,7 +35,7 @@ auto compressLog(const std::filesystem::path& log, const std::filesystem::path& 
         }
         if (!head.empty())
         {
-            std::ifstream h(head, std::ios::binary);
+            const std::ifstream h(head, std::ios::binary);
             if (!h || !(o << h.rdbuf()))
             {
                 o.close();
@@ -56,10 +56,10 @@ auto compressLog(const std::filesystem::path& log, const std::filesystem::path& 
                 return fail("cannot read it");
             }
             last = in.eof();
-            ZSTD_inBuffer input{ inBuf.data(), static_cast<size_t>(in.gcount()), 0 };
+            ZSTD_inBuffer input{ .src = inBuf.data(), .size = static_cast<size_t>(in.gcount()), .pos = 0 };
             for (bool done = false; !done;)
             {
-                ZSTD_outBuffer output{ outBuf.data(), outBuf.size(), 0 };
+                ZSTD_outBuffer output{ .dst = outBuf.data(), .size = outBuf.size(), .pos = 0 };
                 const auto     remaining = ZSTD_compressStream2(cctx.get(), &output, &input, last ? ZSTD_e_end : ZSTD_e_continue);
                 if (ZSTD_isError(remaining))
                 {

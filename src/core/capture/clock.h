@@ -13,7 +13,7 @@ public:
     using Source = std::function<uint64_t()>;
 
     Clock();
-    Clock(Source wallMs, Source steadyMs);
+    Clock(const Source& wallMs, Source steadyMs);
 
     [[nodiscard]] auto nowMs() const -> uint64_t; // since the Unix epoch, UTC
 

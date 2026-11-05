@@ -10,16 +10,16 @@ using namespace memoria::test;
 
 TEST_CASE("timestamps follow the monotonic clock, not the wall clock")
 {
-    uint64_t wall{ 1'790'000'000'000 };
-    uint64_t steady{ 5'000 };
-    Clock    clock([&]
-                   {
-                    return wall;
-                   },
-                   [&]
-                   {
-                    return steady;
-                   });
+    uint64_t    wall{ 1'790'000'000'000 };
+    uint64_t    steady{ 5'000 };
+    const Clock clock([&]
+                      {
+                          return wall;
+                      },
+                      [&]
+                      {
+                          return steady;
+                      });
     CHECK(clock.nowMs() == 1'790'000'000'000);
     steady += 250;
     CHECK(clock.nowMs() == 1'790'000'000'250);

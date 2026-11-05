@@ -31,6 +31,17 @@ jobs:
       - run: cmake --build build --config Release --parallel 4 --target memoria_core_tests
       - run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
+  tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install clang-tidy==22.1.8
+      - run: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
+      - run: git ls-files 'src/core/*.cpp' 'tests/*.cpp' | xargs -P 4 -n 4 clang-tidy -p build --quiet
+
   plugin:
     runs-on: windows-latest
     defaults:

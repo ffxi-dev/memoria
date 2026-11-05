@@ -249,7 +249,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
         live_->reopen();
         say("Opening the live link again.");
     }
-    else if (sub == "live")
+    else if (sub == "live" && link)
     {
         live_ = std::make_unique<Live>(server_, host_.config, link->token, recorder_->live(), hello(), [this](std::string text)
                                        {

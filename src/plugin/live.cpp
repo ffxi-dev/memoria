@@ -49,7 +49,7 @@ auto upgrade(const HINTERNET session, const std::string& url, const std::string&
     s.connection         = std::move(open->connection);
     const auto& req      = open->request;
     const auto  wheaders = wide(headers);
-    if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), wheaders.c_str(), DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+    if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), wheaders.c_str(), static_cast<DWORD>(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(req.get(), nullptr))
     {
         s.error = std::format("WinHTTP error {}", GetLastError());
@@ -146,7 +146,7 @@ auto Live::stop() -> void
 auto Live::reopen() -> void
 {
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         reopen_ = true;
     }
     wake_.notify_all();
@@ -154,7 +154,7 @@ auto Live::reopen() -> void
 
 auto Live::setHello(std::string hello) -> void
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     hello_ = std::move(hello);
 }
 
@@ -166,7 +166,7 @@ auto Live::finished() const -> bool
 auto Live::status() const -> std::string
 {
     std::string text;
-    switch (state_)
+    switch (state_.load())
     {
         case State::Starting:
             text = "connecting";
@@ -176,7 +176,7 @@ auto Live::status() const -> std::string
             break;
         case State::Reconnecting:
         {
-            std::lock_guard lock(mutex_);
+            const std::scoped_lock lock(mutex_);
             text = "reconnecting (" + error_ + ")";
             break;
         }
@@ -197,7 +197,7 @@ auto Live::run(const std::stop_token& stop) -> void
         return;
     }
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         url_ = link->url;
     }
     browse(link->url);
@@ -252,7 +252,7 @@ auto Live::run(const std::stop_token& stop) -> void
             break;
         }
         {
-            std::lock_guard lock(mutex_);
+            const std::scoped_lock lock(mutex_);
             error_ = s.error;
         }
         state_ = State::Reconnecting;
@@ -271,7 +271,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
 {
     std::string hello;
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         closed_    = false;
         closeCode_ = 0;
         hello      = hello_;
@@ -296,7 +296,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                                             USHORT code{ 0 };
                                             DWORD  len{ 0 };
                                             WinHttpWebSocketQueryCloseStatus(h, &code, buffer.data(), static_cast<DWORD>(buffer.size()), &len);
-                                            std::lock_guard lock(mutex_);
+                                            const std::scoped_lock lock(mutex_);
                                             closeCode_ = code;
                                             break;
                                         }
@@ -314,7 +314,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                                         }
                                     }
                                     {
-                                        std::lock_guard lock(mutex_);
+                                        const std::scoped_lock lock(mutex_);
                                         closed_ = true;
                                     }
                                     wake_.notify_all();
@@ -336,7 +336,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                 }
             }
             {
-                std::lock_guard lock(mutex_);
+                const std::scoped_lock lock(mutex_);
                 if (closed_)
                 {
                     break;
@@ -384,14 +384,14 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     {
         receiver.join();
     }
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     closed_ = false;
     return closeCode_;
 }
 
 auto Live::helloNow() const -> std::string
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     return hello_;
 }
 

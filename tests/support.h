@@ -45,6 +45,12 @@ using namespace memoria::capture;
 using namespace memoria::captain;
 using namespace memoria::upload;
 
+// Creates path as an empty file, or empties it.
+inline auto touch(const fs::path& path) -> void
+{
+    const std::ofstream file(path);
+}
+
 inline auto tempDir() -> fs::path
 {
     // ctest runs each test in its own process: a counter alone would repeat names.
@@ -158,9 +164,11 @@ inline auto fromBase64(const std::string_view in) -> std::string
             break;
         }
         v = v << 6 | static_cast<uint32_t>(digits.find(c));
-        if ((bits += 6) >= 8)
+        bits += 6;
+        if (bits >= 8)
         {
-            out += static_cast<char>(v >> (bits -= 8) & 0xFF);
+            bits -= 8;
+            out += static_cast<char>(v >> bits & 0xFF);
         }
     }
     return out;

@@ -109,7 +109,7 @@ Uploader::Uploader(UploadOptions options, std::unique_ptr<Http> http)
 Uploader::~Uploader()
 {
     {
-        std::lock_guard lock(wakeMutex_);
+        const std::scoped_lock lock(wakeMutex_);
         stopping_ = true;
     }
     http_->cancel();
@@ -130,7 +130,7 @@ auto Uploader::run() -> void
     auto wait = options_.every;
     while (true)
     {
-        bool failed{ true };
+        bool failed{ false };
         try
         {
             uploading_ = !options_.mayRun || options_.mayRun();
@@ -138,6 +138,7 @@ auto Uploader::run() -> void
         }
         catch (const std::exception&) // out of memory, or the folder went away
         {
+            failed = true;
         }
         wait = failed ? std::min(wait * 2, options_.every * MAX_WAIT_PASSES) : options_.every;
 
@@ -155,8 +156,9 @@ auto Uploader::run() -> void
                 {
                     last(name);
                 }
-                catch (const std::exception&)
+                catch (const std::exception&) // NOLINT(bugprone-empty-catch)
                 {
+                    // What the last pass could not send goes at the next start.
                 }
                 lock.lock();
                 finished_ = true;
@@ -197,7 +199,7 @@ auto Uploader::last(const std::string& name) -> void
     }
     UploadFile f;
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         f = files_[name];
     }
     last_ = true;
@@ -209,7 +211,7 @@ auto Uploader::last(const std::string& name) -> void
         }
     }
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         files_[name] = f;
     }
     std::ignore = save();
@@ -238,7 +240,7 @@ auto Uploader::pass() -> std::optional<std::string>
         const auto name = entry.path().filename().string();
         UploadFile f;
         {
-            std::lock_guard lock(mutex_);
+            const std::scoped_lock lock(mutex_);
             f = files_[name];
         }
         const auto error = step(entry.path(), f, options_.idle);
@@ -251,7 +253,7 @@ auto Uploader::pass() -> std::optional<std::string>
         {
             f.error.clear();
         }
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         files_[name] = f;
     }
     if (const auto error = save())
@@ -295,7 +297,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         f.reason.clear();
         f.sent = 0;
         {
-            std::lock_guard lock(mutex_);
+            const std::scoped_lock lock(mutex_);
             files_[path.filename().string()] = f;
         }
         dirty_ = true;
@@ -477,8 +479,8 @@ auto Uploader::saved() const -> UploadFiles
 
 auto Uploader::load() -> void
 {
-    auto            files = saved();
-    std::lock_guard lock(mutex_);
+    auto                   files = saved();
+    const std::scoped_lock lock(mutex_);
     files_ = std::move(files);
 }
 
@@ -486,19 +488,19 @@ auto Uploader::save() -> std::optional<std::string>
 {
     UploadFiles files;
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         files = files_;
     }
     const auto error = writeUploads(options_.dir / STATE_FILE, files);
     dirty_           = error.has_value();
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     saveError_ = error.value_or("");
     return error;
 }
 
 auto Uploader::saveError() const -> std::string
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     return saveError_;
 }
 
@@ -510,7 +512,7 @@ auto Uploader::unauthorized() -> bool
 auto Uploader::file(const std::string& name) const -> UploadFile
 {
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         if (uploading_ && loaded_)
         {
             const auto it = files_.find(name);
@@ -537,7 +539,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
     // Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk are the truth.
     UploadFiles files;
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         if (uploading_ && loaded_)
         {
             files = files_;
