@@ -237,14 +237,13 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         }
         f.deniedFor.clear(); // another link: its account may own the upload
     }
-    std::error_code ec;
-    const auto      size = std::filesystem::file_size(path, ec);
-    if (ec)
+    const auto watched = watch(path, f);
+    if (!watched)
     {
-        return ec.message();
+        return watched.error();
     }
-    const auto now = std::chrono::steady_clock::now();
-    watch(f, size, now);
+    const auto size = *watched;
+    const auto now  = std::chrono::steady_clock::now();
     if (size < xicap::HEADER_SIZE || (!f.reason.empty() && f.refusedAt == size))
     {
         return std::nullopt;

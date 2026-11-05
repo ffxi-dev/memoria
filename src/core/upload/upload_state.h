@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -29,8 +30,8 @@ struct UploadFile
 
 using UploadFiles = std::map<std::string, UploadFile>; // by file name
 
-// Notes when the file's size last changed, which tells when it went quiet.
-auto watch(UploadFile& f, uint64_t size, std::chrono::steady_clock::time_point now) -> void;
+// The file's size now, noted in f with when it last changed, which tells when it went quiet. Why not, if it cannot be read.
+auto watch(const std::filesystem::path& path, UploadFile& f) -> std::expected<uint64_t, std::string>;
 
 auto readUploads(const std::filesystem::path& path) -> UploadFiles;
 

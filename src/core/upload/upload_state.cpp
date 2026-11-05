@@ -74,13 +74,20 @@ auto readUploads(const std::filesystem::path& path) -> UploadFiles
     return files;
 }
 
-auto watch(UploadFile& f, const uint64_t size, const std::chrono::steady_clock::time_point now) -> void
+auto watch(const std::filesystem::path& path, UploadFile& f) -> std::expected<uint64_t, std::string>
 {
+    std::error_code ec;
+    const auto      size = std::filesystem::file_size(path, ec);
+    if (ec)
+    {
+        return std::unexpected(ec.message());
+    }
     if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
     {
         f.size = size;
-        f.seen = now;
+        f.seen = std::chrono::steady_clock::now();
     }
+    return size;
 }
 
 auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>

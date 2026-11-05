@@ -82,15 +82,14 @@ auto Uploader::writeRest(const std::filesystem::path& path, UploadFile& f) -> st
     {
         return std::nullopt;
     }
-    std::error_code ec;
-    const auto      size = std::filesystem::file_size(path, ec);
-    if (ec)
+    const auto watched = watch(path, f);
+    if (!watched)
     {
-        return ec.message();
+        return watched.error();
     }
-    const auto now = std::chrono::steady_clock::now();
-    watch(f, size, now);
-    if (size > f.sent && now - f.seen < options_.idle)
+    const auto      size = *watched;
+    std::error_code ec;
+    if (size > f.sent && std::chrono::steady_clock::now() - f.seen < options_.idle)
     {
         return std::nullopt;
     }
