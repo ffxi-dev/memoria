@@ -1,10 +1,10 @@
-#include "core/chat.h"
+#include "core/account/chat.h"
 
 #include <nlohmann/json.hpp>
 
 #include <format>
 
-namespace memoria
+namespace memoria::account
 {
 
 auto fetchSaveChat(Http& http, const std::string& server, const std::string& installToken) -> std::expected<bool, std::string>
@@ -22,4 +22,4 @@ auto fetchSaveChat(Http& http, const std::string& server, const std::string& ins
     return body["save_chat"].get<bool>();
 }
 
-} // namespace memoria
+} // namespace memoria::account

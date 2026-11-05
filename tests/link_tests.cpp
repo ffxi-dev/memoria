@@ -39,10 +39,10 @@ public:
         Refused,
     };
 
-    Code        state = Code::Pending;
+    Code        state{ Code::Pending };
     std::string started; // the body of the last start
 
-    auto request([[maybe_unused]] const std::string& method, const std::string& url, [[maybe_unused]] const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    auto request([[maybe_unused]] const std::string& method, const std::string& url, [[maybe_unused]] const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
         if (url.ends_with("/v1/link/start"))
         {

@@ -2,7 +2,7 @@ schema: spec-driven
 
 context: |
   Memoria is an Ashita v4 plugin: it records retail sessions to xicap and uploads them to Mogsafe.
-  Changes that touch only Memoria start here. Repository rules live in AGENTS.md: the game thread never waits.
+  Changes that touch only Memoria start here. Repository rules live in README.md, under Contributing.
 
 rules:
   design:

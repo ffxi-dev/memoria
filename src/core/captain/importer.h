@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/captain.h"
+#include "core/captain/captain.h"
 #include "core/http.h"
 #include "core/tus.h"
 
@@ -17,7 +17,7 @@
 #include <string>
 #include <thread>
 
-namespace memoria
+namespace memoria::captain
 {
 
 struct ImportOptions
@@ -109,4 +109,4 @@ private:
     std::thread           thread_;
 };
 
-} // namespace memoria
+} // namespace memoria::captain

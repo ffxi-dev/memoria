@@ -1,6 +1,6 @@
 #include "core/tus.h"
 
-#include "core/link.h"
+#include "core/account/link.h"
 
 #include <algorithm>
 #include <charconv>
@@ -12,7 +12,7 @@
 namespace memoria
 {
 
-auto parseU64(std::string_view s) -> std::optional<uint64_t>
+auto parseU64(const std::string_view s) -> std::optional<uint64_t>
 {
     uint64_t v{};
     const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
@@ -25,7 +25,7 @@ auto header(const HttpResponse& res, const std::string& name) -> std::string
     return it == res.headers.end() ? std::string{} : it->second;
 }
 
-auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>
+auto replaceFile(const std::filesystem::path& path, const std::string_view text) -> std::optional<std::string>
 {
     const auto tmp = std::filesystem::path(path).concat(".tmp");
     {
@@ -55,23 +55,23 @@ Tus::Tus(std::string server, std::filesystem::path config, Http& http)
 
 auto Tus::allowed() -> bool
 {
-    if (paused(config_))
+    if (account::paused(config_))
     {
         return false;
     }
-    const auto link = loadLink(config_ / "token");
+    const auto link = account::loadLink(config_ / "token");
     token_          = link ? link->token : std::string{};
     return !token_.empty();
 }
 
-auto Tus::request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
+auto Tus::request(const std::string& method, const std::string& url, HttpHeaders headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
 {
     headers.emplace_back("Tus-Resumable", "1.0.0");
     headers.emplace_back("Authorization", "Bearer " + token_);
     auto res = http_.request(method, onServer(url), headers, body);
     if (res && res->status == 401)
     {
-        if (removeLink(config_ / "token", token_))
+        if (account::removeLink(config_ / "token", token_))
         {
             unauthorized_ = true;
         }
@@ -96,7 +96,7 @@ auto Tus::onServer(std::string_view url) const -> std::string
     return server_.substr(0, server_.find('/', server_.find("://") + 3)) + std::string(url);
 }
 
-auto Tus::append(const std::filesystem::path& path, const std::string& url, uint64_t offset, uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>
+auto Tus::append(const std::filesystem::path& path, const std::string& url, uint64_t offset, const uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>
 {
     std::ifstream in(path, std::ios::binary);
     while (offset < size && go(offset))

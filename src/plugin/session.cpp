@@ -55,14 +55,14 @@ Session::Session(Host host)
 {
 }
 
-auto Session::start(std::optional<LateLogin> late) -> void
+auto Session::start(const std::optional<LateLogin> late) -> void
 {
     server_ = serverIn(host_.config / "upload.ini").value_or(server_);
 
     try
     {
         startUploads();
-        recorder_ = std::make_unique<Recorder>(RecorderOptions{
+        recorder_ = std::make_unique<capture::Recorder>(capture::RecorderOptions{
             .dir          = host_.captures,
             .captureAgent = CAPTURE_AGENT,
             .chat         = [this]
@@ -83,7 +83,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
                 post(paint(Color::Red, "Cannot write the capture: " + why + ".") + " Nothing records until it can; Memoria tries again each minute.");
             },
         });
-        if (Importer::pending(host_.captures) && linked())
+        if (captain::Importer::pending(host_.captures) && linked())
         {
             startImport(false); // an import asked for and not finished goes on, here or in the client holding its mutex
         }
@@ -104,7 +104,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
     // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
-        Login login{ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() };
+        capture::Login login{ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() };
         characterError_ = client::lobby::character(login);
         character_      = login.character;
         loggedIn_       = true;
@@ -142,7 +142,7 @@ Session::~Session()
     }
 }
 
-auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
+auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
 {
     if (!recorder_)
     {
@@ -151,7 +151,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
     if (id == packets::LOGIN)
     {
-        Login who{ .character = packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
+        capture::Login who{ .character = packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
             characterError_ = client::lobby::character(who);
@@ -175,7 +175,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
     }
 }
 
-auto Session::outgoing(uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
+auto Session::outgoing(const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
 {
     if (recorder_)
     {
@@ -183,9 +183,9 @@ auto Session::outgoing(uint32_t size, const uint8_t* data, const uint8_t* modifi
     }
 }
 
-auto Session::record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void
+auto Session::record(const bool clientToServer, const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
 {
-    uint16_t provenance = 0;
+    uint16_t provenance{ 0 };
     if (injected)
     {
         provenance |= xicap::PacketFlag::Injected;
@@ -219,7 +219,7 @@ auto Session::record(bool clientToServer, uint32_t size, const uint8_t* data, co
 }
 
 // The opcode is byte 0x0B, the request type LSB's search server switches on.
-auto Session::recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void
+auto Session::recordSearch(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
 {
     recorder_->packet({
         .timestamp      = clock_.nowMs(),
@@ -234,8 +234,8 @@ auto Session::frame() -> void
 {
     client::search::tick();
 
-    std::vector<std::string> inbox;
-    std::optional<Linked>    arrived;
+    std::vector<std::string>       inbox;
+    std::optional<account::Linked> arrived;
     {
         std::lock_guard lock(inboxMutex_);
         inbox.swap(inbox_);
@@ -249,7 +249,7 @@ auto Session::frame() -> void
     {
         say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
         refreshChat();
-        if (!importer_ && Importer::pending(host_.captures))
+        if (!importer_ && captain::Importer::pending(host_.captures))
         {
             startImport(false);
         }
@@ -280,7 +280,7 @@ auto Session::frame() -> void
 // Runs until the plugin unloads; the token and paused files decide each pass whether it sends.
 auto Session::startUploads() -> void
 {
-    UploadOptions options{
+    upload::UploadOptions options{
         .dir    = host_.captures,
         .server = server_,
         .config = host_.config,
@@ -295,7 +295,7 @@ auto Session::startUploads() -> void
         const auto r = ::WaitForSingleObject(mutex, 0);
         return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
     };
-    uploader_ = std::make_unique<Uploader>(std::move(options), std::make_unique<WinHttp>());
+    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>());
     uploader_->start();
 }
 
@@ -344,16 +344,16 @@ auto Session::remind() -> void
 auto Session::offerImport() -> void
 {
     // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && remindImport(host_.config, host_.captain / "captures"))
+    if (linked() && captain::remindImport(host_.config, host_.captain / "captures"))
     {
         post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }
 }
 
 // Clients sharing an install import through the one whose importer holds the named mutex.
-auto Session::startImport(bool asked) -> void
+auto Session::startImport(const bool asked) -> void
 {
-    ImportOptions options{
+    captain::ImportOptions options{
         .captures = host_.captain / "captures",
         .uploaded = host_.captain / "captures-uploaded",
         .state    = host_.captures,
@@ -365,7 +365,7 @@ auto Session::startImport(bool asked) -> void
     {
         post(std::move(text));
     };
-    importer_ = std::make_unique<Importer>(std::move(options), std::make_unique<WinHttp>());
+    importer_ = std::make_unique<captain::Importer>(std::move(options), std::make_unique<WinHttp>());
     importer_->start(asked);
 }
 
@@ -380,7 +380,7 @@ auto Session::link() -> void
                                                                {
                                                                    http.cancel();
                                                                });
-                               const auto               code = startLink(http, server_);
+                               const auto               code = account::startLink(http, server_);
                                if (stop.stop_requested())
                                {
                                    return;
@@ -411,7 +411,7 @@ auto Session::link() -> void
                                    {
                                        return;
                                    }
-                                   const auto result = pollLink(http, server_, code->poll);
+                                   const auto result = account::pollLink(http, server_, code->poll);
                                    if (stop.stop_requested())
                                    {
                                        return;
@@ -423,7 +423,7 @@ auto Session::link() -> void
                                    }
                                    if (*result)
                                    {
-                                       if (!saveLink(host_.config / "token", **result))
+                                       if (!account::saveLink(host_.config / "token", **result))
                                        {
                                            post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
                                            return;
@@ -437,9 +437,9 @@ auto Session::link() -> void
                            });
 }
 
-auto Session::linked() const -> std::optional<Linked>
+auto Session::linked() const -> std::optional<account::Linked>
 {
-    return loadLink(host_.config / "token");
+    return account::loadLink(host_.config / "token");
 }
 
 auto Session::unlink(const std::string& why) -> void
@@ -450,7 +450,7 @@ auto Session::unlink(const std::string& why) -> void
 
 auto Session::hello() -> std::string
 {
-    return liveHello(character_.name, character_.world, client::lobby::version(), CAPTURE_AGENT);
+    return live::hello(character_.name, character_.world, client::lobby::version(), CAPTURE_AGENT);
 }
 
 // A linked install saves chat when its account chose to. The request runs on its own thread; while one is in flight,
@@ -472,7 +472,7 @@ auto Session::refreshChat() -> void
                                   {
                                       saveChat_ = false;
                                   }
-                                  else if (const auto saved = fetchSaveChat(http, server_, link->token))
+                                  else if (const auto saved = account::fetchSaveChat(http, server_, link->token))
                                   {
                                       saveChat_ = *saved;
                                   }

@@ -1,20 +1,20 @@
-#include "core/event_queue.h"
+#include "core/capture/event_queue.h"
 
 #include <utility>
 
-namespace memoria
+namespace memoria::capture
 {
 
-EventQueue::EventQueue(size_t maxBytes)
+EventQueue::EventQueue(const size_t maxBytes)
 : maxBytes_(maxBytes)
 {
 }
 
 auto EventQueue::push(Event event) -> bool
 {
-    const size_t    size = sizeof(Event) + event.data.size() + event.text.size();
+    const size_t    size{ sizeof(Event) + event.data.size() + event.text.size() };
     std::lock_guard lock(mutex_);
-    if (event.kind == Event::Kind::Packet && bytes_ + size > maxBytes_)
+    if (event.kind == EventKind::Packet && bytes_ + size > maxBytes_)
     {
         dropped_++;
         return false;
@@ -40,4 +40,4 @@ auto EventQueue::takeDropped() -> uint64_t
     return std::exchange(dropped_, 0);
 }
 
-} // namespace memoria
+} // namespace memoria::capture

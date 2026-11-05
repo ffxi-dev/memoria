@@ -46,20 +46,20 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 add_library(memoria_core STATIC
-    src/core/captain.cpp
-    src/core/compress.cpp
-    src/core/importer.cpp
-    src/core/clock.cpp
-    src/core/event_queue.cpp
+    src/core/account/chat.cpp
+    src/core/account/link.cpp
+    src/core/captain/captain.cpp
+    src/core/captain/compress.cpp
+    src/core/captain/importer.cpp
+    src/core/capture/clock.cpp
+    src/core/capture/event_queue.cpp
+    src/core/capture/recorder.cpp
     src/core/file.cpp
-    src/core/link.cpp
-    src/core/live.cpp
-    src/core/chat.cpp
-    src/core/recorder.cpp
+    src/core/live/live.cpp
     src/core/tus.cpp
     src/core/units.cpp
-    src/core/upload_state.cpp
-    src/core/uploader.cpp
+    src/core/upload/upload_state.cpp
+    src/core/upload/uploader.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
 target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json libzstd_static)

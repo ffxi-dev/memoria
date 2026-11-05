@@ -8,8 +8,8 @@ TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
     struct Chat final : Http
     {
         std::string auth;
-        int         status = 200;
-        std::string body   = R"({"save_chat":true})";
+        int         status{ 200 };
+        std::string body{ R"({"save_chat":true})" };
 
         auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
         {
@@ -102,7 +102,7 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
             }
         }
         const auto e     = gamePacket(T0 + 1, 0x0B5);
-        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = e.data }, saveChat ? xicap::Chat::Keep : xicap::Chat::Redact);
+        const auto frame = live::frame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = e.data }, saveChat ? xicap::Chat::Keep : xicap::Chat::Redact);
         CHECK(std::ranges::count(frame | std::views::drop(16), 0) == zeroed);
         fs::remove_all(dir);
     }

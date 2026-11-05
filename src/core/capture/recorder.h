@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/event_queue.h"
-#include "core/live.h"
+#include "core/capture/event_queue.h"
+#include "core/live/live.h"
 
 #include <xicap/writer.h>
 
@@ -15,7 +15,7 @@
 #include <string>
 #include <thread>
 
-namespace memoria
+namespace memoria::capture
 {
 
 struct RecorderOptions
@@ -24,7 +24,7 @@ struct RecorderOptions
     std::string               captureAgent;
     std::chrono::milliseconds flushEvery{ 5000 };
     std::chrono::milliseconds drainEvery{ 50 };
-    size_t                    queueBytes = 64 * 1024 * 1024;
+    size_t                    queueBytes{ 64 * 1024 * 1024 };
     // Asked on the writer thread as each capture opens: whether it, its session file, and its live frames keep chat. Empty: redact.
     std::function<xicap::Chat()> chat;
     // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then
@@ -70,7 +70,7 @@ public:
 
     [[nodiscard]] auto status() const -> RecorderStatus;
 
-    auto live() -> LiveFeed&
+    auto live() -> live::Feed&
     {
         return live_;
     }
@@ -98,7 +98,7 @@ private:
 
     RecorderOptions options_;
     EventQueue      queue_;
-    LiveFeed        live_;
+    live::Feed      live_;
 
     std::thread             thread_;
     std::mutex              wakeMutex_;
@@ -119,4 +119,4 @@ private:
     RecorderStatus     status_;
 };
 
-} // namespace memoria
+} // namespace memoria::capture

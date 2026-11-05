@@ -23,7 +23,7 @@ auto frames(const std::vector<std::vector<uint8_t>>& messages) -> std::vector<Fr
         {
             REQUIRE(m[at] == 1);
             Frame    f{ .channel = m[at + 1] };
-            uint32_t length = 0;
+            uint32_t length{ 0 };
             std::memcpy(&f.flags, &m[at + 2], 2);
             std::memcpy(&f.timestamp, &m[at + 4], 8);
             std::memcpy(&length, &m[at + 12], 4);
@@ -67,7 +67,7 @@ TEST_CASE("a live frame is version, channel, flags, time, length, then the packe
         0xAB,
         0xAB,
     };
-    CHECK(liveFrame(outPacket(e), xicap::Chat::Redact) == want);
+    CHECK(live::frame(outPacket(e), xicap::Chat::Redact) == want);
 }
 
 TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
@@ -111,7 +111,7 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
 
 TEST_CASE("the live feed batches frames into messages and takes nothing while closed")
 {
-    LiveFeed   feed;
+    live::Feed feed;
     const auto owner = feed.claim();
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(owner).empty());
@@ -133,7 +133,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
     }
     messages = feed.take(owner);
     REQUIRE(messages.size() == 3);
-    CHECK(messages[0].size() <= LiveFeed::MESSAGE_BYTES);
+    CHECK(messages[0].size() <= live::Feed::MESSAGE_BYTES);
     CHECK(frames(messages).size() == 5000);
 
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
@@ -143,7 +143,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
 
 TEST_CASE("a full live feed drops packets and counts them")
 {
-    LiveFeed   feed(3 * 32);
+    live::Feed feed(3 * 32);
     const auto owner = feed.claim();
     feed.open(owner, true);
     for (int i = 0; i < 5; ++i)
@@ -163,7 +163,7 @@ TEST_CASE("a full live feed drops packets and counts them")
 
 TEST_CASE("a live link stopped late cannot close the feed of the one that replaced it")
 {
-    LiveFeed   feed;
+    live::Feed feed;
     const auto old = feed.claim();
     feed.open(old, true);
     const auto now = feed.claim(); // /memoria live off, then /memoria live, while the old send still hangs
@@ -196,7 +196,7 @@ TEST_CASE("a malformed answer from Mogsafe is an error, never an exception that 
             http.answer = { .status = status, .body = body };
             CHECK_NOTHROW(std::ignore = startLink(http, "https://mogsafe.test"));
             CHECK_NOTHROW(std::ignore = pollLink(http, "https://mogsafe.test", "p"));
-            CHECK_NOTHROW(std::ignore = startLive(http, "https://mogsafe.test", "t0ken"));
+            CHECK_NOTHROW(std::ignore = live::start(http, "https://mogsafe.test", "t0ken"));
         }
     }
     http.answer = { .status = 201, .body = R"({"code":null})" };
@@ -208,7 +208,7 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
     struct Live final : Http
     {
         std::string auth;
-        int         status = 201;
+        int         status{ 201 };
 
         auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
         {
@@ -218,18 +218,18 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
             return HttpResponse{ .status = status, .body = R"({"token":"l1ve","url":"https://lens.example/live#l1ve","expires":1790000000000})" };
         }
     } mogsafe;
-    const auto link = startLive(mogsafe, "https://mogsafe.test", "t0ken");
+    const auto link = live::start(mogsafe, "https://mogsafe.test", "t0ken");
     REQUIRE(link.has_value());
     CHECK(mogsafe.auth == "Bearer t0ken");
     CHECK(link->token == "l1ve");
     CHECK(link->url == "https://lens.example/live#l1ve");
 
     mogsafe.status = 401;
-    CHECK(startLive(mogsafe, "https://mogsafe.test", "t0ken").error() == "Mogsafe answered 401");
+    CHECK(live::start(mogsafe, "https://mogsafe.test", "t0ken").error() == "Mogsafe answered 401");
 
-    CHECK(liveViewers(R"({"viewers":2})") == 2);
-    CHECK(!liveViewers(R"({"sender":true})"));
-    CHECK(!liveViewers("not json"));
-    CHECK(nlohmann::json::parse(liveHello("Kalnor", "Asura", "30261006_0", "Memoria 0.6.0")) ==
+    CHECK(live::viewers(R"({"viewers":2})") == 2);
+    CHECK(!live::viewers(R"({"sender":true})"));
+    CHECK(!live::viewers("not json"));
+    CHECK(nlohmann::json::parse(live::hello("Kalnor", "Asura", "30261006_0", "Memoria 0.6.0")) ==
           nlohmann::json::parse(R"({"hello":{"character":"Kalnor","world":"Asura","client_version":"30261006_0","agent":"Memoria 0.6.0"}})"));
 }

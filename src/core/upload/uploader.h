@@ -2,7 +2,7 @@
 
 #include "core/http.h"
 #include "core/tus.h"
-#include "core/upload_state.h"
+#include "core/upload/upload_state.h"
 
 #include <atomic>
 #include <chrono>
@@ -16,7 +16,7 @@
 #include <thread>
 #include <vector>
 
-namespace memoria
+namespace memoria::upload
 {
 
 struct UploadOptions
@@ -99,4 +99,4 @@ private:
     std::atomic<bool>       uploading_{ false };
 };
 
-} // namespace memoria
+} // namespace memoria::upload

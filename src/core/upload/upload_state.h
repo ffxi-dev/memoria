@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-namespace memoria
+namespace memoria::upload
 {
 
 // One capture's upload, as uploads.txt keeps it. The fields after reason live only in memory.
@@ -34,4 +34,4 @@ auto readUploads(const std::filesystem::path& path) -> UploadFiles;
 // Why the file was not replaced, if it was not.
 auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>;
 
-} // namespace memoria
+} // namespace memoria::upload

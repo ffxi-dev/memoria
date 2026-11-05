@@ -1,4 +1,4 @@
-#include "core/compress.h"
+#include "core/captain/compress.h"
 
 #include <zstd.h>
 
@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-namespace memoria
+namespace memoria::captain
 {
 
 auto compressLog(const std::filesystem::path& log, const std::filesystem::path& out, const std::filesystem::path& head, const std::atomic<bool>& stop) -> std::optional<std::string>
@@ -84,4 +84,4 @@ auto compressLog(const std::filesystem::path& log, const std::filesystem::path& 
     return std::nullopt;
 }
 
-} // namespace memoria
+} // namespace memoria::captain

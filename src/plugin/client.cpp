@@ -15,16 +15,16 @@ namespace memoria::client
 namespace
 {
 
-auto read32(uintptr_t address) -> uint32_t
+auto read32(const uintptr_t address) -> uint32_t
 {
     uint32_t v{};
     std::memcpy(&v, reinterpret_cast<const void*>(address), sizeof(v));
     return v;
 }
 
-auto write32(uintptr_t address, uint32_t value) -> bool
+auto write32(const uintptr_t address, const uint32_t value) -> bool
 {
-    DWORD protection = 0;
+    DWORD protection{ 0 };
     if (!::VirtualProtect(reinterpret_cast<void*>(address), sizeof(value), PAGE_EXECUTE_READWRITE, &protection))
     {
         return false;
@@ -42,7 +42,7 @@ struct Patch
 };
 
 // Points the call at operand to target, if it calls expected.
-auto redirect(uintptr_t operand, uintptr_t expected, uintptr_t target) -> std::optional<Patch>
+auto redirect(const uintptr_t operand, const uintptr_t expected, const uintptr_t target) -> std::optional<Patch>
 {
     const Patch patch{ operand, read32(operand) };
     if (operand + 4 + patch.backup != expected || !write32(operand, static_cast<uint32_t>(target - (operand + 4))))
@@ -118,7 +118,7 @@ NextPage           nextPage_{};
 uintptr_t          connection_{};
 std::vector<Patch> patches_;
 
-auto record(bool clientToServer, const uint8_t* data, uint32_t size) -> void
+auto record(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
 {
     if (sink_ && size >= 12 && size <= MAX_SIZE)
     {
@@ -136,7 +136,7 @@ auto __cdecl encryptHook(void* context, uint8_t* packet, int size) -> int
 auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
 {
     const auto encrypted = read32(reinterpret_cast<uintptr_t>(packet) + 4) != 0;
-    const bool ok        = decrypt_(context, packet);
+    const bool ok{ decrypt_(context, packet) };
     if (ok && encrypted)
     {
         record(false, packet, read32(reinterpret_cast<uintptr_t>(packet)));
@@ -146,7 +146,7 @@ auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
 
 auto __cdecl nextPageHook(void* connection) -> int
 {
-    const int result = nextPage_(connection);
+    const int result{ nextPage_(connection) };
     if (result == 0) // the request was queued
     {
         record(true, NEXT_PAGE.data(), NEXT_PAGE.size());
@@ -172,7 +172,7 @@ auto encryptPointer() -> uintptr_t
 
 } // namespace
 
-auto install(Sink sink) -> std::string
+auto install(const Sink sink) -> std::string
 {
     const auto encrypt      = find("B8B0100000E8????????538B9C24B8100000555633F685DB");
     const auto decrypt      = find("B8B0100000E8????????538B9C24BC100000568B430485C0");
@@ -279,7 +279,7 @@ auto version() -> std::string
     }
 }
 
-auto character(Login& who) -> std::string
+auto character(capture::Login& who) -> std::string
 {
     if (getter() == 0)
     {

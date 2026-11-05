@@ -10,8 +10,8 @@ using namespace memoria::test;
 
 TEST_CASE("timestamps follow the monotonic clock, not the wall clock")
 {
-    uint64_t wall   = 1'790'000'000'000;
-    uint64_t steady = 5'000;
+    uint64_t wall{ 1'790'000'000'000 };
+    uint64_t steady{ 5'000 };
     Clock    clock([&]
                    {
                     return wall;
@@ -35,14 +35,14 @@ TEST_CASE("the queue drops packets past its limit, never markers")
     CHECK(queue.push(packet(100)));
     CHECK(queue.push(packet(100)));
     CHECK_FALSE(queue.push(packet(100)));
-    CHECK(queue.push(Event{ .kind = Event::Kind::Login }));
+    CHECK(queue.push(Event{ .kind = EventKind::Login }));
     CHECK(queue.takeDropped() == 1);
     CHECK(queue.takeDropped() == 0);
 
     std::vector<Event> out;
     queue.drain(out);
     REQUIRE(out.size() == 4);
-    CHECK(out.back().kind == Event::Kind::Login);
+    CHECK(out.back().kind == EventKind::Login);
     CHECK_FALSE(queue.push(packet(100))); // the writer still holds that batch
     queue.drain(out);                     // and frees it here
     CHECK(out.empty());
@@ -104,7 +104,7 @@ TEST_CASE("a start that missed the content id continues on a login that has it")
 {
     const auto dir = tempDir();
     {
-        Login late               = who("Kalnor", 1);
+        Login late{ who("Kalnor", 1) };
         late.character.contentId = 0;
         late.worldId             = 0;
         late.midSession          = true;
@@ -113,7 +113,7 @@ TEST_CASE("a start that missed the content id continues on a login that has it")
         rec.packet(gamePacket(T0 + 1));
         rec.login(T0 + 10'000, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 10'001));
-        Login other               = who("Kalnor", 1);
+        Login other{ who("Kalnor", 1) };
         other.character.contentId = 7; // same character id and name on another account
         rec.login(T0 + 20'000, other);
         rec.packet(gamePacket(T0 + 20'001));
@@ -133,7 +133,7 @@ TEST_CASE("the same character id and name on another world starts a new capture"
         Recorder rec(options(dir));
         rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1));
-        Login moved   = who("Kalnor", 1);
+        Login moved{ who("Kalnor", 1) };
         moved.worldId = 43;
         rec.login(T0 + 10'000, moved);
         rec.packet(gamePacket(T0 + 10'001));
@@ -188,7 +188,7 @@ TEST_CASE("a start after a crash continues the capture the crash cut off")
         state << " open\n";
     }
     {
-        Login late      = who("Kalnor", 1);
+        Login late{ who("Kalnor", 1) };
         late.midSession = true; // the client came back already in a zone
         Recorder rec(options(dir));
         rec.login(T0 + 60'000, late);
@@ -236,7 +236,7 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     CHECK(!part.atLogin);
 
     xicap::Reader r(session);
-    size_t        packets = 0;
+    size_t        packets{ 0 };
     std::string   notes;
     for (const auto& p : r)
     {
@@ -323,7 +323,7 @@ TEST_CASE("a session write that fails leaves the main capture recording")
         }
         REQUIRE(!rec.status().session.empty());
         // From here the session's file writes to /dev/full.
-        const int full = ::open("/dev/full", O_WRONLY);
+        const int full{ ::open("/dev/full", O_WRONLY) };
         REQUIRE(full >= 0);
         for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
         {
@@ -389,7 +389,7 @@ TEST_CASE("dropped packets leave a note in the capture")
         rec.stop();
         CHECK(rec.status().dropped > 0);
     }
-    bool noted = false;
+    bool noted{ false };
     {
         xicap::Reader r(captures(dir)[0]); // closed before the folder goes: Windows keeps an open file
         for (const auto& p : r)

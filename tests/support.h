@@ -1,16 +1,16 @@
 #pragma once
 
-#include "core/captain.h"
-#include "core/chat.h"
-#include "core/clock.h"
-#include "core/event_queue.h"
+#include "core/account/chat.h"
+#include "core/account/link.h"
+#include "core/captain/captain.h"
+#include "core/captain/importer.h"
+#include "core/capture/clock.h"
+#include "core/capture/event_queue.h"
+#include "core/capture/recorder.h"
 #include "core/file.h"
-#include "core/importer.h"
-#include "core/link.h"
-#include "core/live.h"
-#include "core/recorder.h"
+#include "core/live/live.h"
 #include "core/units.h"
-#include "core/uploader.h"
+#include "core/upload/uploader.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
@@ -40,6 +40,11 @@ namespace fs = std::filesystem;
 namespace memoria::test
 {
 
+using namespace memoria::account;
+using namespace memoria::capture;
+using namespace memoria::captain;
+using namespace memoria::upload;
+
 inline auto tempDir() -> fs::path
 {
     // ctest runs each test in its own process: a counter alone would repeat names.
@@ -57,9 +62,9 @@ inline auto readAll(const fs::path& path) -> std::vector<uint8_t>
     return { std::istreambuf_iterator<char>(in), {} };
 }
 
-inline auto packet(size_t size) -> Event
+inline auto packet(const size_t size) -> Event
 {
-    return Event{ .kind = Event::Kind::Packet, .data = std::vector<uint8_t>(size, 1) };
+    return Event{ .kind = EventKind::Packet, .data = std::vector<uint8_t>(size, 1) };
 }
 
 inline constexpr uint64_t T0 = 1'790'000'000'000ULL;
@@ -74,7 +79,7 @@ inline auto options(const fs::path& dir) -> RecorderOptions
     return o;
 }
 
-inline auto who(const char* name, uint32_t id) -> Login
+inline auto who(const char* name, const uint32_t id) -> Login
 {
     return {
         .character     = { .contentId = id, .characterId = id, .name = name, .world = "Asura" },
@@ -84,7 +89,7 @@ inline auto who(const char* name, uint32_t id) -> Login
     };
 }
 
-inline auto gamePacket(uint64_t t, uint16_t opcode = 0x015) -> Event
+inline auto gamePacket(const uint64_t t, uint16_t opcode = 0x015) -> Event
 {
     std::vector<uint8_t> data(16, 0xAB);
     const auto           hdr = static_cast<uint16_t>((4 << 9) | opcode);
@@ -140,12 +145,12 @@ inline auto readCapture(const fs::path& path) -> Read
 // Stands in for a capture's trailer.
 inline const auto TRAILER = std::string("XCPF") + std::string(20, 't');
 
-inline auto fromBase64(std::string_view in) -> std::string
+inline auto fromBase64(const std::string_view in) -> std::string
 {
     constexpr std::string_view digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string                out;
-    uint32_t                   v    = 0;
-    int                        bits = 0;
+    uint32_t                   v{ 0 };
+    int                        bits{ 0 };
     for (const char c : in)
     {
         if (c == '=')
@@ -181,7 +186,7 @@ public:
     std::map<std::string, std::vector<int>> forced;      // answers by method, given before anything else
     std::set<std::string>                   foreign;     // uploads another account made: every request answers 403
     std::set<std::thread::id>               threads;
-    std::string                             token = "t0ken";
+    std::string                             token{ "t0ken" };
     std::string                             foreignEnd; // an upload that answers 410 with Mogsafe-Ended: refused
     std::string                             origin;     // put before a create's Location: tusd behind a tunnel names http://
     std::vector<std::string>                strayed;    // URLs asked for anywhere but https://mogsafe.test
@@ -190,13 +195,13 @@ public:
     int                                     creates{};
     int                                     requests{};
     int                                     patches{};
-    uint64_t                                received{};        // bytes accepted by appends
-    int                                     crashAtPatch = -1; // the game dies during this PATCH, before any answer
-    int                                     cutAtPatch   = -1; // this PATCH keeps half its body, then the connection drops
+    uint64_t                                received{};         // bytes accepted by appends
+    int                                     crashAtPatch{ -1 }; // the game dies during this PATCH, before any answer
+    int                                     cutAtPatch{ -1 };   // this PATCH keeps half its body, then the connection drops
     std::function<void()>                   onPatch;
     std::function<void()>                   onCreate;
 
-    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
         ++requests;
         if (!url.starts_with("https://mogsafe.test/"))
@@ -264,9 +269,9 @@ public:
             }
             return res;
         }
-        const auto path    = url.substr(std::string("https://mogsafe.test").size());
-        const bool isClose = path.ends_with("/close");
-        const auto it      = uploads.find(isClose ? path.substr(0, path.size() - 6) : path);
+        const auto path = url.substr(std::string("https://mogsafe.test").size());
+        const bool isClose{ path.ends_with("/close") };
+        const auto it = uploads.find(isClose ? path.substr(0, path.size() - 6) : path);
         if (it == uploads.end())
         {
             return HttpResponse{ .status = 404 };
@@ -332,7 +337,7 @@ public:
         {
             return HttpResponse{ .status = 409 };
         }
-        const bool complete = u.data.size() >= TRAILER.size() && std::string(u.data.end() - static_cast<std::ptrdiff_t>(TRAILER.size()), u.data.end()).starts_with("XCPF");
+        const bool complete{ u.data.size() >= TRAILER.size() && std::string(u.data.end() - static_cast<std::ptrdiff_t>(TRAILER.size()), u.data.end()).starts_with("XCPF") };
         if (!complete)
         {
             return HttpResponse{ .status = 409 };
@@ -351,7 +356,7 @@ public:
     {
     }
 
-    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
         return to_.request(method, url, headers, body);
     }
@@ -384,7 +389,7 @@ inline auto outPacket(const Event& e) -> xicap::WritePacket
     return { .timestamp = e.timestamp, .direction = e.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient, .provenance = e.provenance, .channel = e.channel, .opcode = e.opcode, .data = e.data };
 }
 
-inline auto noise(size_t n) -> std::string
+inline auto noise(const size_t n) -> std::string
 {
     std::mt19937 random(42);
     std::string  out(n, '\0');

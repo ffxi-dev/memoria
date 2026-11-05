@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/event_queue.h"
+#include "core/capture/event_queue.h"
 
 #include <cstdint>
 #include <string>
@@ -32,7 +32,7 @@ namespace lobby
 auto version() -> std::string; // from the same copy of the lobby context; empty before the first login
 
 // Fills who's content id, world id, and world name from FFXiMain's copy of the lobby context, which outlives the login, if the selected character is who's character id.
-auto character(Login& who) -> std::string; // why not, or empty
+auto character(capture::Login& who) -> std::string; // why not, or empty
 
 } // namespace lobby
 

@@ -90,17 +90,17 @@ auto Session::status() -> void
         say(importLine());
     }
     const auto link = linked();
-    if (!link || paused(host_.config))
+    if (!link || account::paused(host_.config))
     {
         say("Uploads: " + paint(Color::Yellow, link ? "paused: /memoria upload on" : "not linked: /memoria link"));
         return;
     }
     // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
-    const auto  files  = uploader_->status();
-    uint64_t    behind = 0;
-    uint64_t    kept   = 0; // in recordings Mogsafe cut off: on this PC only
-    int         cut    = 0;
-    const auto* failed = static_cast<const UploadStatus*>(nullptr);
+    const auto  files = uploader_->status();
+    uint64_t    behind{ 0 };
+    uint64_t    kept{ 0 }; // in recordings Mogsafe cut off: on this PC only
+    int         cut{ 0 };
+    const auto* failed = static_cast<const upload::UploadStatus*>(nullptr);
     for (const auto& u : files)
     {
         if (u.refused)
@@ -140,13 +140,13 @@ auto Session::status() -> void
     {
         say(paint(Color::Red, "Cannot save upload progress: " + error));
     }
-    for (const auto& u : files | std::views::filter(&UploadStatus::refused))
+    for (const auto& u : files | std::views::filter(&upload::UploadStatus::refused))
     {
         say(paint(Color::Red, std::format("Mogsafe refused {}: {}", u.name, u.error)));
     }
 }
 
-auto Session::command(const std::vector<std::string>& args, std::string_view line) -> void
+auto Session::command(const std::vector<std::string>& args, const std::string_view line) -> void
 {
     if (!recorder_)
     {
@@ -192,7 +192,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
             const auto capture = recorder_->status().capture;
             const auto id      = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
             say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
-                           : "Session in Vault: " + paint(Color::Cyan, captureLink(server_, id, *from, clock_.nowMs())));
+                           : "Session in Vault: " + paint(Color::Cyan, account::captureLink(server_, id, *from, clock_.nowMs())));
             return;
         }
         recorder_->sessionStop(clock_.nowMs());
@@ -240,7 +240,7 @@ auto Session::command(const std::vector<std::string>& args, std::string_view lin
     {
         say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
     }
-    else if (sub == "live" && paused(host_.config))
+    else if (sub == "live" && account::paused(host_.config))
     {
         say(paint(Color::Yellow, "Uploads are paused.") + " Run " + paint(Color::Cyan, "/memoria upload on") + " first.");
     }

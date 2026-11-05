@@ -47,7 +47,7 @@ auto unzstd(const std::vector<uint8_t>& in) -> std::string
 // <dir>/ashita holds captain's folders and Memoria's state; <dir>/config the install's token.
 struct Install
 {
-    fs::path                 dir = tempDir();
+    fs::path                 dir{ tempDir() };
     fs::path                 captures{ dir / "ashita" / "addons" / "captain" / "captures" };
     fs::path                 uploaded{ dir / "ashita" / "addons" / "captain" / "captures-uploaded" };
     fs::path                 state{ dir / "ashita" / "captures" / "memoria" };
@@ -86,7 +86,7 @@ struct Install
         return std::make_unique<Importer>(options(retry), std::make_unique<Forward>(server));
     }
 
-    auto saidAny(std::string_view text) -> bool
+    auto saidAny(const std::string_view text) -> bool
     {
         std::lock_guard lock(mutex);
         return std::ranges::any_of(said, [&](const auto& s)
@@ -587,7 +587,7 @@ public:
     std::atomic<bool>            waiting{ false };
     std::atomic<std::thread::id> thread;
 
-    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+    auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
     {
         if (method != method_)
         {

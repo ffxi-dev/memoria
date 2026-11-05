@@ -1,7 +1,7 @@
-#include "core/captain.h"
+#include "core/captain/captain.h"
 
+#include "core/account/link.h"
 #include "core/file.h"
-#include "core/link.h"
 #include "core/tus.h"
 
 #include <algorithm>
@@ -9,7 +9,7 @@
 #include <format>
 #include <fstream>
 
-namespace memoria
+namespace memoria::captain
 {
 namespace
 {
@@ -19,7 +19,7 @@ constexpr auto CRC_TABLE = []
     std::array<uint32_t, 256> table{};
     for (uint32_t n = 0; n < 256; ++n)
     {
-        uint32_t c = n;
+        uint32_t c{ n };
         for (int k = 0; k < 8; ++k)
         {
             c = c & 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
@@ -31,7 +31,7 @@ constexpr auto CRC_TABLE = []
 
 } // namespace
 
-auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet) -> std::vector<CaptainCapture>
+auto findCaptain(const std::filesystem::path& root, const std::chrono::seconds quiet) -> std::vector<CaptainCapture>
 {
     namespace fs = std::filesystem;
     std::vector<CaptainCapture> out;
@@ -46,8 +46,8 @@ auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet) 
         }
         it.disable_recursion_pending();
         const auto changed = fs::last_write_time(log, ec);
-        const bool growing = ec || now - changed < quiet;
-        const auto search  = it->path() / "SearchLog" / "search.log";
+        const bool growing{ ec || now - changed < quiet };
+        const auto search = it->path() / "SearchLog" / "search.log";
         out.push_back({
             .dir        = it->path(),
             .folder     = it->path().lexically_relative(root).generic_string(),
@@ -66,7 +66,7 @@ auto crc32File(const std::filesystem::path& path, const std::atomic<bool>& stop)
     std::ifstream     in(path, std::ios::binary);
     std::vector<char> buf(Tus::CHUNK_SIZE);
     Crc32             result;
-    uint32_t          crc = 0xFFFFFFFF;
+    uint32_t          crc{ 0xFFFFFFFF };
     while (in)
     {
         if (stop)
@@ -120,7 +120,7 @@ auto moveAside(const std::filesystem::path& root, const std::filesystem::path& u
 auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root) -> bool
 {
     std::error_code ec;
-    if (!loadLink(config / "token") || std::filesystem::exists(config / "import-reminded", ec))
+    if (!account::loadLink(config / "token") || std::filesystem::exists(config / "import-reminded", ec))
     {
         return false;
     }
@@ -132,4 +132,4 @@ auto remindImport(const std::filesystem::path& config, const std::filesystem::pa
            createNew(config / "import-reminded");
 }
 
-} // namespace memoria
+} // namespace memoria::captain

@@ -52,8 +52,8 @@ auto Plugin::GetFlags() const -> uint32_t
 auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t id) -> bool
 {
     UNREFERENCED_PARAMETER(id);
-    const std::filesystem::path install = core->GetInstallPath();
-    session_                            = std::make_unique<Session>(Host{
+    const std::filesystem::path install{ core->GetInstallPath() };
+    session_ = std::make_unique<Session>(Host{
         .config   = install / "config" / "memoria",
         .captures = install / "captures" / "memoria",
         .captain  = install / "addons" / "captain",
@@ -82,13 +82,13 @@ auto Plugin::Release() -> void
     session_.reset();
 }
 
-auto Plugin::HandleIncomingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
+auto Plugin::HandleIncomingPacket(const uint16_t id, const uint32_t size, const uint8_t* data, uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> bool
 {
     session_->incoming(id, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     return false;
 }
 
-auto Plugin::HandleOutgoingPacket(uint16_t id, uint32_t size, const uint8_t* data, uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> bool
+auto Plugin::HandleOutgoingPacket(const uint16_t id, const uint32_t size, const uint8_t* data, uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> bool
 {
     UNREFERENCED_PARAMETER(id);
     session_->outgoing(size, data, modified, sizeChunk, dataChunk, injected, blocked);
@@ -102,13 +102,13 @@ auto Plugin::Direct3DInitialize(IDirect3DDevice8* device) -> bool
     return true;
 }
 
-auto Plugin::Direct3DBeginScene(bool isRenderingBackBuffer) -> void
+auto Plugin::Direct3DBeginScene(const bool isRenderingBackBuffer) -> void
 {
     UNREFERENCED_PARAMETER(isRenderingBackBuffer);
     session_->frame();
 }
 
-auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> bool
+auto Plugin::HandleCommand(const int32_t mode, const char* command, const bool injected) -> bool
 {
     UNREFERENCED_PARAMETER(mode);
     UNREFERENCED_PARAMETER(injected);
@@ -124,18 +124,17 @@ auto Plugin::HandleCommand(int32_t mode, const char* command, bool injected) -> 
 
 } // namespace memoria
 
-extern "C" IPlugin* __stdcall expCreatePlugin(const char* args)
+extern "C" auto __stdcall expCreatePlugin(const char* /*args*/) -> IPlugin*
 {
-    UNREFERENCED_PARAMETER(args);
     return new memoria::Plugin();
 }
 
-extern "C" void __stdcall expDestroyPlugin(void* instance)
+extern "C" auto __stdcall expDestroyPlugin(void* instance) -> void
 {
     delete static_cast<memoria::Plugin*>(instance);
 }
 
-extern "C" double __stdcall expGetInterfaceVersion()
+extern "C" auto __stdcall expGetInterfaceVersion() -> double
 {
     return ASHITA_INTERFACE_VERSION;
 }

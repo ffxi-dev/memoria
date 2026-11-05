@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace memoria
+namespace memoria::captain
 {
 
 // A folder captain's PacketLogger wrote: manifest.txt and PacketLogger/full.log, and SearchLog/search.log when SearchLog ran.
@@ -41,4 +41,4 @@ auto moveAside(const std::filesystem::path& root, const std::filesystem::path& u
 // True for one caller only, ever, per install: while linked and a capture waits, the first to create config's import-reminded file wins.
 auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root) -> bool;
 
-} // namespace memoria
+} // namespace memoria::captain

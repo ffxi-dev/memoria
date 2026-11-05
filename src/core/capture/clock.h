@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <functional>
 
-namespace memoria
+namespace memoria::capture
 {
 
 // The wall clock read once, then a monotonic clock: a change to the PC's clock never moves packet timestamps.
@@ -23,4 +23,4 @@ private:
     uint64_t startSteadyMs_;
 };
 
-} // namespace memoria
+} // namespace memoria::capture

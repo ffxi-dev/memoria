@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/live.h"
+#include "core/live/live.h"
 #include "plugin/winhttp.h"
 
 #include <atomic>
@@ -22,7 +22,7 @@ class Live
 {
 public:
     // config holds the token and paused files: a pause or unlink in any client sharing the install ends the link.
-    Live(std::string server, std::filesystem::path config, std::string installToken, LiveFeed& feed, std::string hello, std::function<void(std::string)> post);
+    Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post);
     ~Live(); // joins: stop() first to end the link without waiting
 
     Live(const Live&)                    = delete;
@@ -53,7 +53,7 @@ private:
     std::string                      server_;
     std::filesystem::path            config_;
     std::string                      installToken_;
-    LiveFeed&                        feed_;
+    live::Feed&                      feed_;
     uint64_t                         owner_; // the id the feed gave this link
     std::function<void(std::string)> post_;
 

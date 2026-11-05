@@ -1,11 +1,11 @@
 #pragma once
 
-#include "core/chat.h"
-#include "core/clock.h"
-#include "core/importer.h"
-#include "core/link.h"
-#include "core/recorder.h"
-#include "core/uploader.h"
+#include "core/account/chat.h"
+#include "core/account/link.h"
+#include "core/captain/importer.h"
+#include "core/capture/clock.h"
+#include "core/capture/recorder.h"
+#include "core/upload/uploader.h"
 #include "plugin/live.h"
 #include "plugin/text.h"
 
@@ -85,7 +85,7 @@ private:
     auto startUploads() -> void;
     auto link() -> void;
     auto unlink(const std::string& why) -> void;
-    auto linked() const -> std::optional<Linked>; // read each time: clients sharing the install share its token
+    auto linked() const -> std::optional<account::Linked>; // read each time: clients sharing the install share its token
     auto greet() -> void;
     auto remind() -> void;
     auto offerImport() -> void;
@@ -96,17 +96,17 @@ private:
     auto refreshChat() -> void; // asks Mogsafe whether the linked account saves chat, off the game thread
 
     Host                               host_;
-    std::string                        server_ = "https://mogsafe.sruon.dev";
+    std::string                        server_{ "https://mogsafe.sruon.dev" };
     std::mutex                         inboxMutex_;
     std::vector<std::string>           inbox_;
-    std::optional<Linked>              arrived_; // from the link thread
-    Clock                              clock_;
-    std::unique_ptr<Recorder>          recorder_;
-    std::unique_ptr<Uploader>          uploader_;
+    std::optional<account::Linked>     arrived_; // from the link thread
+    capture::Clock                     clock_;
+    std::unique_ptr<capture::Recorder> recorder_;
+    std::unique_ptr<upload::Uploader>  uploader_;
     std::unique_ptr<Live>              live_; // after recorder_, whose feed it reads
     std::vector<std::unique_ptr<Live>> closing_;
     HANDLE                             uploadMutex_{ nullptr };
-    std::unique_ptr<Importer>          importer_;
+    std::unique_ptr<captain::Importer> importer_;
     std::atomic<bool>                  reminding_{ false };
     std::string                        startError_;
     std::string                        searchError_;

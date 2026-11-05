@@ -13,7 +13,7 @@ constexpr size_t LOGIN_NAME_SIZE = 16;
 
 } // namespace
 
-auto character(const uint8_t* login, uint32_t size) -> xicap::Character
+auto character(const uint8_t* login, const uint32_t size) -> xicap::Character
 {
     xicap::Character c;
     if (size >= LOGIN_NAME + LOGIN_NAME_SIZE)
@@ -25,7 +25,7 @@ auto character(const uint8_t* login, uint32_t size) -> xicap::Character
     return c;
 }
 
-auto leavesGame(uint8_t logoutState) -> bool
+auto leavesGame(const uint8_t logoutState) -> bool
 {
     constexpr uint8_t ZONECHANGE = 2;
     constexpr uint8_t MYROOM     = 3;

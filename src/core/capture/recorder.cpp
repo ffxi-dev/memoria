@@ -1,4 +1,4 @@
-#include "core/recorder.h"
+#include "core/capture/recorder.h"
 
 #include "core/file.h"
 #include "core/tus.h"
@@ -15,7 +15,7 @@
 #include <tuple>
 #include <utility>
 
-namespace memoria
+namespace memoria::capture
 {
 namespace
 {
@@ -28,7 +28,7 @@ auto stateFile(const std::filesystem::path& dir, const xicap::Character& charact
 
 constexpr auto REOPEN_EVERY = std::chrono::minutes(1);
 
-auto parseHex(std::string_view text) -> std::optional<xicap::CaptureId>
+auto parseHex(const std::string_view text) -> std::optional<xicap::CaptureId>
 {
     xicap::CaptureId id{};
     if (text.size() != id.size() * 2)
@@ -60,11 +60,11 @@ auto randomCaptureId() -> xicap::CaptureId
 // A login that could not read the content id and world (0) matches on the character id and name alone.
 auto sameCharacter(const Login& a, const Login& b) -> bool
 {
-    const bool known = a.character.contentId != 0 && b.character.contentId != 0;
+    const bool known{ a.character.contentId != 0 && b.character.contentId != 0 };
     return a.character.characterId == b.character.characterId && a.character.name == b.character.name && (!known || (a.character.contentId == b.character.contentId && a.worldId == b.worldId));
 }
 
-auto fileName(uint64_t timestamp, const xicap::Character& character, const xicap::CaptureId& id) -> std::string
+auto fileName(const uint64_t timestamp, const xicap::Character& character, const xicap::CaptureId& id) -> std::string
 {
     const std::chrono::sys_time<std::chrono::milliseconds> when{ std::chrono::milliseconds{ timestamp } };
 
@@ -95,34 +95,34 @@ Recorder::~Recorder()
 
 auto Recorder::packet(Event event) -> void
 {
-    event.kind = Event::Kind::Packet;
+    event.kind = EventKind::Packet;
     queue_.push(std::move(event));
 }
 
-auto Recorder::login(uint64_t timestamp, Login who) -> void
+auto Recorder::login(const uint64_t timestamp, Login who) -> void
 {
-    queue_.push({ .kind = Event::Kind::Login, .timestamp = timestamp, .login = std::move(who) });
+    queue_.push({ .kind = EventKind::Login, .timestamp = timestamp, .login = std::move(who) });
 }
 
-auto Recorder::logout(uint64_t timestamp) -> void
+auto Recorder::logout(const uint64_t timestamp) -> void
 {
-    queue_.push({ .kind = Event::Kind::Logout, .timestamp = timestamp });
+    queue_.push({ .kind = EventKind::Logout, .timestamp = timestamp });
 }
 
-auto Recorder::note(uint64_t timestamp, std::string text) -> void
+auto Recorder::note(const uint64_t timestamp, std::string text) -> void
 {
-    queue_.push({ .kind = Event::Kind::Note, .timestamp = timestamp, .text = std::move(text) });
+    queue_.push({ .kind = EventKind::Note, .timestamp = timestamp, .text = std::move(text) });
 }
 
-auto Recorder::sessionStart(uint64_t timestamp, const std::filesystem::path& path) -> void
+auto Recorder::sessionStart(const uint64_t timestamp, const std::filesystem::path& path) -> void
 {
     const auto utf8 = path.u8string();
-    queue_.push({ .kind = Event::Kind::SessionStart, .timestamp = timestamp, .text = { utf8.begin(), utf8.end() } });
+    queue_.push({ .kind = EventKind::SessionStart, .timestamp = timestamp, .text = { utf8.begin(), utf8.end() } });
 }
 
-auto Recorder::sessionStop(uint64_t timestamp) -> void
+auto Recorder::sessionStop(const uint64_t timestamp) -> void
 {
-    queue_.push({ .kind = Event::Kind::SessionStop, .timestamp = timestamp });
+    queue_.push({ .kind = EventKind::SessionStop, .timestamp = timestamp });
 }
 
 auto Recorder::status() const -> RecorderStatus
@@ -150,7 +150,7 @@ auto Recorder::stop() -> void
 
 // A session is optional: its failure ends it and leaves the main capture recording.
 template <typename Op>
-auto Recorder::onSession(Op op) -> void
+auto Recorder::onSession(const Op op) -> void
 {
     if (!session_)
     {
@@ -171,7 +171,7 @@ auto Recorder::run() -> void
     std::vector<Event> events;
     while (true)
     {
-        bool stopping = false;
+        bool stopping{ false };
         {
             std::unique_lock lock(wakeMutex_);
             stopping = wake_.wait_for(lock, options_.drainEvery, [this]
@@ -191,7 +191,7 @@ auto Recorder::run() -> void
                 std::lock_guard lock(statusMutex_);
                 status_.dropped += dropped;
             }
-            handle({ .kind = Event::Kind::Note, .text = std::format("dropped {} packets: the writer fell behind", dropped) });
+            handle({ .kind = EventKind::Note, .text = std::format("dropped {} packets: the writer fell behind", dropped) });
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -234,7 +234,7 @@ auto Recorder::handle(const Event& event) -> void
     {
         switch (event.kind)
         {
-            case Event::Kind::Login:
+            case EventKind::Login:
                 if (writer_ && login_ && sameCharacter(*login_, *event.login))
                 {
                     login_ = event.login; // the header keeps what it had; later logins compare against what is now known
@@ -246,19 +246,19 @@ auto Recorder::handle(const Event& event) -> void
                     open(event.timestamp, *event.login);
                 }
                 break;
-            case Event::Kind::Logout:
+            case EventKind::Logout:
                 mark(xicap::MarkerKind::Logout);
                 break;
-            case Event::Kind::Note:
+            case EventKind::Note:
                 mark(xicap::MarkerKind::Note, event.text);
                 break;
-            case Event::Kind::SessionStart:
+            case EventKind::SessionStart:
                 openSession(std::u8string(event.text.begin(), event.text.end()));
                 break;
-            case Event::Kind::SessionStop:
+            case EventKind::SessionStop:
                 closeSession();
                 break;
-            case Event::Kind::Packet:
+            case EventKind::Packet:
                 if (!writer_ && login_ && std::chrono::steady_clock::now() >= reopenAt_)
                 {
                     auto again       = *login_; // the last capture broke on a write error
@@ -296,7 +296,7 @@ auto Recorder::metadata(const Login& who, const xicap::CaptureId& previous) cons
 }
 
 // Called with no capture open. A session open from before goes on.
-auto Recorder::open(uint64_t timestamp, const Login& who) -> void
+auto Recorder::open(const uint64_t timestamp, const Login& who) -> void
 {
     if (previous_ == xicap::CaptureId{})
     {
@@ -355,7 +355,7 @@ auto Recorder::write(const Event& event) -> void
     status_.lastMs = event.timestamp;
 }
 
-auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
+auto Recorder::mark(const xicap::MarkerKind kind, const std::string_view text) -> void
 {
     onSession([&](xicap::Writer& session)
               {
@@ -370,7 +370,7 @@ auto Recorder::mark(xicap::MarkerKind kind, std::string_view text) -> void
 auto Recorder::openSession(const std::filesystem::path& path) -> void
 {
     closeSession();
-    bool created = false;
+    bool created{ false };
     try
     {
         if (!writer_)
@@ -474,7 +474,7 @@ auto Recorder::rollover() -> void
 // Writes the trailer and drops the writer. A trailer that failed leaves the capture cut off, so the state stays open and the next capture names it.
 auto Recorder::finish() -> void
 {
-    bool closed = true;
+    bool closed{ true };
     try
     {
         writer_->close();
@@ -488,8 +488,8 @@ auto Recorder::finish() -> void
     writer_.reset();
 }
 
-// Replaced whole: a crash mid-write leaves the old state, never an empty one.
-auto Recorder::saveState(bool open) -> void
+// Replaced whole, so a crash mid-write leaves the old state.
+auto Recorder::saveState(const bool open) -> void
 {
     if (login_)
     {
@@ -497,4 +497,4 @@ auto Recorder::saveState(bool open) -> void
     }
 }
 
-} // namespace memoria
+} // namespace memoria::capture
