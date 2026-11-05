@@ -58,10 +58,6 @@ Live::Live(std::string server, std::filesystem::path config, std::string install
 , owner_(feed.claim())
 , post_(std::move(post))
 , hello_(std::move(hello))
-, calls_([](void* handle)
-         {
-             WinHttpCloseHandle(handle);
-         })
 , thread_([this](const std::stop_token& stop)
           {
               run(stop);
@@ -77,21 +73,12 @@ Live::~Live()
 auto Live::stop() -> void
 {
     thread_.request_stop();
-    http_.cancel();
 }
 
 auto Live::abort() -> void
 {
-    calls_.abort();
-    stop();
-}
-
-auto Live::letGo(InternetHandle& handle) -> void
-{
-    if (handle && calls_.closed(handle.get()))
-    {
-        std::ignore = handle.release();
-    }
+    aborted_ = true;
+    thread_.request_stop();
 }
 
 auto Live::upgrade(void* session, const std::string& url, const std::string& headers) -> Socket
@@ -103,21 +90,13 @@ auto Live::upgrade(void* session, const std::string& url, const std::string& hea
         s.error = open.error();
         return s;
     }
-    s.connection        = std::move(open->connection);
-    auto&      req      = open->request;
-    const auto wheaders = wide(headers);
-    DWORD      error{ 0 };
-    const bool upgraded{ calls_.run(req.get(), [&]
-                                    {
-                                        const bool ok{ WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) &&
-                                                       WinHttpSendRequest(req.get(), wheaders.c_str(), static_cast<DWORD>(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(req.get(), nullptr) };
-                                        error = GetLastError();
-                                        return ok;
-                                    }) };
-    letGo(req);
-    if (!upgraded || !req)
+    s.connection         = std::move(open->connection);
+    const auto& req      = open->request;
+    const auto  wheaders = wide(headers);
+    if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) || !WinHttpSendRequest(req.get(), wheaders.c_str(), static_cast<DWORD>(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(req.get(), nullptr))
     {
-        s.error = std::format("WinHTTP error {}", error);
+        s.error = std::format("WinHTTP error {}", GetLastError());
         return s;
     }
     DWORD status{ 0 };
@@ -129,38 +108,20 @@ auto Live::upgrade(void* session, const std::string& url, const std::string& hea
         s.error = std::format("Mogsafe answered {}", status);
         return s;
     }
-    // A receive waits as long as nobody joins or leaves; Mogsafe's pings and WinHTTP's keepalive hold the line, and stop() closes it.
+    // A receive waits as long as nobody joins or leaves: Mogsafe sends nothing else, so a short timeout would drop an
+    // idle link. The live thread ends the wait with WinHttpWebSocketClose, which WinHTTP lets cancel a pending receive.
     DWORD forever{ 0 };
     WinHttpSetOption(req.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &forever, sizeof(forever));
-    if (!calls_.run(req.get(), [&]
-                    {
-                        s.ws.reset(WinHttpWebSocketCompleteUpgrade(req.get(), 0));
-                        return static_cast<bool>(s.ws);
-                    }))
+    s.ws.reset(WinHttpWebSocketCompleteUpgrade(req.get(), 0));
+    if (!s.ws)
     {
         s.error = std::format("WinHTTP error {}", GetLastError());
         return s;
     }
     WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &forever, sizeof(forever));
+    DWORD closeSeconds{ static_cast<DWORD>(std::chrono::duration_cast<std::chrono::seconds>(TIMEOUT).count()) };
+    WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT, &closeSeconds, sizeof(closeSeconds));
     return s;
-}
-
-// Connects only to end the link, for a player who turned live off while the socket was down.
-auto Live::sendOff(void* session, const std::string& url, const std::string& headers) -> void
-{
-    WinHttpSetTimeouts(session, 3'000, 3'000, 3'000, 3'000);
-    auto s = upgrade(session, url, headers);
-    if (!s.ws)
-    {
-        return;
-    }
-    calls_.run(s.ws.get(), [&]
-               {
-                   DWORD wait{ 3'000 };
-                   WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &wait, sizeof(wait));
-                   return WinHttpWebSocketClose(s.ws.get(), WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, const_cast<char*>(OFF.data()), static_cast<DWORD>(OFF.size())) == NO_ERROR;
-               });
-    letGo(s.ws);
 }
 
 auto Live::reopen() -> void
@@ -227,7 +188,8 @@ auto Live::run(const std::stop_token& stop) -> void
     const auto session = openSession();
     if (session)
     {
-        WinHttpSetTimeouts(session.get(), 10'000, 10'000, 10'000, 10'000);
+        const auto ms = static_cast<int>(TIMEOUT.count());
+        WinHttpSetTimeouts(session.get(), ms, ms, ms, ms);
     }
     const auto url = server_ + "/v1/live/send";
     // The link in a header, not the URL, which proxies and Cloudflare may log.
@@ -279,10 +241,6 @@ auto Live::run(const std::stop_token& stop) -> void
         wait(stop, backoff);
         backoff = (std::min)(backoff * 2, std::chrono::milliseconds(BACKOFF_MAX));
     }
-    if (stop.stop_requested() && !offSent_ && !calls_.aborted())
-    {
-        sendOff(session.get(), url, headers);
-    }
     finished_ = true;
 }
 
@@ -298,10 +256,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     }
     const auto send = [&](const WINHTTP_WEB_SOCKET_BUFFER_TYPE type, const std::span<const uint8_t> data)
     {
-        return calls_.run(ws.get(), [&]
-                          {
-                              return sendBytes(ws.get(), type, data);
-                          });
+        return sendBytes(ws.get(), type, data);
     };
     const auto text = [&](const std::string_view message)
     {
@@ -318,10 +273,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
                                     {
                                         DWORD                          read{ 0 };
                                         WINHTTP_WEB_SOCKET_BUFFER_TYPE type{};
-                                        if (!calls_.run(h, [&]
-                                                        {
-                                                            return WinHttpWebSocketReceive(h, buffer.data(), static_cast<DWORD>(buffer.size()), &read, &type) == NO_ERROR;
-                                                        }))
+                                        if (WinHttpWebSocketReceive(h, buffer.data(), static_cast<DWORD>(buffer.size()), &read, &type) != NO_ERROR)
                                         {
                                             break;
                                         }
@@ -404,25 +356,16 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     }
     feed_.open(owner_, false);
     viewers_ = 0;
-    // An abort skips the off handshake: unload does not wait for Mogsafe, and the link ends after its 12 hours.
-    if (stop.stop_requested() && receiver.joinable() && !calls_.aborted())
-    {
-        offSent_ = calls_.run(ws.get(), [&]
-                              {
-                                  return WinHttpWebSocketShutdown(ws.get(), WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, const_cast<char*>(OFF.data()), static_cast<DWORD>(OFF.size())) == NO_ERROR;
-                              });
-        std::unique_lock lock(mutex_);
-        wake_.wait_for(lock, 3s, [this]
-                       {
-                           return closed_;
-                       });
-    }
-    letGo(ws);
-    ws.reset(); // ends a receive still waiting
     if (receiver.joinable())
     {
+        // The close ends the receive on the other thread, which then exits, before the handle closes. Off ends the
+        // link; at unload, going away leaves it to expire, and the game waits for no handshake beyond the close timeout.
+        const bool off{ stop.stop_requested() && !aborted_ };
+        const auto status = off ? WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS : WINHTTP_WEB_SOCKET_ENDPOINT_TERMINATED_CLOSE_STATUS;
+        WinHttpWebSocketClose(ws.get(), static_cast<USHORT>(status), off ? const_cast<char*>(OFF.data()) : nullptr, off ? static_cast<DWORD>(OFF.size()) : 0);
         receiver.join();
     }
+    ws.reset();
     const std::scoped_lock lock(mutex_);
     closed_ = false;
     return closeCode_;

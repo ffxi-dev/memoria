@@ -85,8 +85,6 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/session.h
         src/plugin/text.cpp
         src/plugin/text.h
-        src/plugin/interruptible.cpp
-        src/plugin/interruptible.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
         src/plugin/worker.cpp
@@ -140,9 +138,7 @@ if(MEMORIA_BUILD_TESTS)
         tests/recorder_tests.cpp
         tests/upload_tests.cpp
         tests/worker_tests.cpp
-        # The plugin's two pieces that need only the standard library.
-        src/plugin/interruptible.cpp
-        src/plugin/worker.cpp
+        src/plugin/worker.cpp # the one piece of the plugin that needs only the standard library
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     if(WIN32)

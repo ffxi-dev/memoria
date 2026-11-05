@@ -143,6 +143,16 @@ WinHttp::WinHttp()
     }
 }
 
+WinHttp::WinHttp(const std::chrono::milliseconds timeout)
+: session_(openSession())
+{
+    if (session_)
+    {
+        const auto ms = static_cast<int>(timeout.count());
+        WinHttpSetTimeouts(session_.get(), ms, ms, ms, ms);
+    }
+}
+
 auto WinHttp::request(const std::string& method, const std::string& url, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
 {
     if (!session_)

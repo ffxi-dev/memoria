@@ -2,6 +2,7 @@
 
 #include "core/http.h"
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string_view>
@@ -34,6 +35,7 @@ class WinHttp final : public Http
 {
 public:
     WinHttp();
+    explicit WinHttp(std::chrono::milliseconds timeout); // for resolving, connecting, sending, and the answer each
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override;
     auto cancel() -> void override;
