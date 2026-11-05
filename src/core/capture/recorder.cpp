@@ -379,7 +379,7 @@ auto Recorder::mark(const xicap::MarkerKind kind, const std::string_view text) -
 auto Recorder::openSession(const std::filesystem::path& path) -> void
 {
     closeSession();
-    if (!writer_)
+    if (!writer_ || !login_)
     {
         sessionFailed("no capture is open, so no session either");
         return;

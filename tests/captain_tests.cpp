@@ -141,7 +141,7 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
 TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
 {
     const Install    in;
-    std::stop_source stop;
+    std::stop_source stop; // NOLINT(misc-const-correctness): request_stop is const in libstdc++ only
     std::string      log;
     for (int i = 0; i < 1000; ++i)
     {
