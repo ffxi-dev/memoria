@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: git ls-files -z '*.cpp' '*.h' | xargs -0 -r pipx run --spec clang-format==23.1.3 clang-format --dry-run --Werror
+      - run: git ls-files -z '*.cpp' '*.h' | xargs -0 -r pipx run --spec clang-format==23.1.5 clang-format --dry-run --Werror
 
   core:
     strategy:
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.15"
       - run: pip install clang-tidy==22.1.8
       - run: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DMEMORIA_BUILD_PLUGIN=OFF -DMEMORIA_BUILD_TESTS=ON
       - run: git ls-files 'src/core/*.cpp' 'tests/*.cpp' | xargs -P 4 -n 4 clang-tidy -p build --quiet
