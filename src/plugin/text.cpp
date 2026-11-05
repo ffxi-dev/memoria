@@ -5,7 +5,7 @@
 namespace memoria::plugin
 {
 
-auto count(const uint64_t n) -> std::string
+auto countText(const uint64_t n) -> std::string
 {
     auto text = std::to_string(n);
     for (auto at = static_cast<std::ptrdiff_t>(text.size()) - 3; at > 0; at -= 3)
@@ -15,7 +15,7 @@ auto count(const uint64_t n) -> std::string
     return text;
 }
 
-auto duration(const uint64_t seconds) -> std::string
+auto durationText(const uint64_t seconds) -> std::string
 {
     if (seconds < 60)
     {

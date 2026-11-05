@@ -40,7 +40,7 @@ auto Session::importLine() const -> std::string
     return std::format("Import: {}/{} {}, {}/{} sent", p.index, p.count, p.character, sizeText(p.sent), sizeText(p.size));
 }
 
-auto Session::status() -> void
+auto Session::sayStatus() -> void
 {
     say(paint(Color::Grey, CAPTURE_AGENT));
     const auto s = recorder_->status();
@@ -52,17 +52,14 @@ auto Session::status() -> void
     {
         std::error_code ec;
         const auto      onDisk  = std::filesystem::file_size(s.capture, ec);
-        const auto      raw     = s.bytes;
         const auto      seconds = (std::max)(uint64_t{ 1 }, (s.lastMs - s.firstMs) / 1000);
-        const auto&     name    = character_.name;
-        const auto&     world   = character_.world;
-        say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), name, world.empty() ? "" : " on " + world, duration(seconds), count(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), sizeText(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(raw) / static_cast<double>(onDisk)) : ""));
+        say(std::format("{} {}{} for {} · {} packets ({:.1f}/s) · {}{}", paint(Color::Green, "Recording"), character_.name, character_.world.empty() ? "" : " on " + character_.world, durationText(seconds), countText(s.packets), static_cast<double>(s.packets) / static_cast<double>(seconds), sizeText(onDisk), onDisk > 0 ? std::format(" ({:.1f}x smaller)", static_cast<double>(s.bytes) / static_cast<double>(onDisk)) : ""));
     }
     const auto version = client::lobby::version();
     auto       client  = "Client " + (version.empty() ? paint(Color::Grey, "unknown before the first login") : version);
     if (searchError_.empty())
     {
-        client += std::format(" · {} search packets", count(s.search));
+        client += std::format(" · {} search packets", countText(s.search));
     }
     const auto chatText = [](const xicap::Chat chat)
     {
@@ -76,7 +73,7 @@ auto Session::status() -> void
     }
     if (s.dropped > 0)
     {
-        client += " · " + paint(Color::Yellow, std::format("{} packets dropped", count(s.dropped)));
+        client += " · " + paint(Color::Yellow, std::format("{} packets dropped", countText(s.dropped)));
     }
     say(client);
     if (!s.session.empty())
@@ -114,12 +111,12 @@ auto Session::status() -> void
         return;
     }
     // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
-    const auto  files = uploader_->status();
-    uint64_t    behind{ 0 };
-    uint64_t    kept{ 0 }; // in recordings Mogsafe cut off: on this PC only
-    int         cut{ 0 };
-    const auto* failed = static_cast<const upload::UploadStatus*>(nullptr);
-    int         foreign{ 0 };
+    const auto                  files = uploader_->status();
+    uint64_t                    behind{ 0 };
+    uint64_t                    kept{ 0 }; // in recordings Mogsafe cut off: on this PC only
+    int                         cut{ 0 };
+    const upload::UploadStatus* failed{ nullptr };
+    int                         foreign{ 0 };
     for (const auto& u : files)
     {
         if (u.refused)
@@ -182,176 +179,201 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
         return;
     }
     const auto sub = args.size() > 1 ? args[1] : "status";
+    const auto arg = args.size() > 2 ? args[2] : "";
     if (sub == "status")
     {
-        status();
+        sayStatus();
     }
-    else if (sub == "note" && args.size() > 2)
+    else if (sub == "note" && !arg.empty())
     {
         recorder_->note(clock_.nowMs(), utf8FromShiftJis(args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>()));
         say("noted");
     }
-    else if (sub == "session" && args.size() > 2 && args[2] == "start")
+    else if (sub == "session" && arg == "start")
     {
-        const auto path = restAfter(line, "start");
-        if (path.empty())
-        {
-            say("/memoria session start <file.xicap>");
-            return;
-        }
-        // Linked, Vault keeps the session as a range of the recording, from captain's notes: no second file. Unlinked, the file is the only copy.
-        if (linked())
-        {
-            sessionInVault_ = VaultSession{ .fromMs = clock_.nowMs(), .capture = recorder_->status().capture };
-            say("session recorded in Vault, as part of this recording");
-            return;
-        }
-        try
-        {
-            const auto utf8 = utf8FromShiftJis(std::string(path)); // the chat line is Shift-JIS
-            recorder_->sessionStart(clock_.nowMs(), std::filesystem::path(std::u8string(utf8.begin(), utf8.end())));
-        }
-        catch (const std::exception& error)
-        {
-            say(paint(Color::Red, std::format("No session: {}", error.what())));
-            return;
-        }
-        say(std::format("session to {}", path));
+        startSession(restAfter(line, "start"));
     }
-    else if (sub == "session" && args.size() > 2 && args[2] == "stop")
+    else if (sub == "session" && arg == "stop")
     {
-        if (const auto from = std::exchange(sessionInVault_, std::nullopt))
-        {
-            const auto now     = clock_.nowMs();
-            const auto current = recorder_->status();
-            const auto first   = from->capture.empty() ? current.capture : from->capture;
-            const auto sayLink = [&](const std::filesystem::path& capture, const uint64_t fromMs)
-            {
-                const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
-                say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
-                               : "Session in Vault: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
-            };
-            sayLink(first, from->fromMs);
-            if (!current.capture.empty() && current.capture != first)
-            {
-                say("It went on in a new recording:");
-                sayLink(current.capture, current.firstMs);
-            }
-            return;
-        }
-        recorder_->sessionStop(clock_.nowMs());
-        say("session closed");
+        stopSession();
     }
     else if (sub == "import")
     {
-        if (importer_)
-        {
-            say(importLine());
-        }
-        else if (!linked())
-        {
-            say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
-        }
-        else
-        {
-            std::ignore = markImportReminded(host_.config);
-            startImport(true);
-        }
+        importCaptain();
     }
     else if (sub == "link")
     {
-        if (!privacyShown_)
+        if (!std::exchange(privacyShown_, true))
         {
-            privacyShown_ = true;
             say("The link page asks you to accept Vault's privacy policy: " + paint(Color::Cyan, server_ + "/privacy"));
         }
         say(paint(Color::Grey, "Asking Vault for a link code..."));
         link();
     }
-    else if (sub == "live" && args.size() > 2 && args[2] == "off")
+    else if (sub == "live" && arg == "off")
     {
-        if (live_)
-        {
-            stopLive();
-            say(paint(Color::Yellow, "Live off.") + " The link has ended.");
-        }
-        else
-        {
-            say("Not live.");
-        }
+        say(live_ ? paint(Color::Yellow, "Live off.") + " The link has ended." : "Not live.");
+        stopLive();
     }
-    else if (const auto link = linked(); sub == "live" && !link)
+    else if (sub == "live")
     {
-        say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
-    }
-    else if (sub == "live" && paused(host_.config))
-    {
-        say(paint(Color::Yellow, "Uploads are paused.") + " Run " + paint(Color::Cyan, "/memoria upload on") + " first.");
-    }
-    else if (sub == "live" && live_)
-    {
-        live_->reopen();
-        say("Opening the live link again.");
-    }
-    else if (sub == "live" && link)
-    {
-        live_ = std::make_unique<Live>(LiveOptions{
-                                           .server       = server_,
-                                           .config       = host_.config,
-                                           .installToken = link->token,
-                                           .hello        = hello(),
-                                           .post         = [this](std::string text)
-                                           {
-                                               post(std::move(text));
-                                           },
-                                           .open = [this](std::string url)
-                                           {
-                                               worker_.post([url = std::move(url)](const std::stop_token&)
-                                                            {
-                                                                browse(url);
-                                                            });
-                                           },
-                                       },
-                                       recorder_->live());
-        say(paint(Color::Grey, "Asking Vault for a live link..."));
+        goLive();
     }
     else if (sub == "unlink")
     {
-        const bool linking = cancelLink();
-        if (!linked())
-        {
-            say(linking ? "Linking stopped." : "Not linked.");
-            return;
-        }
-        if (const auto error = unlink(host_.config))
-        {
-            say(paint(Color::Red, "Still linked: " + *error));
-            return;
-        }
-        unlinked("Unlinked");
+        unlinkInstall();
     }
-    else if (sub == "upload" && args.size() > 2 && (args[2] == "off" || args[2] == "on"))
+    else if (sub == "upload" && (arg == "off" || arg == "on"))
     {
-        const bool off{ args[2] == "off" };
-        if (const auto error = setPaused(host_.config, off))
-        {
-            say(paint(Color::Red, std::format("Uploads still {}: {}", off ? "on" : "paused", *error)));
-            return;
-        }
-        if (off)
-        {
-            stopLive();
-            say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
-        }
-        else
-        {
-            say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
-        }
+        setUploads(arg == "on");
     }
     else
     {
         say("/memoria status | link | unlink | live [off] | upload on|off | import | note <text> | session start <file.xicap> | session stop");
     }
+}
+
+// Linked, Vault keeps the session as a range of the recording, from captain's notes: no second file. Unlinked, the file is
+// the only copy.
+auto Session::startSession(const std::string_view path) -> void
+{
+    if (path.empty())
+    {
+        say("/memoria session start <file.xicap>");
+        return;
+    }
+    if (linked())
+    {
+        sessionInVault_ = VaultSession{ .fromMs = clock_.nowMs(), .capture = recorder_->status().capture };
+        say("session recorded in Vault, as part of this recording");
+        return;
+    }
+    try
+    {
+        const auto utf8 = utf8FromShiftJis(std::string(path)); // the chat line is Shift-JIS
+        recorder_->sessionStart(clock_.nowMs(), std::filesystem::path(std::u8string(utf8.begin(), utf8.end())));
+    }
+    catch (const std::exception& error)
+    {
+        say(paint(Color::Red, std::format("No session: {}", error.what())));
+        return;
+    }
+    say(std::format("session to {}", path));
+}
+
+auto Session::stopSession() -> void
+{
+    const auto from = std::exchange(sessionInVault_, std::nullopt);
+    if (!from)
+    {
+        recorder_->sessionStop(clock_.nowMs());
+        say("session closed");
+        return;
+    }
+    const auto now     = clock_.nowMs();
+    const auto current = recorder_->status();
+    const auto first   = from->capture.empty() ? current.capture : from->capture;
+    const auto sayLink = [&](const std::filesystem::path& capture, const uint64_t fromMs)
+    {
+        const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
+        say(id.empty() ? "Session in Vault once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
+                       : "Session in Vault: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
+    };
+    sayLink(first, from->fromMs);
+    if (!current.capture.empty() && current.capture != first)
+    {
+        say("It went on in a new recording:");
+        sayLink(current.capture, current.firstMs);
+    }
+}
+
+auto Session::importCaptain() -> void
+{
+    if (importer_)
+    {
+        say(importLine());
+    }
+    else if (!linked())
+    {
+        say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
+    }
+    else
+    {
+        std::ignore = markImportReminded(host_.config);
+        startImport(true);
+    }
+}
+
+auto Session::goLive() -> void
+{
+    const auto link = linked();
+    if (!link)
+    {
+        say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
+        return;
+    }
+    if (paused(host_.config))
+    {
+        say(paint(Color::Yellow, "Uploads are paused.") + " Run " + paint(Color::Cyan, "/memoria upload on") + " first.");
+        return;
+    }
+    if (live_)
+    {
+        live_->reopen();
+        say("Opening the live link again.");
+        return;
+    }
+    live_ = std::make_unique<Live>(LiveOptions{
+                                       .server       = server_,
+                                       .config       = host_.config,
+                                       .installToken = link->token,
+                                       .hello        = hello(),
+                                       .post         = [this](std::string text)
+                                       {
+                                           post(std::move(text));
+                                       },
+                                       .open = [this](std::string url)
+                                       {
+                                           worker_.post([url = std::move(url)](const std::stop_token&)
+                                                        {
+                                                            browse(url);
+                                                        });
+                                       },
+                                   },
+                                   recorder_->live());
+    say(paint(Color::Grey, "Asking Vault for a live link..."));
+}
+
+auto Session::unlinkInstall() -> void
+{
+    const bool linking = cancelLink();
+    if (!linked())
+    {
+        say(linking ? "Linking stopped." : "Not linked.");
+        return;
+    }
+    if (const auto error = unlink(host_.config))
+    {
+        say(paint(Color::Red, "Still linked: " + *error));
+        return;
+    }
+    unlinked("Unlinked");
+}
+
+auto Session::setUploads(const bool on) -> void
+{
+    if (const auto error = setPaused(host_.config, !on))
+    {
+        say(paint(Color::Red, std::format("Uploads still {}: {}", on ? "paused" : "on", *error)));
+        return;
+    }
+    if (on)
+    {
+        say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
+        return;
+    }
+    stopLive();
+    say(paint(Color::Yellow, "Uploads paused.") + " " + paint(Color::Cyan, "/memoria upload on") + " resumes them.");
 }
 
 } // namespace memoria::plugin

@@ -90,21 +90,17 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
         return;
     }
     refreshChat();
-    instance_    = this;
-    searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
-                                           {
-                                               instance_->recordSearch(clientToServer, data, size);
-                                           });
+    instance_       = this;
+    const auto sink = [](bool clientToServer, const uint8_t* data, uint32_t size)
+    {
+        instance_->recordSearch(clientToServer, data, size);
+    };
+    searchError_ = client::search::install(sink).value_or("");
 
     // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
-        capture::Login login{ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() };
-        characterError_ = client::lobby::character(login);
-        character_      = login.character;
-        loggedIn_       = true;
-        loggedInAs_     = login.character.characterId;
-        recorder_->login(clock_.nowMs(), std::move(login));
+        enter({ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() });
     }
     host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, host_.captures.string()));
 }
@@ -116,7 +112,6 @@ Session::~Session()
     importer_.reset();
     if (live_)
     {
-        live_->abort();
         closing_.push_back(std::move(live_));
     }
     for (const auto& live : closing_)
@@ -162,13 +157,9 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         capture::Login who{ .character = capture::packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
-            characterError_ = client::lobby::character(who);
-            character_      = who.character;
-            loggedIn_       = true;
-            loggedInAs_     = who.character.characterId;
+            enter(std::move(who));
             refreshChat(); // a change made on Mogsafe applies from the capture after this one
             greet();
-            recorder_->login(clock_.nowMs(), std::move(who));
             if (live_)
             {
                 live_->setHello(hello());
@@ -181,6 +172,16 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
     }
+}
+
+// The character in game, here or already when Memoria loads: the lobby's details, then the recorder.
+auto Session::enter(capture::Login who) -> void
+{
+    characterError_ = client::lobby::fillCharacter(who).value_or("");
+    character_      = who.character;
+    loggedIn_       = true;
+    loggedInAs_     = who.character.characterId;
+    recorder_->login(clock_.nowMs(), std::move(who));
 }
 
 auto Session::outgoing(const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void

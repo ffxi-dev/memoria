@@ -3,6 +3,7 @@
 #include "core/capture/event_queue.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace memoria::plugin::client
@@ -19,8 +20,8 @@ namespace search
 
 using Sink = void (*)(bool clientToServer, const uint8_t* data, uint32_t size);
 
-auto install(Sink sink) -> std::string; // why not, or empty
-auto tick() -> void;                    // each frame: a reconnect resets the encrypt pointer
+auto install(Sink sink) -> std::optional<std::string>; // why not, if it failed
+auto tick() -> void;                                   // each frame: a reconnect resets the encrypt pointer
 auto remove() -> void;
 
 } // namespace search
@@ -32,7 +33,7 @@ namespace lobby
 auto version() -> std::string; // from the same copy of the lobby context; empty before the first login
 
 // Fills who's content id, world id, and world name from FFXiMain's copy of the lobby context, which outlives the login, if the selected character is who's character id.
-auto character(capture::Login& who) -> std::string; // why not, or empty
+auto fillCharacter(capture::Login& who) -> std::optional<std::string>; // why not, if it could not
 
 } // namespace lobby
 

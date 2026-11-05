@@ -87,10 +87,17 @@ private:
         auto operator==(const ChunkKey&) const -> bool = default;
     };
 
+    auto enter(capture::Login who) -> void;
     auto record(xicap::PacketDirection direction, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto say(const std::string& text) -> void;
     auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
-    auto status() -> void;
+    auto sayStatus() -> void;
+    auto startSession(std::string_view path) -> void;
+    auto stopSession() -> void;
+    auto importCaptain() -> void;
+    auto goLive() -> void;
+    auto unlinkInstall() -> void;
+    auto setUploads(bool on) -> void;
     auto startUploads() -> void;
     auto link() -> void;
     auto waitForLink(const std::stop_token& stop) -> void;

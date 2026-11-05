@@ -12,18 +12,18 @@ TEST_CASE("painted text goes back to the normal colour after it")
 
 TEST_CASE("counts group their thousands")
 {
-    CHECK(plugin::count(0) == "0");
-    CHECK(plugin::count(999) == "999");
-    CHECK(plugin::count(1000) == "1,000");
-    CHECK(plugin::count(1234567) == "1,234,567");
+    CHECK(plugin::countText(0) == "0");
+    CHECK(plugin::countText(999) == "999");
+    CHECK(plugin::countText(1000) == "1,000");
+    CHECK(plugin::countText(1234567) == "1,234,567");
 }
 
 TEST_CASE("durations round down to seconds, minutes, or hours and minutes")
 {
-    CHECK(plugin::duration(45) == "45 s");
-    CHECK(plugin::duration(60) == "1 min");
-    CHECK(plugin::duration(3599) == "59 min");
-    CHECK(plugin::duration(3600 + 5 * 60 + 59) == "1 h 5 min");
+    CHECK(plugin::durationText(45) == "45 s");
+    CHECK(plugin::durationText(60) == "1 min");
+    CHECK(plugin::durationText(3599) == "59 min");
+    CHECK(plugin::durationText(3600 + 5 * 60 + 59) == "1 h 5 min");
 }
 
 TEST_CASE("the rest of a command keeps its spaces and drops its quotes")

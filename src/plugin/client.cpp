@@ -172,7 +172,7 @@ auto encryptPointer() -> uintptr_t
 
 } // namespace
 
-auto install(const Sink sink) -> std::string
+auto install(const Sink sink) -> std::optional<std::string>
 {
     const auto encrypt      = find("B8B0100000E8????????538B9C24B8100000555633F685DB");
     const auto decrypt      = find("B8B0100000E8????????538B9C24BC100000568B430485C0");
@@ -199,7 +199,7 @@ auto install(const Sink sink) -> std::string
         }
         patches_.push_back(*patch);
     }
-    return {};
+    return std::nullopt;
 }
 
 auto tick() -> void
@@ -279,7 +279,7 @@ auto version() -> std::string
     }
 }
 
-auto character(capture::Login& who) -> std::string
+auto fillCharacter(capture::Login& who) -> std::optional<std::string>
 {
     if (getter() == 0)
     {
@@ -311,7 +311,7 @@ auto character(capture::Login& who) -> std::string
         std::memcpy(&who.worldId, entry + 6, sizeof(who.worldId));
         const auto* world   = reinterpret_cast<const char*>(entry + 28);
         who.character.world = std::string(world, strnlen(world, WORLD_NAME_SIZE));
-        return {};
+        return std::nullopt;
     }
     catch (...)
     {
