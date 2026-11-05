@@ -41,13 +41,18 @@ try
     {
         return std::unexpected(std::format("Mogsafe answered {}", status));
     }
-    return LinkCode{
+    const LinkCode code{
         .code     = body.value("code", ""),
         .poll     = body.value("poll", ""),
         .url      = body.value("url", ""),
         .interval = std::chrono::seconds(body.value("interval", 5)),
         .expires  = std::chrono::seconds(body.value("expires", 600)),
     };
+    if (code.interval <= std::chrono::seconds(0) || code.expires <= std::chrono::seconds(0))
+    {
+        return std::unexpected("Mogsafe sent a malformed answer"); // a poll every 0 s would hammer it
+    }
+    return code;
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
@@ -145,8 +150,14 @@ auto removeLink(const std::filesystem::path& path, const std::string& token) -> 
     const bool refused{ link && link->token == token };
     if (!refused)
     {
-        // A hard link fails where a token was saved since the rename, so the newer one stays.
+        // A hard link fails where a token was saved since the rename, so the newer one stays. Where it fails for another
+        // reason, the taken token goes back by name, keeping its permissions; it is never deleted while it is the only copy.
         std::filesystem::create_hard_link(taken, path, ec);
+        if (ec && !std::filesystem::exists(path, ec))
+        {
+            std::filesystem::rename(taken, path, ec);
+            return false;
+        }
     }
     std::filesystem::remove(taken, ec);
     return refused;

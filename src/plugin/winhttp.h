@@ -6,7 +6,7 @@
 #include <mutex>
 #include <string_view>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 struct CloseInternetHandle
@@ -45,4 +45,4 @@ private:
     bool           cancelled_{ false };
 };
 
-} // namespace memoria
+} // namespace memoria::plugin

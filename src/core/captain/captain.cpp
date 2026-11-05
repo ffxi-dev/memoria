@@ -31,13 +31,13 @@ constexpr auto CRC_TABLE = []
 
 } // namespace
 
-auto findCaptain(const std::filesystem::path& root, const std::chrono::seconds quiet) -> std::vector<CaptainCapture>
+auto findCaptain(const std::filesystem::path& root, const std::chrono::seconds quiet, const std::atomic<bool>& stop) -> std::vector<CaptainCapture>
 {
     namespace fs = std::filesystem;
     std::vector<CaptainCapture> out;
     std::error_code             ec;
     const auto                  now = fs::file_time_type::clock::now();
-    for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+    for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec); !ec && !stop && it != fs::recursive_directory_iterator(); it.increment(ec))
     {
         const auto log = it->path() / "PacketLogger" / "full.log";
         if (!it->is_directory(ec) || !fs::is_regular_file(it->path() / "manifest.txt", ec) || !fs::is_regular_file(log, ec))
@@ -117,18 +117,18 @@ auto moveAside(const std::filesystem::path& root, const std::filesystem::path& u
     return target;
 }
 
-auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root) -> bool
+auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root, const std::atomic<bool>& stop) -> bool
 {
     std::error_code ec;
     if (!account::loadLink(config / "token") || std::filesystem::exists(config / "import-reminded", ec))
     {
         return false;
     }
-    const auto found = findCaptain(root);
-    return std::ranges::any_of(found, [](const auto& c)
-                               {
-                                   return !c.growing;
-                               }) &&
+    const auto found = findCaptain(root, std::chrono::minutes(10), stop);
+    return !stop && std::ranges::any_of(found, [](const auto& c)
+                                        {
+                                            return !c.growing;
+                                        }) &&
            createNew(config / "import-reminded");
 }
 

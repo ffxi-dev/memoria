@@ -1,5 +1,5 @@
 ---
-# LLVM style with Allman braces, for clang-format 22.
+# LLVM style with Allman braces.
 Language: Cpp
 AccessModifierOffset: -4
 AlignConsecutiveAssignments: true

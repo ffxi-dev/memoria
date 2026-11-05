@@ -164,3 +164,24 @@ TEST_CASE("only the refused token is deleted")
     CHECK(fs::is_empty(dir));
     fs::remove_all(dir);
 }
+
+TEST_CASE("a link code that would poll at once or never expire is refused")
+{
+    struct Start final : Http
+    {
+        std::string body;
+
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            return HttpResponse{ .status = 201, .body = body };
+        }
+    } mogsafe;
+    mogsafe.body = R"({"code":"A","poll":"p","url":"https://mogsafe.test/link","interval":5,"expires":600})";
+    CHECK(startLink(mogsafe, "https://mogsafe.test").has_value());
+    for (const auto* bad : { R"({"code":"A","interval":0})", R"({"code":"A","interval":-5})", R"({"code":"A","expires":0})" })
+    {
+        INFO(bad);
+        mogsafe.body = bad;
+        CHECK(!startLink(mogsafe, "https://mogsafe.test").has_value());
+    }
+}

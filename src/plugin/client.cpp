@@ -10,7 +10,7 @@
 #include <tuple>
 #include <vector>
 
-namespace memoria::client
+namespace memoria::plugin::client
 {
 namespace
 {
@@ -321,4 +321,4 @@ auto character(capture::Login& who) -> std::string
 
 } // namespace lobby
 
-} // namespace memoria::client
+} // namespace memoria::plugin::client

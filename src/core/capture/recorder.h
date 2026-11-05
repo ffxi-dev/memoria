@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace memoria::capture
 {
@@ -43,9 +44,10 @@ struct RecorderStatus
     uint64_t              search{};
     uint64_t              firstMs{};
     uint64_t              lastMs{};
-    uint64_t              dropped{};    // the queue's, and those that came while no capture could be written
-    std::string           error;        // why the capture stopped, until one writes again
-    std::string           sessionError; // why the last session ended early or never started
+    uint64_t              dropped{};                   // the queue's, game packets too short for a header, and those that came while no capture could be written
+    xicap::Chat           chat{ xicap::Chat::Redact }; // the open capture's
+    std::string           error;                       // why the capture stopped, until one writes again
+    std::string           sessionError;                // why the last session ended early or never started
 };
 
 // Writes queued events to xicap captures on a thread of its own. A login of another character starts a new capture; the same character logging back in continues it. A session is a second capture of the same packets, written to a path of the caller's choosing until sessionStop.
@@ -75,7 +77,9 @@ public:
         return live_;
     }
 
-    auto stop() -> void; // writes what is queued and closes the capture
+    // Writes what is queued and closes the capture. Returns every capture it closed once asked to stop, the one a queued
+    // login rotated out included, so unload sends the last bytes of what was really closed.
+    auto stop() -> std::vector<std::filesystem::path>;
 
 private:
     auto run() -> void;
@@ -100,10 +104,11 @@ private:
     EventQueue      queue_;
     live::Feed      live_;
 
-    std::thread             thread_;
-    std::mutex              wakeMutex_;
-    std::condition_variable wake_;
-    bool                    stopping_{ false };
+    std::thread                        thread_;
+    std::mutex                         wakeMutex_;
+    std::condition_variable            wake_;
+    bool                               stopping_{ false };
+    std::vector<std::filesystem::path> closedAtStop_; // under wakeMutex_
 
     // Writer thread only.
     std::unique_ptr<xicap::Writer>        writer_;

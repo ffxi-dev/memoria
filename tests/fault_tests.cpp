@@ -34,7 +34,7 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     };
     uint64_t most{ 0 };
     bool     opened{ false };
-    for (size_t n = CAPTURE_HEADER_SIZE; n < bytes.size(); ++n)
+    for (size_t n = xicap::HEADER_SIZE; n < bytes.size(); ++n)
     {
         write(n);
         uint64_t packets{ 0 };
@@ -57,7 +57,7 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     CHECK(most == 12); // a cut inside the trailer still reads every packet
 
     // Killed mid-frame: the uploader sends every byte, and stops at a close Mogsafe refuses until the file changes.
-    write(CAPTURE_HEADER_SIZE + (bytes.size() - CAPTURE_HEADER_SIZE) / 2);
+    write(xicap::HEADER_SIZE + (bytes.size() - xicap::HEADER_SIZE) / 2);
     FakeMogsafe server;
     auto        up = uploader(cut.parent_path(), server);
     CHECK(!up->pass());
@@ -378,7 +378,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
                         {
                             path = rec.status().capture;
                             std::error_code ec;
-                            return !path.empty() && fs::file_size(path, ec) > CAPTURE_HEADER_SIZE;
+                            return !path.empty() && fs::file_size(path, ec) > xicap::HEADER_SIZE;
                         }));
         cut = readCapture(path).id;
         const int full{ ::open("/dev/full", O_WRONLY) };
@@ -408,3 +408,28 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
     fs::remove_all(dir);
 }
 #endif
+
+TEST_CASE("a state file that cannot be saved stays as it was")
+{
+    const auto dir  = tempDir();
+    const auto path = dir / "uploads.txt";
+    REQUIRE(!replaceFile(path, "old\n"));
+    CHECK(readAll(path) == std::vector<uint8_t>{ 'o', 'l', 'd', '\n' });
+
+    fs::create_directory(dir / "uploads.txt.tmp"); // the write fails
+    CHECK(replaceFile(path, "new\n").has_value());
+    CHECK(readAll(path) == std::vector<uint8_t>{ 'o', 'l', 'd', '\n' });
+    CHECK(fs::is_directory(dir / "uploads.txt.tmp"));
+    fs::remove(dir / "uploads.txt.tmp");
+
+    const auto taken = dir / "taken";
+    fs::create_directories(taken / "inside"); // the rename fails: a folder that is not empty
+    CHECK(replaceFile(taken, "new\n").has_value());
+    CHECK(fs::is_directory(taken / "inside"));
+    CHECK(!fs::exists(dir / "taken.tmp"));
+
+    REQUIRE(!replaceFile(path, "new\n"));
+    CHECK(readAll(path) == std::vector<uint8_t>{ 'n', 'e', 'w', '\n' });
+    CHECK(!fs::exists(dir / "uploads.txt.tmp"));
+    fs::remove_all(dir);
+}

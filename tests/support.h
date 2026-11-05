@@ -12,6 +12,17 @@
 #include "core/units.h"
 #include "core/upload/uploader.h"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#include <aclapi.h>
+#include <sddl.h>
+#else
+#include <sys/stat.h>
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 #include <picosha2.h>
@@ -49,6 +60,64 @@ using namespace memoria::upload;
 inline auto touch(const fs::path& path) -> void
 {
     const std::ofstream file(path);
+}
+
+// Whether only the user running the tests can open path: what createNew gives a secret.
+inline auto ownerOnly(const fs::path& path) -> bool
+{
+#ifdef _WIN32
+    const auto free = [](void* p)
+    {
+        ::LocalFree(p);
+    };
+    HANDLE token{ nullptr };
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        return false;
+    }
+    DWORD size{ 0 };
+    ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::vector<std::byte> user(size);
+    wchar_t*               me{ nullptr };
+    if (size > 0 && ::GetTokenInformation(token, TokenUser, user.data(), size, &size))
+    {
+        ::ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid, &me);
+    }
+    ::CloseHandle(token);
+    const std::unique_ptr<wchar_t, decltype(free)> ownedMe(me, free);
+    PACL                                           dacl{ nullptr };
+    PSECURITY_DESCRIPTOR                           sd{ nullptr };
+    if (me == nullptr || ::GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr, &sd) != ERROR_SUCCESS)
+    {
+        return false;
+    }
+    const std::unique_ptr<void, decltype(free)> ownedSd(sd, free);
+    SECURITY_DESCRIPTOR_CONTROL                 control{ 0 };
+    DWORD                                       revision{ 0 };
+    if (dacl == nullptr || !::GetSecurityDescriptorControl(sd, &control, &revision) || (control & SE_DACL_PROTECTED) == 0)
+    {
+        return false;
+    }
+    for (DWORD i = 0; i < dacl->AceCount; ++i)
+    {
+        void* ace{ nullptr };
+        if (!::GetAce(dacl, i, &ace) || static_cast<ACE_HEADER*>(ace)->AceType != ACCESS_ALLOWED_ACE_TYPE)
+        {
+            return false;
+        }
+        wchar_t* text{ nullptr };
+        ::ConvertSidToStringSidW(&static_cast<ACCESS_ALLOWED_ACE*>(ace)->SidStart, &text);
+        const std::unique_ptr<wchar_t, decltype(free)> name(text, free);
+        if (!text || std::wstring_view(me) != text)
+        {
+            return false;
+        }
+    }
+    return true;
+#else
+    struct stat st{};
+    return ::stat(path.c_str(), &st) == 0 && (st.st_mode & 077) == 0;
+#endif
 }
 
 inline auto tempDir() -> fs::path
@@ -394,7 +463,7 @@ inline auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_pt
 
 inline auto outPacket(const Event& e) -> xicap::WritePacket
 {
-    return { .timestamp = e.timestamp, .direction = e.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient, .provenance = e.provenance, .channel = e.channel, .opcode = e.opcode, .data = e.data };
+    return { .timestamp = e.timestamp, .direction = e.direction, .provenance = e.provenance, .channel = e.channel, .opcode = e.opcode, .data = e.data };
 }
 
 inline auto noise(const size_t n) -> std::string

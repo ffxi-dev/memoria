@@ -2,6 +2,7 @@
 
 #include "core/account/link.h"
 #include "core/captain/compress.h"
+#include "core/file.h"
 #include "core/units.h"
 
 #include <algorithm>
@@ -24,8 +25,9 @@ namespace memoria::captain
 namespace
 {
 
-constexpr auto STATE_FILE = "imports.txt";
-constexpr auto MAX_WAIT   = std::chrono::milliseconds(std::chrono::minutes(5));
+constexpr auto   STATE_FILE   = "imports.txt";
+constexpr size_t MAX_MANIFEST = 64 * 1024; // it goes in a request header; captain's are under 1 KiB
+constexpr auto   MAX_WAIT     = std::chrono::milliseconds(std::chrono::minutes(5));
 
 auto base64(const std::string_view in) -> std::string
 {
@@ -140,8 +142,12 @@ auto Importer::run() -> void
         return;
     }
 
-    auto found = findCaptain(options_.captures, options_.quiet);
-    count_     = found.size();
+    auto found = findCaptain(options_.captures, options_.quiet, stopping_);
+    if (stopping_)
+    {
+        return;
+    }
+    count_ = found.size();
     if (found.empty())
     {
         say("No captain captures to upload.");
@@ -173,14 +179,9 @@ auto Importer::run() -> void
         {
             say(prefix + "still being written; skipped.");
         }
-        if (result == Outcome::Stopped)
+        if (result == Outcome::Stopped || result == Outcome::Failed)
         {
             return; // imports.txt stays, so the next start or link resumes
-        }
-        if (result == Outcome::Failed)
-        {
-            found.clear(); // no summary: the error ended the run
-            break;
         }
         ++tally[result];
     }
@@ -222,8 +223,17 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         }
         e = { .crc = std::format("{:08x}", crc->crc), .size = crc->size };
     }
-    std::ostringstream manifest;
-    manifest << std::ifstream(c.dir / "manifest.txt", std::ios::binary).rdbuf(); // closed at once: Windows will not move a folder with a file open
+    std::string manifest(MAX_MANIFEST + 1, '\0');
+    {
+        std::ifstream in(c.dir / "manifest.txt", std::ios::binary); // closed at once: Windows will not move a folder with a file open
+        in.read(manifest.data(), static_cast<std::streamsize>(manifest.size()));
+        manifest.resize(static_cast<size_t>(in.gcount()));
+    }
+    if (manifest.size() > MAX_MANIFEST)
+    {
+        say(prefix + std::format("its manifest.txt is over {}, more than captain writes; skipped.", sizeText(MAX_MANIFEST)));
+        return Outcome::Skipped;
+    }
 
     // A search log goes ahead of full.log in the same upload. It is staged alone before the create, which gives its length,
     // then the upload's staged file is that stage followed by full.log's.
@@ -244,7 +254,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         say(prefix + std::format("refused: {}.", trim(res.body).empty() ? std::to_string(res.status) : trim(res.body)));
         return Outcome::Refused;
     };
-    const auto  metadata = std::format("format {},manifest {},character {},crc32 {},size {},folder {}", base64("captain"), base64(manifest.str()), base64(c.character), base64(e.crc), base64(std::to_string(e.size)), base64(c.folder));
+    const auto  metadata = std::format("format {},manifest {},character {},crc32 {},size {},folder {}", base64("captain"), base64(manifest), base64(c.character), base64(e.crc), base64(std::to_string(e.size)), base64(c.folder));
     std::string replaces; // the capture this upload gives its search log, as the create said
 
     auto backoff = options_.retry;
@@ -271,19 +281,27 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                     say(prefix + "cannot read its search.log; skipped.");
                     return Outcome::Skipped;
                 }
+                // Staged again for each create, which names this search log: a stage from an earlier create may hold an older one.
                 std::error_code ec;
-                if (!fs::exists(searchStaged, ec))
+                fs::remove(staged, ec);
+                if (const auto error = compressLog(searchLog, searchStaged, {}, stopping_))
                 {
-                    fs::remove(staged, ec); // a stage of full.log without this search stage ahead of it
-                    if (const auto error = compressLog(searchLog, searchStaged, {}, stopping_))
+                    if (stopping_)
                     {
-                        if (stopping_)
-                        {
-                            return Outcome::Stopped;
-                        }
-                        say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
-                        return Outcome::Failed;
+                        return Outcome::Stopped;
                     }
+                    say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
+                    return Outcome::Failed;
+                }
+                if (const auto staging = crc32File(searchLog, stopping_); !staging || staging->crc != crc->crc || staging->size != crc->size)
+                {
+                    if (stopping_)
+                    {
+                        return Outcome::Stopped;
+                    }
+                    forget();
+                    say(prefix + "its search.log changed while it was staged; skipped.");
+                    return Outcome::Skipped;
                 }
                 search = std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(fs::file_size(searchStaged, ec))), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
             }

@@ -12,7 +12,7 @@
 #include <tuple>
 #include <utility>
 
-namespace memoria
+namespace memoria::plugin
 {
 namespace
 {
@@ -184,4 +184,4 @@ auto WinHttp::cancel() -> void
     }
 }
 
-} // namespace memoria
+} // namespace memoria::plugin

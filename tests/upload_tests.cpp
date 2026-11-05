@@ -412,7 +412,7 @@ TEST_CASE("at unload the last bytes and the trailer reach Mogsafe, and the game 
                     }));
     append(file, std::string(100, 'y') + TRAILER); // the recorder's last frame and trailer, at unload
     const auto before = std::chrono::steady_clock::now();
-    up->finish("a.xicap", std::chrono::seconds(3));
+    up->finish({ "a.xicap" }, std::chrono::seconds(3));
     CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(3));
     up.reset();
     REQUIRE(server.uploads.size() == 1);
@@ -458,7 +458,7 @@ TEST_CASE("at unload a hung connection holds the game for the time allowed, no l
     up->start();
     std::this_thread::sleep_for(std::chrono::milliseconds(50)); // the first pass hangs in its create
     const auto before = std::chrono::steady_clock::now();
-    up->finish("a.xicap", std::chrono::milliseconds(300));
+    up->finish({ "a.xicap" }, std::chrono::milliseconds(300));
     up.reset();
     const auto took = std::chrono::steady_clock::now() - before;
     CHECK(took >= std::chrono::milliseconds(300));
@@ -612,7 +612,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
                     {
                         first = rec.status().capture;
                         std::error_code ec;
-                        if (first.empty() || fs::file_size(first, ec) < CAPTURE_HEADER_SIZE)
+                        if (first.empty() || fs::file_size(first, ec) < xicap::HEADER_SIZE)
                         {
                             return false;
                         }
@@ -670,5 +670,88 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     CHECK(now.previous == old.id);
     CHECK(std::ranges::all_of(server.uploads | std::views::drop(1) | std::views::values, &FakeMogsafe::Upload::closed));
     CHECK(!now.atLogin);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an upload another account made is skipped while this token stays, and tried again after a new link")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    append(dir / "old.xicap", std::string(500, 'x'));
+    auto up = uploader(dir, server);
+    CHECK(!up->pass());
+    append(dir / "old.xicap", std::string(100, 'x'));
+    server.foreign.insert(server.uploads.begin()->first);
+    CHECK(!up->pass()); // a 403: not a failure, so no backoff for the other files
+    REQUIRE(up->status().size() == 1);
+    CHECK(up->status()[0].foreign);
+    const auto requests = server.requests;
+    CHECK(!up->pass());
+    CHECK(server.requests == requests); // the same token asks nothing
+    server.foreign.clear();
+    server.token = "n3w";
+    saveLink(dir / "config" / "token", { .token = "n3w", .account = "owner" });
+    CHECK(!up->pass());
+    CHECK(server.requests > requests);
+    CHECK(!up->status()[0].foreign);
+    CHECK(server.uploads.begin()->second.data.size() == 600);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a capture Mogsafe refused for good costs no request")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    append(dir / "a.xicap", std::string(500, 'x') + TRAILER);
+    auto up = uploader(dir, server);
+    CHECK(!up->pass());
+    server.forced["POST"] = { 422 };
+    CHECK(!up->pass());
+    REQUIRE(up->status()[0].refused);
+    const auto requests = server.requests;
+    CHECK(!up->pass());
+    CHECK(!up->pass());
+    CHECK(server.requests == requests);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an unload during a long cut-off recovery returns at once, and the next run writes the tail")
+{
+    const auto dir    = tempDir();
+    const auto file   = dir / "a.xicap";
+    const auto source = dir / "source" / "a.xicap";
+    fs::create_directories(source.parent_path());
+    {
+        xicap::Writer w(source, { .character = { .name = "Kalnor" } });
+        for (uint64_t i = 0; i < 1'500'000; ++i)
+        {
+            w.write(outPacket(gamePacket(T0 + i)));
+        }
+        w.close();
+    }
+    const auto  bytes = readAll(source);
+    FakeMogsafe server;
+    append(file, std::string(bytes.begin(), bytes.begin() + 200));
+    CHECK(!uploader(dir, server)->pass());
+    append(file, std::string(bytes.begin() + 200, bytes.end()));
+    server.uploads.begin()->second.cutOff = true;
+
+    UploadOptions options{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .every = std::chrono::milliseconds(10), .idle = std::chrono::milliseconds(0) };
+    auto          up = std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
+    up->start();
+    REQUIRE(waitFor([&]
+                    {
+                        return fs::exists(dir / "a-rest.tmp");
+                    }));
+    const auto before = std::chrono::steady_clock::now();
+    up.reset();
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(500));
+    CHECK(!fs::exists(dir / "a-rest.tmp"));
+    CHECK(!fs::exists(dir / "a-rest.xicap"));
+    CHECK(!readUploads(dir / "uploads.txt")["a.xicap"].rescued);
+
+    auto again = uploader(dir, server);
+    CHECK(!again->pass()); // writes the tail
+    CHECK(fs::exists(dir / "a-rest.xicap"));
     fs::remove_all(dir);
 }

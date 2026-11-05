@@ -25,6 +25,7 @@ struct UploadFile
     uint64_t                              size{};
     std::chrono::steady_clock::time_point seen{}; // when size last changed
     std::string                           error;
+    std::string                           deniedFor; // the token Mogsafe answered 403 for: another account's upload
 };
 
 using UploadFiles = std::map<std::string, UploadFile>; // by file name

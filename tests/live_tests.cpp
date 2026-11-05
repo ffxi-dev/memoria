@@ -39,9 +39,9 @@ auto frames(const std::vector<std::vector<uint8_t>>& messages) -> std::vector<Fr
 
 TEST_CASE("a live frame is version, channel, flags, time, length, then the packet")
 {
-    auto e           = gamePacket(0x0102030405060708ULL, 0x015);
-    e.clientToServer = true;
-    e.provenance     = xicap::PacketFlag::Injected;
+    auto e       = gamePacket(0x0102030405060708ULL, 0x015);
+    e.direction  = xicap::PacketDirection::ClientToServer;
+    e.provenance = xicap::PacketFlag::Injected;
     e.data.resize(6);
     const std::vector<uint8_t> want{
         0x01,
@@ -79,11 +79,11 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
         rec.live().open(owner, true);
         rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1, 0x017)); // chat to the client
-        auto said           = gamePacket(T0 + 2, 0x0B5);
-        said.clientToServer = true;
+        auto said      = gamePacket(T0 + 2, 0x0B5);
+        said.direction = xicap::PacketDirection::ClientToServer;
         rec.packet(std::move(said));
         rec.packet(gamePacket(T0 + 3, 0x015));
-        rec.packet({ .timestamp = T0 + 4, .clientToServer = true, .channel = xicap::Channel::Search, .opcode = 0x05, .data = std::vector<uint8_t>(40, 0xCD) });
+        rec.packet({ .timestamp = T0 + 4, .direction = xicap::PacketDirection::ClientToServer, .channel = xicap::Channel::Search, .opcode = 0x05, .data = std::vector<uint8_t>(40, 0xCD) });
         rec.stop();
 
         const auto live = frames(rec.live().take(owner));

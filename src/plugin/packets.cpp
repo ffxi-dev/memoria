@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace memoria::packets
+namespace memoria::plugin::packets
 {
 namespace
 {
@@ -33,4 +33,4 @@ auto leavesGame(const uint8_t logoutState) -> bool
     return logoutState != 0 && logoutState != ZONECHANGE && logoutState != MYROOM && logoutState != CANCEL;
 }
 
-} // namespace memoria::packets
+} // namespace memoria::plugin::packets

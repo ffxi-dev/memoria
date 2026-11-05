@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/live/live.h"
+#include "plugin/enums/live_state.h"
 #include "plugin/winhttp.h"
 
 #include <atomic>
@@ -11,11 +12,19 @@
 #include <string>
 #include <thread>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 // Opens an https URL in the default browser. Blocks while Windows starts it, so call it off the game thread.
 auto browse(const std::string& url) -> void;
+
+struct Socket
+{
+    InternetHandle connection;
+    InternetHandle ws;
+    int            status{};
+    std::string    error;
+};
 
 // /memoria live: asks Mogsafe for a link, opens it, and streams the feed over a WinHTTP WebSocket while anyone watches, reconnecting until stopped.
 class Live
@@ -23,14 +32,15 @@ class Live
 public:
     // config holds the token and paused files: a pause or unlink in any client sharing the install ends the link.
     Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post);
-    ~Live(); // joins: stop() first to end the link without waiting
+    ~Live(); // aborts, then joins
 
     Live(const Live&)                    = delete;
     Live(Live&&)                         = delete;
     auto operator=(const Live&) -> Live& = delete;
     auto operator=(Live&&) -> Live&      = delete;
 
-    auto stop() -> void; // closes with 1000 "off", which ends the link, reconnecting once to send it if the socket is down
+    auto stop() -> void;  // closes with 1000 "off", which ends the link, reconnecting once to send it if the socket is down
+    auto abort() -> void; // at unload: closes the connection in flight at once, and sends no "off"
     auto reopen() -> void;
     auto setHello(std::string hello) -> void; // sent on each connect, and at once while connected
 
@@ -38,14 +48,11 @@ public:
     [[nodiscard]] auto status() const -> std::string;
 
 private:
-    enum class State : uint8_t
-    {
-        Starting,
-        Connected,
-        Reconnecting,
-    };
-
     auto run(const std::stop_token& stop) -> void;
+    auto upgrade(void* session, const std::string& url, const std::string& headers) -> Socket;
+    auto sendOff(void* session, const std::string& url, const std::string& headers) -> void;
+    auto hold(void* handle) -> bool;            // the handle abort() closes; false once aborted
+    auto letGo(InternetHandle& handle) -> void; // a handle abort() closed is released, not closed twice
     auto stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t;
     auto wait(const std::stop_token& stop, std::chrono::milliseconds time) -> void;
     auto helloNow() const -> std::string;
@@ -66,13 +73,16 @@ private:
     bool                        closed_{ false }; // the server ended the connection
     uint16_t                    closeCode_{ 0 };
     bool                        offSent_{ false }; // live thread only
+    bool                        aborted_{ false };
+    void*                       inFlight_{ nullptr }; // the request or WebSocket a call is waiting on
+    void*                       closedByAbort_{ nullptr };
 
-    std::atomic<State>    state_{ State::Starting };
-    std::atomic<int>      viewers_{ 0 };
-    std::atomic<uint64_t> dropped_{ 0 };
-    std::atomic<bool>     finished_{ false };
-    WinHttp               http_;
-    std::jthread          thread_; // last: started once the rest is ready
+    std::atomic<LiveState> state_{ LiveState::Starting };
+    std::atomic<int>       viewers_{ 0 };
+    std::atomic<uint64_t>  dropped_{ 0 };
+    std::atomic<bool>      finished_{ false };
+    WinHttp                http_;
+    std::jthread           thread_; // last: started once the rest is ready
 };
 
-} // namespace memoria
+} // namespace memoria::plugin

@@ -403,3 +403,50 @@ TEST_CASE("dropped packets leave a note in the capture")
     CHECK(noted);
     fs::remove_all(dir);
 }
+
+TEST_CASE("a game packet too short for its header is dropped and counted, and the capture goes on")
+{
+    const auto dir = tempDir();
+    {
+        Recorder rec(options(dir));
+        rec.login(T0, who("Kalnor", 1));
+        rec.packet(gamePacket(T0 + 1));
+        rec.packet({ .timestamp = T0 + 2, .data = std::vector<uint8_t>(3, 0xAB) });
+        rec.packet(gamePacket(T0 + 3));
+        REQUIRE(waitFor([&]
+                        {
+                            return rec.status().packets == 2;
+                        }));
+        const auto status = rec.status();
+        CHECK(status.dropped == 1);
+        CHECK(status.error.empty());
+        rec.stop();
+    }
+    REQUIRE(captures(dir).size() == 1);
+    const auto read = readCapture(captures(dir)[0]);
+    CHECK(read.packets == 2);
+    CHECK(read.complete);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("stop names every capture it closed, the one a queued login rotated out included")
+{
+    const auto dir  = tempDir();
+    auto       opts = options(dir);
+    opts.drainEvery = std::chrono::seconds(1); // the queued login waits for stop's wake
+    Recorder rec(opts);
+    rec.login(T0, who("Kalnor", 1));
+    rec.packet(gamePacket(T0 + 1));
+    REQUIRE(waitFor([&]
+                    {
+                        return !rec.status().capture.empty();
+                    }));
+    const auto first = rec.status().capture;
+    rec.login(T0 + 10, who("Mirabeth", 2)); // queued: the unload drains it
+    rec.packet(gamePacket(T0 + 11));
+    const auto closed = rec.stop();
+    REQUIRE(captures(dir).size() == 2);
+    CHECK(std::ranges::find(closed, first) != closed.end());
+    CHECK(std::ranges::find(closed, captures(dir)[0] == first ? captures(dir)[1] : captures(dir)[0]) != closed.end());
+    fs::remove_all(dir);
+}

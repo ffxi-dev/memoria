@@ -750,3 +750,74 @@ TEST_CASE("a second client sharing the install does not import while the first d
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 #endif
+
+TEST_CASE("a log that cannot be staged stops the import and keeps its place for the next start")
+{
+    Install    in;
+    const auto log = noise(3 << 20);
+    captainFolder(in.captures, "s/Mirabeth", log);
+    std::atomic<bool> stop{ false };
+    const auto        crc = crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop);
+    REQUIRE(crc);
+    const auto blocker = in.state / "imports" / std::format("{:08x}-{}.zst.tmp", crc->crc, crc->size);
+    fs::create_directories(blocker);
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("cannot stage the log"));
+    CHECK(server.received == 0);
+    CHECK(Importer::pending(in.state));
+    fs::remove(blocker);
+    in.importer(server)->run();
+    CHECK(server.creates == 1); // the upload the first run created
+    CHECK(server.received == server.uploads.begin()->second.data.size());
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
+    CHECK(!Importer::pending(in.state));
+}
+
+TEST_CASE("a search log changed after an interrupted create goes up as it is now, with metadata that matches")
+{
+    Install    in;
+    const auto log = noise(1 << 20);
+    const auto dir = captainFolder(in.captures, "s/Hoa", log);
+    searchFolder(dir, "old search");
+    FakeMogsafe server;
+    server.down   = true; // the create never answers
+    auto importer = in.importer(server);
+    importer->start();
+    REQUIRE(waitFor([&]
+                    {
+                        std::error_code ec;
+                        for (const auto& e : fs::directory_iterator(in.state / "imports", ec))
+                        {
+                            if (e.path().string().ends_with(".search.zst"))
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }));
+    importer.reset(); // the client stops
+    const std::string now = "new search, longer than the old one";
+    searchFolder(dir, now);
+    server.down = false;
+    in.importer(server)->run();
+    REQUIRE(server.uploads.size() == 1);
+    const auto&       u = server.uploads.begin()->second;
+    std::atomic<bool> stop{ false };
+    CHECK(searchParts(u) == std::pair{ now, log });
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "s/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_size") == std::to_string(now.size()));
+}
+
+TEST_CASE("a manifest.txt larger than captain writes is refused for its folder, and the next one goes")
+{
+    Install in;
+    captainFolder(in.captures, "a/Hoa", noise(1000), std::string("StartTime = 1\n") + std::string(100 * 1024, 'm'));
+    captainFolder(in.captures, "b/Ijs", noise(1000) + "b");
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 1/2 a/Hoa: its manifest.txt is over"));
+    CHECK(server.creates == 1);
+    CHECK(fs::exists(in.captures / "a/Hoa"));
+    CHECK(fs::exists(in.uploaded / "b/Ijs"));
+}

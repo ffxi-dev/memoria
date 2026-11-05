@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 // Ashita's chat colours, as its chat.lua names them: 0x1E, then a colour number; 0x1E 0x01 goes back to normal.
@@ -15,4 +15,4 @@ enum class Color : uint8_t
     Yellow = 104,
 };
 
-} // namespace memoria
+} // namespace memoria::plugin

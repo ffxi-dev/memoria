@@ -53,8 +53,9 @@ auto sha256(const std::filesystem::path& path, const uint64_t size, const std::a
 }
 
 // Writes the packets of source from the first frame that does not end within its first fromByte bytes, as a new
-// capture at out that continues source. Returns the packets written; with none, it writes no file.
-auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, const std::filesystem::path& out) -> uint64_t
+// capture at out that continues source. Returns the packets written, and nothing once stop holds; with none, it writes
+// no file.
+auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, const std::filesystem::path& out, const std::function<bool()>& stop) -> std::optional<uint64_t>
 {
     xicap::Reader in(source);
     auto          metadata     = in.metadata();
@@ -65,6 +66,10 @@ auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, 
     xicap::Packet                p;
     while (in.next(p))
     {
+        if (stop())
+        {
+            return std::nullopt;
+        }
         if (in.bytesRead() <= fromByte)
         {
             continue;
@@ -150,15 +155,18 @@ auto Uploader::run() -> void
         {
             if (finishing_ && !stopping_)
             {
-                const auto name = finish_;
+                const auto names = finish_;
                 lock.unlock();
-                try
+                for (const auto& name : names)
                 {
-                    last(name);
-                }
-                catch (const std::exception&) // NOLINT(bugprone-empty-catch)
-                {
-                    // What the last pass could not send goes at the next start.
+                    try
+                    {
+                        last(name);
+                    }
+                    catch (const std::exception&) // NOLINT(bugprone-empty-catch)
+                    {
+                        // What the last pass could not send goes at the next start.
+                    }
                 }
                 lock.lock();
                 finished_ = true;
@@ -169,14 +177,14 @@ auto Uploader::run() -> void
     }
 }
 
-auto Uploader::finish(const std::string& name, const std::chrono::milliseconds limit) -> void
+auto Uploader::finish(std::vector<std::string> names, const std::chrono::milliseconds limit) -> void
 {
     if (!thread_.joinable())
     {
         return;
     }
     std::unique_lock lock(wakeMutex_);
-    finish_    = name;
+    finish_    = std::move(names);
     finishing_ = true;
     wake_.notify_all();
     wake_.wait_for(lock, limit, [this]
@@ -269,6 +277,14 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     {
         return f.cutOff && !f.rescued ? rest(path, f) : std::nullopt;
     }
+    if (!f.deniedFor.empty())
+    {
+        if (f.deniedFor == tus_.token())
+        {
+            return std::nullopt;
+        }
+        f.deniedFor.clear(); // another link: its account may own the upload
+    }
     std::error_code ec;
     const auto      size = std::filesystem::file_size(path, ec);
     if (ec)
@@ -277,7 +293,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     }
     const auto now = std::chrono::steady_clock::now();
     watch(f, size, now);
-    if (size < CAPTURE_HEADER_SIZE)
+    if (size < xicap::HEADER_SIZE || (!f.reason.empty() && f.refused == size))
     {
         return std::nullopt;
     }
@@ -319,6 +335,11 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     if (res->status == 410)
     {
         end(f, *res);
+        return std::nullopt;
+    }
+    if (res->status == 403)
+    {
+        f.deniedFor = tus_.token();
         return std::nullopt;
     }
     if (res->status == 404)
@@ -431,7 +452,7 @@ auto Uploader::end(UploadFile& f, const HttpResponse& res) -> void
 
 // Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
 // kept go to <name>-rest.xicap, which uploads as a capture of its own. sent may be below what Mogsafe holds, if an
-// append's answer was lost: then a few packets reach Vault twice, never none.
+// append's answer was lost: then a few packets reach Vault twice.
 auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>
 {
     if (f.restFailed)
@@ -456,7 +477,16 @@ auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::op
         const auto tmp = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap: no pass sends it half written
         try
         {
-            if (continueFrom(path, f.sent, tmp) > 0)
+            const auto packets = continueFrom(path, f.sent, tmp, [this]
+                                              {
+                                                  return stopping_ || finishing_;
+                                              });
+            if (!packets)
+            {
+                std::filesystem::remove(tmp, ec);
+                return std::nullopt; // stopped: the next run writes the tail
+            }
+            if (*packets > 0)
             {
                 std::filesystem::rename(tmp, out);
             }
@@ -561,7 +591,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         const auto& f    = files[entry.path().filename().string()];
         const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
         const bool  refused{ !f.closed && f.refused == size && !f.reason.empty() };
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && (!f.cutOff || f.rescued)) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff && !f.rescued, .error = refused ? f.reason : f.error });
+        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && (!f.cutOff || f.rescued)) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff && !f.rescued, .foreign = !f.deniedFor.empty(), .error = refused ? f.reason : f.error });
     }
     return out;
 }

@@ -2,7 +2,6 @@
 
 #ifdef _WIN32
 #include <Windows.h>
-#include <aclapi.h>
 #include <fcntl.h>
 #include <io.h>
 #include <sddl.h>
@@ -15,7 +14,12 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
 #endif
+
+#include <format>
 
 namespace memoria
 {
@@ -96,43 +100,73 @@ auto createNew(const std::filesystem::path& path, const bool secret) -> bool
     return true;
 }
 
-auto ownerOnly(const std::filesystem::path& path) -> bool
+auto replaceFile(const std::filesystem::path& path, const std::string_view text) -> std::optional<std::string>
 {
+    const auto tmp       = std::filesystem::path(path).concat(".tmp");
+    const auto unwritten = [&](const bool created)
+    {
+        if (created)
+        {
+            std::error_code ec;
+            std::filesystem::remove(tmp, ec);
+        }
+        return std::format("cannot write {}", tmp.string());
+    };
 #ifdef _WIN32
-    PACL                 dacl{ nullptr };
-    PSECURITY_DESCRIPTOR sd{ nullptr };
-    if (::GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr, &sd) != ERROR_SUCCESS)
+    const HANDLE file{ ::CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) };
+    if (file == INVALID_HANDLE_VALUE)
     {
-        return false;
+        return unwritten(false);
     }
-    const std::unique_ptr<void, LocalFreer> owned(sd);
-    SECURITY_DESCRIPTOR_CONTROL             control{ 0 };
-    DWORD                                   revision{ 0 };
-    if (dacl == nullptr || !::GetSecurityDescriptorControl(sd, &control, &revision) || (control & SE_DACL_PROTECTED) == 0)
+    DWORD      written{ 0 };
+    const bool flushed{ ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file) };
+    if (!::CloseHandle(file) || !flushed)
     {
-        return false;
+        return unwritten(true);
     }
-    const auto sid = userSid();
-    for (DWORD i = 0; i < dacl->AceCount; ++i)
+    if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     {
-        void* ace{ nullptr };
-        if (!::GetAce(dacl, i, &ace) || static_cast<ACE_HEADER*>(ace)->AceType != ACCESS_ALLOWED_ACE_TYPE)
-        {
-            return false;
-        }
-        wchar_t* text{ nullptr };
-        ::ConvertSidToStringSidW(&static_cast<ACCESS_ALLOWED_ACE*>(ace)->SidStart, &text);
-        const std::unique_ptr<wchar_t, LocalFreer> name(text);
-        if (!text || sid != text)
-        {
-            return false;
-        }
+        const auto error = ::GetLastError();
+        ::DeleteFileW(tmp.c_str());
+        return std::format("cannot save {}: Windows error {}", path.filename().string(), error);
     }
-    return true;
 #else
-    struct stat st{};
-    return ::stat(path.c_str(), &st) == 0 && (st.st_mode & 077) == 0;
+    const int fd{ ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644) };
+    if (fd < 0)
+    {
+        return unwritten(false);
+    }
+    bool ok{ true };
+    for (size_t at = 0; ok && at < text.size();)
+    {
+        const auto n = ::write(fd, text.data() + at, text.size() - at);
+        ok           = n > 0;
+        at += ok ? static_cast<size_t>(n) : 0;
+    }
+    ok = ok && ::fsync(fd) == 0;
+    if (::close(fd) != 0 || !ok)
+    {
+        return unwritten(true);
+    }
+    if (::rename(tmp.c_str(), path.c_str()) != 0)
+    {
+        const auto error = std::format("cannot save {}: {}", path.filename().string(), std::strerror(errno));
+        ::unlink(tmp.c_str());
+        return error;
+    }
+    const auto dir = path.has_parent_path() ? path.parent_path() : std::filesystem::path(".");
+    const int  dfd{ ::open(dir.c_str(), O_RDONLY | O_DIRECTORY) };
+    const bool synced{ dfd >= 0 && ::fsync(dfd) == 0 };
+    if (dfd >= 0)
+    {
+        ::close(dfd);
+    }
+    if (!synced)
+    {
+        return std::format("saved {}, but cannot flush its folder", path.filename().string());
+    }
 #endif
+    return std::nullopt;
 }
 
 } // namespace memoria
