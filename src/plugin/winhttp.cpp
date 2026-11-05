@@ -46,7 +46,7 @@ auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<co
     }
     auto*      data = body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<uint8_t*>(body.data());
     const auto size = static_cast<DWORD>(body.size());
-    if (!WinHttpSendRequest(req, lines.c_str(), DWORD(-1), data, size, size, 0) || !WinHttpReceiveResponse(req, nullptr))
+    if (!WinHttpSendRequest(req, lines.c_str(), static_cast<DWORD>(-1), data, size, size, 0) || !WinHttpReceiveResponse(req, nullptr))
     {
         return failed("send");
     }
@@ -112,7 +112,7 @@ auto openSession() -> InternetHandle
 auto openRequest(void* session, const std::string_view method, const std::string& url) -> std::expected<OpenRequest, std::string>
 {
     const auto     wurl = wide(url);
-    URL_COMPONENTS parts{ .dwStructSize = sizeof(URL_COMPONENTS), .dwHostNameLength = DWORD(-1), .dwUrlPathLength = DWORD(-1), .dwExtraInfoLength = DWORD(-1) };
+    URL_COMPONENTS parts{ .dwStructSize = sizeof(URL_COMPONENTS), .dwHostNameLength = static_cast<DWORD>(-1), .dwUrlPathLength = static_cast<DWORD>(-1), .dwExtraInfoLength = static_cast<DWORD>(-1) };
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts))
     {
         return failed("bad URL");
@@ -155,15 +155,15 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
         return std::unexpected(open.error());
     }
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         if (cancelled_)
         {
             return std::unexpected("stopped");
         }
         request_ = open->request.get();
     }
-    auto            res = perform(open->request.get(), headers, body);
-    std::lock_guard lock(mutex_);
+    auto                   res = perform(open->request.get(), headers, body);
+    const std::scoped_lock lock(mutex_);
     if (request_ == nullptr) // cancel closed it
     {
         std::ignore = open->request.release();
@@ -176,7 +176,7 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
 // A send or receive waiting on the request ends when it closes.
 auto WinHttp::cancel() -> void
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     cancelled_ = true;
     if (request_ != nullptr)
     {

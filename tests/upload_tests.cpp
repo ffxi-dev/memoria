@@ -85,7 +85,7 @@ TEST_CASE("a crash during the first pass resumes the upload it created")
         const auto  file = dir / "a.xicap";
         FakeMogsafe server;
         server.crashAtPatch = crashAt;
-        append(file, std::string(3 * 512 * 1024, 'x'));
+        append(file, std::string(size_t{ 3 } * 512 * 1024, 'x'));
         CHECK_THROWS(uploader(dir, server)->pass()); // no save at the end of the pass, as in a crash
         server.crashAtPatch = -1;
         CHECK(!uploader(dir, server)->pass());
@@ -165,7 +165,7 @@ TEST_CASE("a file Mogsafe keeps refusing never holds the recording's upload past
     std::vector<std::chrono::steady_clock::time_point> sent;
     server.onPatch = [&]
     {
-        std::lock_guard lock(mutex);
+        const std::scoped_lock lock(mutex);
         sent.push_back(std::chrono::steady_clock::now());
     };
     UploadOptions options{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .every = std::chrono::milliseconds(10), .idle = std::chrono::hours(1) };
@@ -245,7 +245,7 @@ TEST_CASE("an uploader stops without waiting for a request in flight")
         auto cancel() -> void override
         {
             {
-                std::lock_guard lock(mutex_);
+                const std::scoped_lock lock(mutex_);
                 cancelled_ = true;
             }
             wake_.notify_all();
@@ -307,7 +307,7 @@ TEST_CASE("pause, unlink, and a new link govern every client sharing the install
     auto        second = uploader(dir, server);
 
     append(file, std::string(500, 'x'));
-    std::ofstream{ paused }; // /memoria upload off in a client that is not uploading
+    touch(paused); // /memoria upload off in a client that is not uploading
     CHECK(!first->pass());
     first.reset(); // the uploading client exits, and the other takes the upload mutex
     CHECK(!second->pass());
@@ -440,7 +440,7 @@ TEST_CASE("at unload a hung connection holds the game for the time allowed, no l
         auto cancel() -> void override
         {
             {
-                std::lock_guard lock(mutex_);
+                const std::scoped_lock lock(mutex_);
                 cancelled_ = true;
             }
             wake_.notify_all();

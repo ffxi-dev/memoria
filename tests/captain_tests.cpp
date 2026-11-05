@@ -27,13 +27,13 @@ auto captainFolder(const fs::path& root, const std::string& rel, const std::stri
 
 auto unzstd(const std::vector<uint8_t>& in) -> std::string
 {
-    std::unique_ptr<ZSTD_DCtx, decltype(&ZSTD_freeDCtx)> d(ZSTD_createDCtx(), &ZSTD_freeDCtx);
-    std::string                                          out;
-    std::vector<char>                                    buf(ZSTD_DStreamOutSize());
-    ZSTD_inBuffer                                        input{ in.data(), in.size(), 0 };
+    const std::unique_ptr<ZSTD_DCtx, decltype(&ZSTD_freeDCtx)> d(ZSTD_createDCtx(), &ZSTD_freeDCtx);
+    std::string                                                out;
+    std::vector<char>                                          buf(ZSTD_DStreamOutSize());
+    ZSTD_inBuffer                                              input{ .src = in.data(), .size = in.size(), .pos = 0 };
     for (size_t left = 1; left != 0;)
     {
-        ZSTD_outBuffer o{ buf.data(), buf.size(), 0 };
+        ZSTD_outBuffer o{ .dst = buf.data(), .size = buf.size(), .pos = 0 };
         left = ZSTD_decompressStream(d.get(), &o, &input);
         if (ZSTD_isError(left) || (o.pos == 0 && input.pos == input.size))
         {
@@ -75,7 +75,7 @@ struct Install
         ImportOptions options{ .captures = captures, .uploaded = uploaded, .state = state, .server = "https://mogsafe.test", .config = config, .retry = retry };
         options.say = [this](std::string text)
         {
-            std::lock_guard lock(mutex);
+            const std::scoped_lock lock(mutex);
             said.push_back(std::move(text));
         };
         return options;
@@ -88,7 +88,7 @@ struct Install
 
     auto saidAny(const std::string_view text) -> bool
     {
-        std::lock_guard lock(mutex);
+        const std::scoped_lock lock(mutex);
         return std::ranges::any_of(said, [&](const auto& s)
                                    {
                                        return s.find(text) != std::string::npos;
@@ -100,7 +100,7 @@ struct Install
 
 TEST_CASE("captain captures are found at any depth, and not inside one")
 {
-    Install in;
+    const Install in;
     captainFolder(in.captures, "Mining/test_2026-8-4/Mirabeth", "log");
     captainFolder(in.captures, "2026-8-4_23_54/Mirabeth", "log");
     captainFolder(in.captures, "2026-8-4_23_54/Mirabeth/inner/Nested", "log"); // inside a match: not searched
@@ -140,7 +140,7 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
 
 TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
 {
-    Install           in;
+    const Install     in;
     std::atomic<bool> stop{ false };
     std::string       log;
     for (int i = 0; i < 1000; ++i)
@@ -204,8 +204,8 @@ TEST_CASE("a log already in Vault sends no bytes and moves")
     Install    in;
     const auto log = std::string("[2026-08-04] x\n");
     captainFolder(in.captures, "s/Mirabeth", log);
-    FakeMogsafe       server;
-    std::atomic<bool> stop{ false };
+    FakeMogsafe             server;
+    const std::atomic<bool> stop{ false };
     server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop)->crc, log.size())] = "cap7";
     in.importer(server)->run();
     CHECK(server.creates == 0);
@@ -308,7 +308,7 @@ TEST_CASE("a pause stops the import between chunks until uploads are on")
     {
         if (++patches == 1)
         {
-            std::ofstream{ in.config / "paused" };
+            touch(in.config / "paused");
         }
     };
     auto imp = in.importer(server);
@@ -343,7 +343,7 @@ TEST_CASE("an import resumes from each point a crash can leave it at")
         Install in;
         captainFolder(in.captures, "s/Mirabeth", log);
         fs::create_directories(in.state);
-        std::ofstream{ in.state / "imports.txt" };
+        touch(in.state / "imports.txt");
         CHECK(Importer::pending(in.state));
         FakeMogsafe server;
         in.importer(server)->run();
@@ -425,7 +425,7 @@ TEST_CASE("a folder's search log goes ahead of its full.log in the same upload, 
     REQUIRE(server.creates == 2);
     const auto& u = server.uploads.at("/v1/uploads/1");
     CHECK(u.closed);
-    std::atomic<bool> stop{ false };
+    const std::atomic<bool> stop{ false };
     CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "a/Hoa/SearchLog/search.log", stop)->crc));
     CHECK(u.meta.at("search_size") == std::to_string(search.size()));
     CHECK(!u.meta.contains("search_encoding"));
@@ -536,7 +536,7 @@ TEST_CASE("an import whose state cannot be saved sends nothing and goes on at th
 
 TEST_CASE("an uploaded folder moves to the same path under captures-uploaded")
 {
-    Install in;
+    const Install in;
     captainFolder(in.captures, "Mining/test/Mirabeth", "a");
     captainFolder(in.captures, "Mining/test/Kalnor", "b");
     auto to = moveAside(in.captures, in.uploaded, in.captures / "Mining/test/Mirabeth");
@@ -558,7 +558,7 @@ TEST_CASE("a folder that cannot move stays, and the next import moves it")
 {
     Install in;
     captainFolder(in.captures, "s/Mirabeth", "log");
-    std::ofstream{ in.uploaded }; // a file where the folder goes
+    touch(in.uploaded); // a file where the folder goes
     FakeMogsafe server;
     in.importer(server)->run();
     CHECK(in.saidAny("Captain 1/1 s/Mirabeth: in Vault, but its folder could not move: "));
@@ -606,7 +606,7 @@ public:
     auto cancel() -> void override
     {
         {
-            std::lock_guard lock(mutex_);
+            const std::scoped_lock lock(mutex_);
             cancelled_ = true;
         }
         wake_.notify_all();
@@ -692,6 +692,7 @@ TEST_CASE("the import reminder shows once per install, to one client")
         {
             std::latch                go(2);
             std::vector<std::jthread> clients;
+            clients.reserve(2);
             for (int i = 0; i < 2; ++i)
             {
                 clients.emplace_back([&]

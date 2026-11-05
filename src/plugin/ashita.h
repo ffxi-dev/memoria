@@ -13,13 +13,13 @@ namespace memoria
 class Plugin final : public IPlugin
 {
 public:
-    auto GetName() const -> const char* override;
-    auto GetAuthor() const -> const char* override;
-    auto GetDescription() const -> const char* override;
-    auto GetLink() const -> const char* override;
-    auto GetVersion() const -> double override;
-    auto GetPriority() const -> int32_t override;
-    auto GetFlags() const -> uint32_t override;
+    [[nodiscard]] auto GetName() const -> const char* override;
+    [[nodiscard]] auto GetAuthor() const -> const char* override;
+    [[nodiscard]] auto GetDescription() const -> const char* override;
+    [[nodiscard]] auto GetLink() const -> const char* override;
+    [[nodiscard]] auto GetVersion() const -> double override;
+    [[nodiscard]] auto GetPriority() const -> int32_t override;
+    [[nodiscard]] auto GetFlags() const -> uint32_t override;
 
     auto Initialize(IAshitaCore* core, ILogManager* logger, uint32_t id) -> bool override;
     auto Release() -> void override;

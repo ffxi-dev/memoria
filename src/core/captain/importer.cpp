@@ -72,7 +72,7 @@ Importer::Importer(ImportOptions options, std::unique_ptr<Http> http)
 Importer::~Importer()
 {
     {
-        std::lock_guard lock(mutex_);
+        const std::scoped_lock lock(mutex_);
         stopping_ = true;
     }
     http_->cancel();
@@ -161,7 +161,7 @@ auto Importer::run() -> void
     {
         const auto c = found[i];
         {
-            std::lock_guard lock(mutex_);
+            const std::scoped_lock lock(mutex_);
             character_ = c.character;
         }
         index_            = i + 1;
@@ -507,7 +507,7 @@ auto Importer::finished() const -> bool
 
 auto Importer::progress() const -> ImportProgress
 {
-    std::lock_guard lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     return { .index = index_, .count = count_, .character = character_, .sent = sent_, .size = size_ };
 }
 

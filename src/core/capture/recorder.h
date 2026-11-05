@@ -24,7 +24,7 @@ struct RecorderOptions
     std::string               captureAgent;
     std::chrono::milliseconds flushEvery{ 5000 };
     std::chrono::milliseconds drainEvery{ 50 };
-    size_t                    queueBytes{ 64 * 1024 * 1024 };
+    size_t                    queueBytes{ size_t{ 64 } * 1024 * 1024 };
     // Asked on the writer thread as each capture opens: whether it, its session file, and its live frames keep chat. Empty: redact.
     std::function<xicap::Chat()> chat;
     // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then

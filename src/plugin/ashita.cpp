@@ -73,7 +73,7 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     {
         late = LateLogin{ .characterId = party->GetMemberServerId(0), .name = party->GetMemberName(0) };
     }
-    session_->start(std::move(late));
+    session_->start(late);
     return true;
 }
 

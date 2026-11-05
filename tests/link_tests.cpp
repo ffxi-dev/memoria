@@ -31,7 +31,7 @@ namespace
 class FakeLink final : public Http
 {
 public:
-    enum class Code
+    enum class Code : uint8_t
     {
         Pending,
         Approved,
@@ -123,7 +123,7 @@ TEST_CASE("the link is kept across restarts")
 TEST_CASE("a link that cannot be written says so")
 {
     const auto dir = tempDir();
-    std::ofstream{ dir / "config" }; // a file where the folder should be
+    touch(dir / "config"); // a file where the folder should be
     CHECK_FALSE(saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" }));
     fs::remove_all(dir);
 }
@@ -134,7 +134,7 @@ TEST_CASE("live goes on only while the install shares: not paused, and the same 
     const auto config = dir / "config";
     REQUIRE(saveLink(config / "token", { .token = "t0ken", .account = "player" }));
     CHECK(sharing(config, "t0ken"));
-    std::ofstream{ config / "paused" }; // /memoria upload off, in any client
+    touch(config / "paused"); // /memoria upload off, in any client
     CHECK_FALSE(sharing(config, "t0ken"));
     fs::remove(config / "paused");
     CHECK(sharing(config, "t0ken"));

@@ -57,7 +57,7 @@ public:
     auto operator=(const Session&) -> Session& = delete;
     auto operator=(Session&&) -> Session&      = delete;
 
-    auto start(std::optional<LateLogin> late) -> void;
+    auto start(const std::optional<LateLogin>& late) -> void;
 
     auto incoming(uint16_t id, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto outgoing(uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
@@ -95,33 +95,33 @@ private:
     auto stopLive() -> void;
     auto refreshChat() -> void; // asks Mogsafe whether the linked account saves chat, off the game thread
 
-    Host                               host_;
-    std::string                        server_{ "https://mogsafe.sruon.dev" };
-    std::mutex                         inboxMutex_;
-    std::vector<std::string>           inbox_;
-    std::optional<account::Linked>     arrived_; // from the link thread
-    capture::Clock                     clock_;
-    std::unique_ptr<capture::Recorder> recorder_;
-    std::unique_ptr<upload::Uploader>  uploader_;
-    std::unique_ptr<Live>              live_; // after recorder_, whose feed it reads
-    std::vector<std::unique_ptr<Live>> closing_;
-    HANDLE                             uploadMutex_{ nullptr };
-    std::unique_ptr<captain::Importer> importer_;
-    std::atomic<bool>                  reminding_{ false };
-    std::string                        startError_;
-    std::string                        searchError_;
-    std::string                        characterError_; // why the content id and world are missing
-    xicap::Character                   character_;
-    bool                               loggedIn_{ false };
-    bool                               privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
-    std::optional<uint64_t>            sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
-    uint32_t                           loggedInAs_{ 0 };
-    std::optional<ChunkKey>            lastChunk_[2];      // the last chunk seen in each direction
-    std::atomic<bool>                  saveChat_{ false }; // for the next capture: the linked account's choice
-    std::atomic<bool>                  fetchingChat_{ false };
-    std::jthread                       chatFetch_;
-    std::jthread                       reminder_;
-    std::jthread                       linker_; // last: destroyed first, before what its thread uses
+    Host                                   host_;
+    std::string                            server_{ "https://mogsafe.sruon.dev" };
+    std::mutex                             inboxMutex_;
+    std::vector<std::string>               inbox_;
+    std::optional<account::Linked>         arrived_; // from the link thread
+    capture::Clock                         clock_;
+    std::unique_ptr<capture::Recorder>     recorder_;
+    std::unique_ptr<upload::Uploader>      uploader_;
+    std::unique_ptr<Live>                  live_; // after recorder_, whose feed it reads
+    std::vector<std::unique_ptr<Live>>     closing_;
+    HANDLE                                 uploadMutex_{ nullptr };
+    std::unique_ptr<captain::Importer>     importer_;
+    std::atomic<bool>                      reminding_{ false };
+    std::string                            startError_;
+    std::string                            searchError_;
+    std::string                            characterError_; // why the content id and world are missing
+    xicap::Character                       character_;
+    bool                                   loggedIn_{ false };
+    bool                                   privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
+    std::optional<uint64_t>                sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
+    uint32_t                               loggedInAs_{ 0 };
+    std::array<std::optional<ChunkKey>, 2> lastChunk_;         // the last chunk seen in each direction
+    std::atomic<bool>                      saveChat_{ false }; // for the next capture: the linked account's choice
+    std::atomic<bool>                      fetchingChat_{ false };
+    std::jthread                           chatFetch_;
+    std::jthread                           reminder_;
+    std::jthread                           linker_; // last: destroyed first, before what its thread uses
 };
 
 } // namespace memoria

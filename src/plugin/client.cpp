@@ -44,7 +44,7 @@ struct Patch
 // Points the call at operand to target, if it calls expected.
 auto redirect(const uintptr_t operand, const uintptr_t expected, const uintptr_t target) -> std::optional<Patch>
 {
-    const Patch patch{ operand, read32(operand) };
+    const Patch patch{ .operand = operand, .backup = read32(operand) };
     if (operand + 4 + patch.backup != expected || !write32(operand, static_cast<uint32_t>(target - (operand + 4))))
     {
         return std::nullopt;

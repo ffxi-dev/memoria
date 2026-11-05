@@ -127,14 +127,14 @@ auto Recorder::sessionStop(const uint64_t timestamp) -> void
 
 auto Recorder::status() const -> RecorderStatus
 {
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     return status_;
 }
 
 auto Recorder::stop() -> void
 {
     {
-        std::lock_guard lock(wakeMutex_);
+        const std::scoped_lock lock(wakeMutex_);
         if (stopping_)
         {
             return;
@@ -188,7 +188,7 @@ auto Recorder::run() -> void
         if (const auto dropped = queue_.takeDropped(); dropped > 0)
         {
             {
-                std::lock_guard lock(statusMutex_);
+                const std::scoped_lock lock(statusMutex_);
                 status_.dropped += dropped;
             }
             handle({ .kind = EventKind::Note, .text = std::format("dropped {} packets: the writer fell behind", dropped) });
@@ -202,7 +202,7 @@ auto Recorder::run() -> void
                 writer_->flush();
                 if (std::exchange(failing_, false))
                 {
-                    std::lock_guard lock(statusMutex_);
+                    const std::scoped_lock lock(statusMutex_);
                     status_.error.clear();
                 }
             }
@@ -235,6 +235,10 @@ auto Recorder::handle(const Event& event) -> void
         switch (event.kind)
         {
             case EventKind::Login:
+                if (!event.login)
+                {
+                    break;
+                }
                 if (writer_ && login_ && sameCharacter(*login_, *event.login))
                 {
                     login_ = event.login; // the header keeps what it had; later logins compare against what is now known
@@ -271,7 +275,7 @@ auto Recorder::handle(const Event& event) -> void
                 }
                 else if (login_) // the capture broke: until it reopens, the packet is lost
                 {
-                    std::lock_guard lock(statusMutex_);
+                    const std::scoped_lock lock(statusMutex_);
                     status_.dropped++;
                 }
                 break;
@@ -320,7 +324,7 @@ auto Recorder::open(const uint64_t timestamp, const Login& who) -> void
     {
         mark(xicap::MarkerKind::Login);
     }
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.capture = path;
     status_.packets = 0;
     status_.bytes   = 0;
@@ -345,7 +349,7 @@ auto Recorder::write(const Event& event) -> void
               });
     writer_->write(packet);
     live_.push(packet, chat_);
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.packets++;
     status_.bytes += event.data.size();
     if (event.channel == xicap::Channel::Search)
@@ -397,7 +401,7 @@ auto Recorder::openSession(const std::filesystem::path& path) -> void
         sessionFailed(error);
         return;
     }
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.session = path;
     status_.sessionError.clear();
 }
@@ -409,14 +413,14 @@ auto Recorder::closeSession() -> void
                   session.close();
               });
     session_.reset();
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.session.clear();
 }
 
 auto Recorder::sessionFailed(const std::exception& error) -> void
 {
     session_.reset();
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.sessionError = error.what();
     status_.session.clear();
 }
@@ -430,13 +434,13 @@ auto Recorder::close() -> void
     }
     finish();
     login_.reset();
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.capture.clear();
 }
 
 auto Recorder::fail(const std::exception& error) -> void
 {
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.error = error.what();
 }
 
@@ -447,7 +451,7 @@ auto Recorder::broken(const std::exception& error) -> void
     session_.reset();
     writer_.reset();
     {
-        std::lock_guard lock(statusMutex_);
+        const std::scoped_lock lock(statusMutex_);
         if (!status_.session.empty())
         {
             status_.sessionError = std::format("the capture stopped: {}", error.what());
@@ -467,7 +471,7 @@ auto Recorder::rollover() -> void
 {
     finish();
     reopenAt_ = {};
-    std::lock_guard lock(statusMutex_);
+    const std::scoped_lock lock(statusMutex_);
     status_.capture.clear();
 }
 

@@ -55,7 +55,7 @@ Session::Session(Host host)
 {
 }
 
-auto Session::start(const std::optional<LateLogin> late) -> void
+auto Session::start(const std::optional<LateLogin>& late) -> void
 {
     server_ = serverIn(host_.config / "upload.ini").value_or(server_);
 
@@ -114,6 +114,7 @@ auto Session::start(const std::optional<LateLogin> late) -> void
     host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, host_.captures.string()));
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): only running out of memory throws here, and that ends the game anyway
 Session::~Session()
 {
     linker_    = {};
@@ -201,7 +202,7 @@ auto Session::record(const bool clientToServer, const uint32_t size, const uint8
     // Ashita hands each packet as a copy, so a new chunk shows as a new chunk pointer, size, or head (its sequence number).
     if (dataChunk && sizeChunk > 0)
     {
-        ChunkKey key{ reinterpret_cast<uintptr_t>(dataChunk), sizeChunk, {} };
+        ChunkKey key{ .pointer = reinterpret_cast<uintptr_t>(dataChunk), .size = sizeChunk, .head = {} };
         std::memcpy(key.head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key.head.size()));
         auto& last = lastChunk_[clientToServer ? 1 : 0];
         if (last != key)
@@ -237,7 +238,7 @@ auto Session::frame() -> void
     std::vector<std::string>       inbox;
     std::optional<account::Linked> arrived;
     {
-        std::lock_guard lock(inboxMutex_);
+        const std::scoped_lock lock(inboxMutex_);
         inbox.swap(inbox_);
         arrived.swap(arrived_);
     }
@@ -306,7 +307,7 @@ auto Session::say(const std::string& text) -> void
 
 auto Session::post(std::string text) -> void
 {
-    std::lock_guard lock(inboxMutex_);
+    const std::scoped_lock lock(inboxMutex_);
     inbox_.push_back(std::move(text));
 }
 
@@ -372,7 +373,7 @@ auto Session::startImport(const bool asked) -> void
 // Asks for a code, then polls until the player approves it on the link page.
 auto Session::link() -> void
 {
-    linker_ = std::jthread([this](std::stop_token stop)
+    linker_ = std::jthread([this](const std::stop_token& stop)
                            {
                                WinHttp http;
                                // Replacing or destroying linker_ joins this thread on the game thread: end a request in flight at once.
@@ -428,7 +429,7 @@ auto Session::link() -> void
                                            post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
                                            return;
                                        }
-                                       std::lock_guard inbox(inboxMutex_);
+                                       const std::scoped_lock inbox(inboxMutex_);
                                        arrived_ = **result;
                                        return;
                                    }
@@ -463,11 +464,11 @@ auto Session::refreshChat() -> void
     }
     chatFetch_ = std::jthread([this](const std::stop_token& stop)
                               {
-                                  WinHttp            http;
-                                  std::stop_callback cancel(stop, [&]
-                                                            {
-                                                                http.cancel();
-                                                            });
+                                  WinHttp                  http;
+                                  const std::stop_callback cancel(stop, [&]
+                                                                  {
+                                                                      http.cancel();
+                                                                  });
                                   if (const auto link = linked(); !link) // read here: the caller may be a packet hook
                                   {
                                       saveChat_ = false;

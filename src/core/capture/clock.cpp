@@ -21,7 +21,7 @@ Clock::Clock()
 {
 }
 
-Clock::Clock(const Source wallMs, Source steadyMs)
+Clock::Clock(const Source& wallMs, Source steadyMs)
 : steadyMs_(std::move(steadyMs))
 , startWallMs_(wallMs())
 , startSteadyMs_(steadyMs_())
