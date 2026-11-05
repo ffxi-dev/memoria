@@ -38,9 +38,9 @@ auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<ui
 class Feed
 {
 public:
-    static constexpr size_t MESSAGE_BYTES = 64 * 1024;
+    static constexpr size_t MESSAGE_BYTES = size_t{ 64 } * 1024;
 
-    explicit Feed(size_t maxBytes = 1024 * 1024);
+    explicit Feed(size_t maxBytes = size_t{ 1024 } * 1024);
 
     auto push(const xicap::WritePacket& packet, xicap::Chat chat) -> void;
 

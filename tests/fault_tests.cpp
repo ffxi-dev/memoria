@@ -320,7 +320,7 @@ TEST_CASE("a full disk is said once, ends the session with a reason, and counts 
     std::vector<std::string> said;
     opts.failed = [&](const std::string& why)
     {
-        std::lock_guard lock(mutex);
+        const std::scoped_lock lock(mutex);
         said.push_back(why);
     };
     Recorder rec(opts);
@@ -354,7 +354,7 @@ TEST_CASE("a full disk is said once, ends the session with a reason, and counts 
                     }));
     rec.stop();
     {
-        std::lock_guard lock(mutex);
+        const std::scoped_lock lock(mutex);
         CHECK(said.size() == 1);
     }
     fs::remove_all(dir);

@@ -235,6 +235,10 @@ auto Recorder::handle(const Event& event) -> void
         switch (event.kind)
         {
             case EventKind::Login:
+                if (!event.login)
+                {
+                    break;
+                }
                 if (writer_ && login_ && sameCharacter(*login_, *event.login))
                 {
                     login_ = event.login; // the header keeps what it had; later logins compare against what is now known

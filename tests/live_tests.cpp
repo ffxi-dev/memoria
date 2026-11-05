@@ -143,7 +143,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
 
 TEST_CASE("a full live feed drops packets and counts them")
 {
-    live::Feed feed(3 * 32);
+    live::Feed feed(size_t{ 3 } * 32);
     const auto owner = feed.claim();
     feed.open(owner, true);
     for (int i = 0; i < 5; ++i)

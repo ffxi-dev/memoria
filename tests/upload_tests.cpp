@@ -85,7 +85,7 @@ TEST_CASE("a crash during the first pass resumes the upload it created")
         const auto  file = dir / "a.xicap";
         FakeMogsafe server;
         server.crashAtPatch = crashAt;
-        append(file, std::string(3 * 512 * 1024, 'x'));
+        append(file, std::string(size_t{ 3 } * 512 * 1024, 'x'));
         CHECK_THROWS(uploader(dir, server)->pass()); // no save at the end of the pass, as in a crash
         server.crashAtPatch = -1;
         CHECK(!uploader(dir, server)->pass());
