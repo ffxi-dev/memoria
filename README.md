@@ -31,7 +31,7 @@ Chat text is zeroed in place, so chat packets keep their length. A linked accoun
 
 ## Uploads
 
-Memoria sends each capture to Mogsafe as it grows and resumes after a crash, a restart or a lost connection without sending a byte twice. It closes a capture's upload once the capture is complete. At unload it waits at most three seconds for the last bytes.
+Memoria sends each capture to Mogsafe as it grows, and after a crash, a restart or a lost connection resumes from the bytes Mogsafe holds. When Mogsafe has cut a recording off, its tail goes up as a new capture that starts at a frame boundary, so a few packets may reach Vault twice. It closes a capture's upload once the capture is complete. At unload it waits at most three seconds for the last bytes.
 
 Mogsafe ends a recording that has sent nothing for five minutes. The part it never got goes up later as a capture of its own that names the first.
 
@@ -67,8 +67,8 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 
 ## Layout
 
-- `src/core/`: everything without Ashita code, built and tested on Windows and Linux. Each folder is a namespace: `capture/` (the event queue, clock and recorder), `upload/` (the uploader and its state file), `account/` (linking and the chat choice), `live/` (the live feed) and `captain/` (captain imports). `http.h`, `tus.*`, `file.*` and `units.*`, which several of them use, sit at the top.
-- `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe.
+- `src/core/`: everything without Ashita code, built and tested on Windows and Linux. Each folder is a namespace: `capture/` (the event queue, clock and recorder), `upload/` (the uploader and its state file), `account/` (linking, and the chat choice tied to the token that made it), `live/` (the live feed) and `captain/` (captain imports). `http.h`, `tus.*`, `file.*` and `units.*`, which several of them use, sit at the top.
+- `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe; `worker.*` runs the short jobs a packet hook must not wait on.
 - `tests/`: the core's tests, one file per module, with shared fakes in `support.h`.
 - `openspec/`: what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's CMake helper, unchanged.
@@ -78,7 +78,7 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 - The game thread never waits: packet hooks only copy into the queue. Compression, writing, flushing and uploading run on Memoria's own threads.
 - Captures are written only through xicap's library, with its live preset.
 - Upload credentials and the link handle are never printed or logged.
-- A change in behaviour updates its spec in `openspec/` in the same commit.
+- A change that alters a capability in `openspec/specs/` updates that spec in the same commit, and a larger change records its reasoning under `openspec/changes/`.
 - CI builds the plugin with MSVC, runs the core's tests on Linux and as 32-bit Windows programs, and checks formatting with clang-format 23.
 
 ## Licence
