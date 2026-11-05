@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <vector>
@@ -91,7 +92,7 @@ private:
     std::thread              thread_;
     std::mutex               wakeMutex_;
     std::condition_variable  wake_;
-    std::atomic<bool>        stopping_{ false };
+    std::stop_source         stop_;
     std::atomic<bool>        finishing_{ false };
     std::vector<std::string> finish_;     // the files finish() names, under wakeMutex_
     bool                     finished_{}; // under wakeMutex_

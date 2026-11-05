@@ -35,7 +35,7 @@ auto oneLine(std::string text) -> std::string
 }
 
 // Only the first size bytes: the file may still be growing.
-auto sha256(const std::filesystem::path& path, const uint64_t size, const std::atomic<bool>& stopping) -> std::optional<std::string>
+auto sha256(const std::filesystem::path& path, const uint64_t size, const std::stop_token& stop) -> std::optional<std::string>
 {
     std::ifstream                in(path, std::ios::binary);
     std::vector<char>            chunk(Tus::CHUNK_SIZE);
@@ -43,7 +43,7 @@ auto sha256(const std::filesystem::path& path, const uint64_t size, const std::a
     for (uint64_t left = size; left > 0;)
     {
         const auto n = std::min<uint64_t>(left, chunk.size());
-        if (stopping || !in.read(chunk.data(), static_cast<std::streamsize>(n)))
+        if (stop.stop_requested() || !in.read(chunk.data(), static_cast<std::streamsize>(n)))
         {
             return std::nullopt;
         }
@@ -117,7 +117,7 @@ Uploader::~Uploader()
 {
     {
         const std::scoped_lock lock(wakeMutex_);
-        stopping_ = true;
+        stop_.request_stop();
     }
     http_->cancel();
     wake_.notify_all();
@@ -152,10 +152,10 @@ auto Uploader::run() -> void
         std::unique_lock lock(wakeMutex_);
         if (wake_.wait_for(lock, wait, [this]
                            {
-                               return stopping_ || finishing_;
+                               return stop_.stop_requested() || finishing_;
                            }))
         {
-            if (finishing_ && !stopping_)
+            if (finishing_ && !stop_.stop_requested())
             {
                 const auto names = finish_;
                 lock.unlock();
@@ -213,7 +213,7 @@ auto Uploader::last(const std::string& name) -> void
         f = files_[name];
     }
     last_ = true;
-    for (int i = 0; i < 3 && !f.closed && !f.ended && !stopping_; ++i)
+    for (int i = 0; i < 3 && !f.closed && !f.ended && !stop_.stop_requested(); ++i)
     {
         if (step(options_.dir / name, f, std::chrono::milliseconds(0)))
         {
@@ -239,7 +239,7 @@ auto Uploader::pass() -> std::optional<std::string>
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (stopping_ || finishing_ || !tus_.allowed())
+        if (stop_.stop_requested() || finishing_ || !tus_.allowed())
         {
             break;
         }
@@ -383,7 +383,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
 {
     const auto sent = tus_.append(path, f.url, offset, size, [this](uint64_t)
                                   {
-                                      return !stopping_ && (!finishing_ || last_) && tus_.allowed(); // finish() ends a pass, not its own sending
+                                      return !stop_.stop_requested() && (!finishing_ || last_) && tus_.allowed(); // finish() ends a pass, not its own sending
                                   });
     if (!sent)
     {
@@ -404,7 +404,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
 
 auto Uploader::close(const std::filesystem::path& path, UploadFile& f, const uint64_t size) -> std::optional<std::string>
 {
-    const auto hash = sha256(path, size, stopping_);
+    const auto hash = sha256(path, size, stop_.get_token());
     if (!hash)
     {
         return "cannot read the capture";
@@ -481,7 +481,7 @@ auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::op
         {
             const auto packets = continueFrom(path, f.sent, tmp, [this]
                                               {
-                                                  return stopping_ || finishing_;
+                                                  return stop_.stop_requested() || finishing_;
                                               });
             if (!packets)
             {

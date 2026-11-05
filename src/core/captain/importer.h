@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -94,7 +95,7 @@ private:
     std::atomic<size_t>   count_{ 0 };
     std::atomic<uint64_t> sent_{ 0 };
     std::atomic<uint64_t> size_{ 0 };
-    std::atomic<bool>     stopping_{ false };
+    std::stop_source      stop_;
     std::atomic<bool>     finished_{ false };
     std::thread           thread_;
 };

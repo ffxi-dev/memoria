@@ -16,7 +16,6 @@ Worker::Worker()
 
 Worker::~Worker()
 {
-    stopping_ = true;
     thread_.request_stop();
 }
 
@@ -27,11 +26,6 @@ auto Worker::post(Job job) -> void
         jobs_.push_back(std::move(job));
     }
     wake_.notify_one();
-}
-
-auto Worker::stopping() const -> const std::atomic<bool>&
-{
-    return stopping_;
 }
 
 auto Worker::run(const std::stop_token& stop) -> void

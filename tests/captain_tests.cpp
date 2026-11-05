@@ -140,9 +140,9 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
 
 TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
 {
-    const Install     in;
-    std::atomic<bool> stop{ false };
-    std::string       log;
+    const Install    in;
+    std::stop_source stop;
+    std::string      log;
     for (int i = 0; i < 1000; ++i)
     {
         log += "[2026-08-04 23:54:01] Incoming packet 0x00A\n|  00 01 02 03 |\n";
@@ -150,14 +150,14 @@ TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
     std::ofstream(in.dir / "check", std::ios::binary) << "123456789";
     std::ofstream(in.dir / "full.log", std::ios::binary) << log;
     // The values Mogsafe's zip.js crc32Of, which browse.html calls, gives for the same bytes.
-    CHECK(crc32File(in.dir / "check", stop)->crc == 0xcbf43926);
-    const auto crc = crc32File(in.dir / "full.log", stop);
+    CHECK(crc32File(in.dir / "check")->crc == 0xcbf43926);
+    const auto crc = crc32File(in.dir / "full.log");
     REQUIRE(crc);
     CHECK(crc->crc == 0x94175684);
     CHECK(crc->size == 61000);
-    CHECK(!crc32File(in.dir / "missing", stop));
-    stop = true;
-    CHECK(!crc32File(in.dir / "full.log", stop));
+    CHECK(!crc32File(in.dir / "missing"));
+    stop.request_stop();
+    CHECK(!crc32File(in.dir / "full.log", stop.get_token()));
 }
 
 TEST_CASE("a captain import sends full.log compressed with its manifest, then moves the folder")
@@ -204,9 +204,8 @@ TEST_CASE("a log already in Vault sends no bytes and moves")
     Install    in;
     const auto log = std::string("[2026-08-04] x\n");
     captainFolder(in.captures, "s/Mirabeth", log);
-    FakeMogsafe             server;
-    const std::atomic<bool> stop{ false };
-    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop)->crc, log.size())] = "cap7";
+    FakeMogsafe server;
+    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log")->crc, log.size())] = "cap7";
     in.importer(server)->run();
     CHECK(server.creates == 0);
     CHECK(server.received == 0);
@@ -425,8 +424,7 @@ TEST_CASE("a folder's search log goes ahead of its full.log in the same upload, 
     REQUIRE(server.creates == 2);
     const auto& u = server.uploads.at("/v1/uploads/1");
     CHECK(u.closed);
-    const std::atomic<bool> stop{ false };
-    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "a/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "a/Hoa/SearchLog/search.log")->crc));
     CHECK(u.meta.at("search_size") == std::to_string(search.size()));
     CHECK(!u.meta.contains("search_encoding"));
     CHECK(searchParts(u) == std::pair{ search, log });
@@ -446,11 +444,10 @@ TEST_CASE("a folder in Vault without its search log replaces its capture; withou
     const auto log = noise(3000);
     searchFolder(captainFolder(in.captures, "a/Hoa", log), "search");
     captainFolder(in.captures, "b/Ijs", log + "b");
-    FakeMogsafe       server;
-    std::atomic<bool> stop{ false };
-    const auto        key = [&](const std::string& rel)
+    FakeMogsafe server;
+    const auto  key = [&](const std::string& rel)
     {
-        return std::format("{:08x}:{}", crc32File(in.captures / rel / "PacketLogger" / "full.log", stop)->crc, fs::file_size(in.captures / rel / "PacketLogger" / "full.log"));
+        return std::format("{:08x}:{}", crc32File(in.captures / rel / "PacketLogger" / "full.log")->crc, fs::file_size(in.captures / rel / "PacketLogger" / "full.log"));
     };
     server.imported[key("a/Hoa")] = "cap7";
     server.imported[key("b/Ijs")] = "cap8";
@@ -756,8 +753,7 @@ TEST_CASE("a log that cannot be staged stops the import and keeps its place for 
     Install    in;
     const auto log = noise(3 << 20);
     captainFolder(in.captures, "s/Mirabeth", log);
-    const std::atomic<bool> stop{ false };
-    const auto              crc = crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop);
+    const auto crc = crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log");
     REQUIRE(crc);
     const auto blocker = in.state / "imports" / std::format("{:08x}-{}.zst.tmp", crc->crc, crc->size);
     fs::create_directories(blocker);
@@ -802,10 +798,9 @@ TEST_CASE("a search log changed after an interrupted create goes up as it is now
     server.down = false;
     in.importer(server)->run();
     REQUIRE(server.uploads.size() == 1);
-    const auto&             u = server.uploads.begin()->second;
-    const std::atomic<bool> stop{ false };
+    const auto& u = server.uploads.begin()->second;
     CHECK(searchParts(u) == std::pair{ now, log });
-    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "s/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "s/Hoa/SearchLog/search.log")->crc));
     CHECK(u.meta.at("search_size") == std::to_string(now.size()));
 }
 
@@ -863,9 +858,8 @@ TEST_CASE("an old stage that cannot be removed stops the import before a new cre
     CHECK_THROWS(in.importer(server)->run());
     server.uploads.clear();
     server.crashAtPatch = -1;
-    const std::atomic<bool> stop{ false };
-    const auto              crc   = crc32File(dir / "PacketLogger" / "full.log", stop);
-    const auto              stage = in.state / "imports" / std::format("{:08x}-{}.zst", crc->crc, crc->size);
+    const auto crc      = crc32File(dir / "PacketLogger" / "full.log");
+    const auto stage    = in.state / "imports" / std::format("{:08x}-{}.zst", crc->crc, crc->size);
     REQUIRE(fs::remove(stage));
     fs::create_directories(stage / "inside"); // a folder that is not empty cannot be removed
     in.importer(server)->run();

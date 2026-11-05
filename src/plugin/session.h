@@ -99,7 +99,7 @@ private:
     auto linked() const -> std::optional<Linked>;  // read each time: clients sharing the install share its token
     auto greet() -> void;
     auto remind() -> void;
-    auto offerImport() -> void;
+    auto offerImport(const std::stop_token& stop) -> void;
     auto startImport(bool asked) -> void;
     auto importLine() const -> std::string;
     auto hello() -> std::string;

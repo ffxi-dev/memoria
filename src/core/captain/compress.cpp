@@ -9,7 +9,7 @@
 namespace memoria::captain
 {
 
-auto compressLog(const std::filesystem::path& log, const std::filesystem::path& out, const std::filesystem::path& head, const std::atomic<bool>& stop) -> std::optional<std::string>
+auto compressLog(const std::filesystem::path& log, const std::filesystem::path& out, const std::filesystem::path& head, const std::stop_token& stop) -> std::optional<std::string>
 {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -44,7 +44,7 @@ auto compressLog(const std::filesystem::path& log, const std::filesystem::path& 
         }
         for (bool last = false; !last;)
         {
-            if (stop)
+            if (stop.stop_requested())
             {
                 o.close();
                 return fail("stopped");

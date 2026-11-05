@@ -75,7 +75,7 @@ Importer::~Importer()
 {
     {
         const std::scoped_lock lock(mutex_);
-        stopping_ = true;
+        stop_.request_stop();
     }
     http_->cancel();
     wake_.notify_all();
@@ -142,8 +142,8 @@ auto Importer::run() -> void
         return;
     }
 
-    auto found = findCaptain(options_.captures, options_.quiet, stopping_);
-    if (stopping_)
+    auto found = findCaptain(options_.captures, options_.quiet, stop_.get_token());
+    if (stop_.stop_requested())
     {
         return;
     }
@@ -210,11 +210,11 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
     auto       e   = entries_[c.folder];
     if (e.crc.empty() || e.size != c.size)
     {
-        const auto crc = crc32File(log, stopping_);
+        const auto crc = crc32File(log, stop_.get_token());
         if (!crc)
         {
             entries_.erase(c.folder);
-            if (stopping_)
+            if (stop_.stop_requested())
             {
                 return Outcome::Stopped;
             }
@@ -282,10 +282,10 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             std::string search;
             if (c.searchSize > 0)
             {
-                const auto crc = crc32File(searchLog, stopping_);
+                const auto crc = crc32File(searchLog, stop_.get_token());
                 if (!crc)
                 {
-                    if (stopping_)
+                    if (stop_.stop_requested())
                     {
                         return Outcome::Stopped;
                     }
@@ -293,18 +293,18 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                     say(prefix + "cannot read its search.log; skipped.");
                     return Outcome::Skipped;
                 }
-                if (const auto error = compressLog(searchLog, searchStaged, {}, stopping_))
+                if (const auto error = compressLog(searchLog, searchStaged, {}, stop_.get_token()))
                 {
-                    if (stopping_)
+                    if (stop_.stop_requested())
                     {
                         return Outcome::Stopped;
                     }
                     say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
                     return Outcome::Failed;
                 }
-                if (const auto staging = crc32File(searchLog, stopping_); !staging || staging->crc != crc->crc || staging->size != crc->size)
+                if (const auto staging = crc32File(searchLog, stop_.get_token()); !staging || staging->crc != crc->crc || staging->size != crc->size)
                 {
-                    if (stopping_)
+                    if (stop_.stop_requested())
                     {
                         return Outcome::Stopped;
                     }
@@ -369,9 +369,9 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                 e.url.clear();
                 continue;
             }
-            if (const auto error = compressLog(log, staged, c.searchSize > 0 ? searchStaged : fs::path{}, stopping_))
+            if (const auto error = compressLog(log, staged, c.searchSize > 0 ? searchStaged : fs::path{}, stop_.get_token()))
             {
-                if (stopping_)
+                if (stop_.stop_requested())
                 {
                     return Outcome::Stopped;
                 }
@@ -387,7 +387,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             const auto sent = tus_.append(staged, e.url, *offset, total, [this](uint64_t at)
                                           {
                                               sent_ = at;
-                                              return !stopping_ && tus_.allowed();
+                                              return !stop_.stop_requested() && tus_.allowed();
                                           });
             if (!sent)
             {
@@ -442,7 +442,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         }
         again();
     }
-    if (!stopping_)
+    if (!stop_.stop_requested())
     {
         say("Captain import stopped: this install is not linked. It goes on after /memoria link.");
     }
@@ -463,7 +463,7 @@ auto Importer::moved(const CaptainCapture& c, const std::string& prefix, const s
 
 auto Importer::ready() -> bool
 {
-    while (!stopping_)
+    while (!stop_.stop_requested())
     {
         if (tus_.allowed())
         {
@@ -484,7 +484,7 @@ auto Importer::wait(const std::chrono::milliseconds time) -> void
     std::unique_lock lock(mutex_);
     wake_.wait_for(lock, time, [this]
                    {
-                       return stopping_.load();
+                       return stop_.stop_requested();
                    });
 }
 

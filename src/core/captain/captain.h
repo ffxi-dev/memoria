@@ -1,11 +1,11 @@
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -23,11 +23,9 @@ struct CaptainCapture
     bool                  growing{};    // full.log changed within the quiet time, or a log's size could not be read: PacketLogger may still be writing it
 };
 
-inline const std::atomic<bool> NEVER_STOP{ false };
-
 // Every captain capture under root, at any depth, in path order. A match's own subfolders are not searched. Stops early,
-// with what it found so far, once stop is set.
-auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet = std::chrono::minutes(10), const std::atomic<bool>& stop = NEVER_STOP) -> std::vector<CaptainCapture>;
+// with what it found so far, once stop is requested.
+auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet = std::chrono::minutes(10), const std::stop_token& stop = {}) -> std::vector<CaptainCapture>;
 
 struct Crc32
 {
@@ -35,13 +33,13 @@ struct Crc32
     uint64_t size{};
 };
 
-// CRC-32 (IEEE, as zip uses) of a file; nothing if it cannot be read or stop is set.
-auto crc32File(const std::filesystem::path& path, const std::atomic<bool>& stop) -> std::optional<Crc32>;
+// CRC-32 (IEEE, as zip uses) of a file; nothing if it cannot be read or stop is requested.
+auto crc32File(const std::filesystem::path& path, const std::stop_token& stop = {}) -> std::optional<Crc32>;
 
 // Moves dir, under root, to the same relative path under uploaded, with -2, -3... on a clash, then removes the folders it leaves empty up to root.
 auto moveAside(const std::filesystem::path& root, const std::filesystem::path& uploaded, const std::filesystem::path& dir) -> std::expected<std::filesystem::path, std::string>;
 
 // True for one caller only, ever, per install: while linked and a capture waits, the first to create config's import-reminded file wins.
-auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root, const std::atomic<bool>& stop = NEVER_STOP) -> bool;
+auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root, const std::stop_token& stop = {}) -> bool;
 
 } // namespace memoria::captain

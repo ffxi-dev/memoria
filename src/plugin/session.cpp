@@ -307,11 +307,11 @@ auto Session::greet() -> void
     {
         return;
     }
-    worker_.post([this](const std::stop_token&)
+    worker_.post([this](const std::stop_token& stop)
                  {
                      reminding_ = false;
                      remind();
-                     offerImport();
+                     offerImport(stop);
                  });
 }
 
@@ -331,10 +331,10 @@ auto Session::remind() -> void
 }
 
 // Once per install, ever: while linked and captain captures wait.
-auto Session::offerImport() -> void
+auto Session::offerImport(const std::stop_token& stop) -> void
 {
     // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && captain::remindImport(host_.config, host_.captain / "captures", worker_.stopping()))
+    if (linked() && captain::remindImport(host_.config, host_.captain / "captures", stop))
     {
         post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }
