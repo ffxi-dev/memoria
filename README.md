@@ -31,7 +31,7 @@ Chat text is zeroed in place, so chat packets keep their length. A linked accoun
 
 ## Uploads
 
-Memoria sends each capture to Mogsafe as it grows, and after a crash, a restart or a lost connection resumes from the bytes Mogsafe holds. When Mogsafe has cut a recording off, its tail goes up as a new capture that starts at a frame boundary, so a few packets may reach Vault twice. It closes a capture's upload once the capture is complete. At unload it waits at most three seconds for the last bytes.
+Memoria sends each capture to Mogsafe as it grows, and after a crash, a restart or a lost connection resumes from the bytes Mogsafe holds. When Mogsafe has cut a recording off, its tail goes up as a new capture that starts at a frame boundary, so a few packets may reach Vault twice. It closes a capture's upload once the capture is complete. At unload it gives the last bytes three seconds, then waits for any request still in flight to finish or time out: seconds as a rule, and up to a minute only when Mogsafe is slow to answer a close.
 
 Mogsafe ends a recording that has sent nothing for five minutes. The part it never got goes up later as a capture of its own that names the first.
 
@@ -39,7 +39,7 @@ To use another Mogsafe server, put `server = https://...` in `<Ashita>/config/me
 
 ## Live
 
-`/memoria live` needs a linked install. Mogsafe gives Memoria a link that anyone can open while it lasts, at most 12 hours, and Memoria opens it in your browser. Packets go out only while someone watches, and viewers see what the capture holds, so chat stays zeroed unless you save it. `/memoria live` again reopens the page. `/memoria live off`, `/memoria unlink`, `/memoria upload off` and unloading all end the link.
+`/memoria live` needs a linked install. Mogsafe gives Memoria a link that anyone can open while it lasts, at most 12 hours, and Memoria opens it in your browser. Packets go out only while someone watches, and viewers see what the capture holds, so chat stays zeroed unless you save it. `/memoria live` again reopens the page. `/memoria live off`, `/memoria unlink` and `/memoria upload off` end the link; unloading leaves it to expire.
 
 ## Captain imports
 
@@ -75,7 +75,7 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 
 ## Contributing
 
-- The game thread never waits: packet hooks only copy into the queue. Compression, writing, flushing and uploading run on Memoria's own threads.
+- Packet hooks never wait: they only copy into the queue. Compression, writing, flushing and uploading run on Memoria's own threads.
 - Captures are written only through xicap's library, with its live preset.
 - Upload credentials and the link handle are never printed or logged.
 - A change that alters a capability in `openspec/specs/` updates that spec in the same commit, and a larger change records its reasoning under `openspec/changes/`.

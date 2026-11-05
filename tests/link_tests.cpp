@@ -216,3 +216,49 @@ TEST_CASE("a token taken by mistake goes back without replacing one saved meanwh
     CHECK(olds() == 1); // the taken token stays in its file
     fs::remove_all(dir);
 }
+
+TEST_CASE("an approval that comes with a stop is dropped, so no token is published after an unlink")
+{
+    struct Poll final : Http
+    {
+        std::function<HttpResponse()> answer;
+
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            return answer();
+        }
+    } mogsafe;
+    const LinkCode code{ .code = "A", .poll = "p", .url = "https://mogsafe.test/link", .interval = std::chrono::seconds(0), .expires = std::chrono::seconds(60) };
+    const auto     approved = []
+    {
+        return HttpResponse{ .status = 200, .body = R"({"token":"t0ken","account":"player"})" };
+    };
+
+    std::stop_source unlink;
+    int              polls{ 0 };
+    mogsafe.answer = [&]
+    {
+        if (++polls == 2)
+        {
+            unlink.request_stop(); // /memoria unlink while this poll is in flight
+            return approved();
+        }
+        return HttpResponse{ .status = 202 };
+    };
+    const auto stopped = waitForApproval(mogsafe, "https://mogsafe.test", code, unlink.get_token());
+    REQUIRE(!stopped);
+    CHECK(stopped.error() == "stopped");
+
+    mogsafe.answer   = approved;
+    const auto later = waitForApproval(mogsafe, "https://mogsafe.test", code, std::stop_source{}.get_token());
+    REQUIRE(later);
+    CHECK(later->token == "t0ken");
+
+    mogsafe.answer = []
+    {
+        return HttpResponse{ .status = 202 };
+    };
+    const auto expired = waitForApproval(mogsafe, "https://mogsafe.test", { .poll = "p", .interval = std::chrono::seconds(0), .expires = std::chrono::seconds(0) }, std::stop_source{}.get_token());
+    REQUIRE(!expired);
+    CHECK(expired.error() == "the code expired");
+}

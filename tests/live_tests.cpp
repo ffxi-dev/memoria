@@ -233,3 +233,28 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
     CHECK(nlohmann::json::parse(live::hello("Kalnor", "Asura", "30261006_0", "Memoria 0.6.0")) ==
           nlohmann::json::parse(R"({"hello":{"character":"Kalnor","world":"Asura","client_version":"30261006_0","agent":"Memoria 0.6.0"}})"));
 }
+
+TEST_CASE("a stop sends nothing more of a batch of frames")
+{
+    const std::vector<std::vector<uint8_t>> batch{ { 1 }, { 2 }, { 3 } };
+    std::stop_source                        stop;
+    std::vector<uint8_t>                    sent;
+    CHECK(!live::sendAll(batch, stop.get_token(), [&](const std::span<const uint8_t> message)
+                         {
+                             sent.push_back(message[0]);
+                             if (message[0] == 1)
+                             {
+                                 stop.request_stop(); // /memoria live off, or unload, while the first frame goes out
+                             }
+                             return true;
+                         }));
+    CHECK(sent == std::vector<uint8_t>{ 1 });
+
+    sent.clear();
+    CHECK(live::sendAll(batch, std::stop_source{}.get_token(), [&](const std::span<const uint8_t> message)
+                        {
+                            sent.push_back(message[0]);
+                            return true;
+                        }));
+    CHECK(sent == std::vector<uint8_t>{ 1, 2, 3 });
+}

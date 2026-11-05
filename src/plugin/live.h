@@ -32,7 +32,7 @@ class Live
 public:
     // config holds the token and paused files: a pause or unlink in any client sharing the install ends the link.
     Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post);
-    ~Live(); // aborts, then joins: the game waits at most one network call's timeout
+    ~Live(); // aborts, then joins: the game waits for the step in flight to finish or time out, then the WebSocket close
 
     Live(const Live&)                    = delete;
     Live(Live&&)                         = delete;
@@ -48,12 +48,13 @@ public:
     [[nodiscard]] auto status() const -> std::string;
 
 private:
-    // Each connect, send and answer Mogsafe owes gets this long: it answers in well under a second, and unload waits for
-    // at most one call in flight, since no call is cut short from another thread.
-    static constexpr auto TIMEOUT = std::chrono::milliseconds(3000);
+    // Each step of a request, and the WebSocket close, gets this long: Mogsafe answers in well under a second, and no
+    // call is cut short from another thread, so unload waits for the step in flight. WinHTTP counts a request's timeouts
+    // in 4 s ticks, so less would still wait 4 s.
+    static constexpr auto TIMEOUT = std::chrono::milliseconds(4000);
 
     auto run(const std::stop_token& stop) -> void;
-    auto upgrade(void* session, const std::string& url, const std::string& headers) -> Socket;
+    auto upgrade(void* session, const std::string& url, const std::string& headers, const std::stop_token& stop) -> Socket;
     auto stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t;
     auto wait(const std::stop_token& stop, std::chrono::milliseconds time) -> void;
     auto helloNow() const -> std::string;
@@ -79,7 +80,7 @@ private:
     std::atomic<uint64_t>  dropped_{ 0 };
     std::atomic<bool>      finished_{ false };
     std::atomic<bool>      aborted_{ false };
-    WinHttp                http_{ TIMEOUT };
+    WinHttp                http_{ HttpTimeouts{ .resolve = TIMEOUT, .connect = TIMEOUT, .send = TIMEOUT, .receive = TIMEOUT } };
     std::jthread           thread_; // last: started once the rest is ready
 };
 

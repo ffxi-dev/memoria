@@ -5,8 +5,10 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <condition_variable>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <random>
 #include <thread>
 #include <tuple>
@@ -90,6 +92,39 @@ try
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
     return std::unexpected("Mogsafe sent a malformed answer");
+}
+
+auto waitForApproval(Http& http, const std::string& server, const LinkCode& code, const std::stop_token& stop) -> std::expected<Linked, std::string>
+{
+    std::mutex                  mutex;
+    std::condition_variable_any wake;
+    const auto                  until = std::chrono::steady_clock::now() + code.expires;
+    while (std::chrono::steady_clock::now() < until)
+    {
+        std::unique_lock lock(mutex);
+        if (wake.wait_for(lock, stop, code.interval, []
+                          {
+                              return false;
+                          }) ||
+            stop.stop_requested())
+        {
+            return std::unexpected("stopped");
+        }
+        const auto result = pollLink(http, server, code.poll);
+        if (stop.stop_requested())
+        {
+            return std::unexpected("stopped");
+        }
+        if (!result)
+        {
+            return std::unexpected(result.error());
+        }
+        if (*result)
+        {
+            return **result;
+        }
+    }
+    return std::unexpected("the code expired");
 }
 
 // Two lines: the token, then the account it belongs to.

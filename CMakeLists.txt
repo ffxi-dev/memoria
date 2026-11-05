@@ -142,7 +142,10 @@ if(MEMORIA_BUILD_TESTS)
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     if(WIN32)
-        target_link_libraries(memoria_core_tests PRIVATE advapi32) # ownerOnly reads the token file's permissions
+        # ownerOnly reads the token file's permissions; the WinHTTP tests build the plugin's network code on its own.
+        target_sources(memoria_core_tests PRIVATE tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
+        target_link_libraries(memoria_core_tests PRIVATE advapi32 winhttp ws2_32 shell32 ole32)
+        target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")
     endif()
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)

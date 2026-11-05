@@ -304,7 +304,7 @@ auto Session::startUploads() -> void
         const auto r = ::WaitForSingleObject(mutex, 0);
         return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
     };
-    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>());
+    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
     uploader_->start();
 }
 
@@ -374,7 +374,7 @@ auto Session::startImport(const bool asked) -> void
     {
         post(std::move(text));
     };
-    importer_ = std::make_unique<captain::Importer>(std::move(options), std::make_unique<WinHttp>());
+    importer_ = std::make_unique<captain::Importer>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
     importer_->start(asked);
 }
 
@@ -392,8 +392,8 @@ auto Session::link() -> void
 
 auto Session::waitForLink(const std::stop_token& stop) -> void
 {
-    WinHttp http;
-    // Replacing or destroying linker_ joins this thread on the game thread: end a request in flight at once.
+    WinHttp http(QUICK_TIMEOUTS);
+    // Replacing or destroying linker_ joins this thread on the game thread: the request in flight stops at its next step.
     const std::stop_callback cancel(stop, [&http]
                                     {
                                         http.cancel();
@@ -417,48 +417,27 @@ auto Session::waitForLink(const std::stop_token& stop) -> void
                          browse(url);
                      });
     }
-    std::mutex                  mutex;
-    std::condition_variable_any wake;
-    const auto                  until = std::chrono::steady_clock::now() + code->expires;
-    while (std::chrono::steady_clock::now() < until)
+    const auto linked = account::waitForApproval(http, server_, *code, stop);
+    if (!linked)
     {
-        std::unique_lock lock(mutex);
-        if (wake.wait_for(lock, stop, code->interval, []
-                          {
-                              return false;
-                          }) ||
-            stop.stop_requested())
+        if (!stop.stop_requested())
         {
-            return;
+            post(paint(Color::Red, "Not linked: " + linked.error() + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
         }
-        const auto result = account::pollLink(http, server_, code->poll);
-        if (stop.stop_requested())
-        {
-            return;
-        }
-        if (!result)
-        {
-            post(paint(Color::Red, "Not linked: " + result.error() + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
-            return;
-        }
-        if (*result)
-        {
-            const std::scoped_lock link(linkMutex_);
-            if (stop.stop_requested())
-            {
-                return;
-            }
-            if (!account::saveLink(host_.config / "token", **result))
-            {
-                post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
-                return;
-            }
-            const std::scoped_lock inbox(inboxMutex_);
-            arrived_ = **result;
-            return;
-        }
+        return;
     }
-    post(paint(Color::Red, "The code expired.") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
+    const std::scoped_lock link(linkMutex_);
+    if (stop.stop_requested())
+    {
+        return;
+    }
+    if (!account::saveLink(host_.config / "token", *linked))
+    {
+        post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
+        return;
+    }
+    const std::scoped_lock inbox(inboxMutex_);
+    arrived_ = *linked;
 }
 
 // Ends a link being made: its request is cancelled, and a token it saves later than this never is.
@@ -502,7 +481,7 @@ auto Session::refreshChat() -> void
     worker_.post([this](const std::stop_token& stop)
                  {
                      chatQueued_ = false;
-                     WinHttp                  http;
+                     WinHttp                  http(QUICK_TIMEOUTS);
                      const std::stop_callback cancel(stop, [&]
                                                      {
                                                          http.cancel();

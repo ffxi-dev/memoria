@@ -9,7 +9,6 @@
 #include <memory>
 #include <ranges>
 #include <string>
-#include <tuple>
 #include <utility>
 
 namespace memoria::plugin
@@ -37,18 +36,43 @@ auto trim(const std::string_view s) -> std::string_view
     return first == std::string_view::npos ? std::string_view{} : s.substr(first);
 }
 
-auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
+auto stopped() -> std::unexpected<std::string>
+{
+    return std::unexpected<std::string>("stopped");
+}
+
+auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<const uint8_t> body, const std::atomic<bool>& cancelled) -> std::expected<HttpResponse, std::string>
 {
     std::wstring lines;
     for (const auto& [name, value] : headers)
     {
         lines += std::format(L"{}: {}\r\n", wide(name), wide(value));
     }
-    auto*      data = body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<uint8_t*>(body.data());
-    const auto size = static_cast<DWORD>(body.size());
-    if (!WinHttpSendRequest(req, lines.c_str(), static_cast<DWORD>(-1), data, size, size, 0) || !WinHttpReceiveResponse(req, nullptr))
+    if (!WinHttpSendRequest(req, lines.c_str(), static_cast<DWORD>(-1), WINHTTP_NO_REQUEST_DATA, 0, static_cast<DWORD>(body.size()), 0))
     {
         return failed("send");
+    }
+    for (size_t at = 0; at < body.size();)
+    {
+        if (cancelled)
+        {
+            return stopped();
+        }
+        DWORD      written{ 0 };
+        const auto n = static_cast<DWORD>((std::min)(body.size() - at, WRITE_SIZE));
+        if (!WinHttpWriteData(req, body.data() + at, n, &written) || written == 0)
+        {
+            return failed("send");
+        }
+        at += written;
+    }
+    if (cancelled)
+    {
+        return stopped();
+    }
+    if (!WinHttpReceiveResponse(req, nullptr))
+    {
+        return failed("receive");
     }
 
     HttpResponse res;
@@ -78,8 +102,16 @@ auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<co
         }
     }
 
-    for (DWORD available = 0; WinHttpQueryDataAvailable(req, &available) && available > 0;)
+    for (DWORD available = 0;;)
     {
+        if (cancelled)
+        {
+            return stopped();
+        }
+        if (!WinHttpQueryDataAvailable(req, &available) || available == 0)
+        {
+            break;
+        }
         std::string chunk(available, '\0');
         DWORD       read{ 0 };
         if (!WinHttpReadData(req, chunk.data(), available, &read) || read == 0)
@@ -133,23 +165,23 @@ auto openRequest(void* session, const std::string_view method, const std::string
     return open;
 }
 
-WinHttp::WinHttp()
-: session_(openSession())
+auto setTimeouts(void* const session, const HttpTimeouts& timeouts) -> bool
 {
-    if (session_)
+    const auto ms = [](const std::chrono::milliseconds t)
     {
-        // Mogsafe hashes and checks a whole capture before it answers a close.
-        WinHttpSetTimeouts(session_.get(), 10'000, 10'000, 120'000, 120'000);
-    }
+        return static_cast<int>(t.count());
+    };
+    DWORD answer{ static_cast<DWORD>(timeouts.receive.count()) };
+    return WinHttpSetTimeouts(session, ms(timeouts.resolve), ms(timeouts.connect), ms(timeouts.send), ms(timeouts.receive)) != FALSE &&
+           WinHttpSetOption(session, WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT, &answer, sizeof(answer)) != FALSE;
 }
 
-WinHttp::WinHttp(const std::chrono::milliseconds timeout)
+WinHttp::WinHttp(const HttpTimeouts& timeouts)
 : session_(openSession())
 {
-    if (session_)
+    if (session_ && !setTimeouts(session_.get(), timeouts))
     {
-        const auto ms = static_cast<int>(timeout.count());
-        WinHttpSetTimeouts(session_.get(), ms, ms, ms, ms);
+        session_.reset(); // no bound on its requests: refuse them
     }
 }
 
@@ -159,39 +191,21 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
     {
         return std::unexpected("WinHTTP did not start");
     }
+    if (cancelled_)
+    {
+        return std::unexpected("stopped");
+    }
     auto open = openRequest(session_.get(), method, url);
     if (!open)
     {
         return std::unexpected(open.error());
     }
-    {
-        const std::scoped_lock lock(mutex_);
-        if (cancelled_)
-        {
-            return std::unexpected("stopped");
-        }
-        request_ = open->request.get();
-    }
-    auto                   res = perform(open->request.get(), headers, body);
-    const std::scoped_lock lock(mutex_);
-    if (request_ == nullptr) // cancel closed it
-    {
-        std::ignore = open->request.release();
-        return std::unexpected("stopped");
-    }
-    request_ = nullptr;
-    return res;
+    return perform(open->request.get(), headers, body, cancelled_);
 }
 
-// A send or receive waiting on the request ends when it closes.
 auto WinHttp::cancel() -> void
 {
-    const std::scoped_lock lock(mutex_);
     cancelled_ = true;
-    if (request_ != nullptr)
-    {
-        WinHttpCloseHandle(std::exchange(request_, nullptr));
-    }
 }
 
 } // namespace memoria::plugin
