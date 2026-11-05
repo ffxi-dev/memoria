@@ -77,6 +77,7 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 
 - Packet hooks never wait: they only copy into the queue. Compression, writing, flushing and uploading run on Memoria's own threads.
 - Captures are written only through xicap's library, with its live preset.
+- A function that can fail and has nothing else to return gives `std::optional<std::string>`: why not, or nothing on success.
 - Upload credentials and the link handle are never printed or logged.
 - A change that alters a capability in `openspec/specs/` updates that spec in the same commit, and a larger change records its reasoning under `openspec/changes/`.
 - CI builds the plugin with MSVC, runs the tests on Linux and as 32-bit Windows programs, runs clang-tidy, and checks formatting with clang-format 23.

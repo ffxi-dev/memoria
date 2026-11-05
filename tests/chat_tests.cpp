@@ -133,7 +133,7 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
     ChatChoice choice;
     CHECK(choice.chat(std::nullopt) == xicap::Chat::Redact);
 
-    saveLink(config, { .token = "a", .account = "one" });
+    REQUIRE(!saveLink(config, { .token = "a", .account = "one" }));
     choice.refresh(mogsafe, "https://mogsafe.test", config);
     CHECK(choice.chat(loadLink(config)) == xicap::Chat::Keep);
 
@@ -141,7 +141,7 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
     {
         fs::remove(config / "token");
         CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
-        saveLink(config, { .token = "b", .account = "two" });
+        REQUIRE(!saveLink(config, { .token = "b", .account = "two" }));
         CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     SECTION("an answer for a token replaced while it was asked is dropped, and the new token is asked")
@@ -150,7 +150,7 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
         mogsafe.saveChat["c"] = true;
         mogsafe.whileAsked    = [&]
         {
-            saveLink(config, { .token = "b", .account = "two" }); // relinked to an account that cuts chat
+            REQUIRE(!saveLink(config, { .token = "b", .account = "two" })); // relinked to an account that cuts chat
         };
         mogsafe.asked = 0;
         choice.refresh(mogsafe, "https://mogsafe.test", config);
@@ -164,7 +164,7 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
             fs::remove(config / "token");
         };
         choice.refresh(mogsafe, "https://mogsafe.test", config);
-        saveLink(config, { .token = "a2", .account = "one" });
+        REQUIRE(!saveLink(config, { .token = "a2", .account = "one" }));
         CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     fs::remove_all(dir);

@@ -293,7 +293,7 @@ TEST_CASE("an uploader, an importer and the worker each join within their reques
 {
     Server     server(stall);
     const auto dir = tempDir();
-    saveLink(dir / "config", { .token = "t0ken", .account = "player" });
+    REQUIRE(!saveLink(dir / "config", { .token = "t0ken", .account = "player" }));
 
     SECTION("the uploader")
     {
@@ -373,7 +373,7 @@ TEST_CASE("a live link upgrades, streams, stays connected while nobody watches, 
                       }
                              });
     const auto        dir = tempDir();
-    saveLink(dir, { .token = "t0ken", .account = "player" }); // the link lives while the install shares this token
+    REQUIRE(!saveLink(dir, { .token = "t0ken", .account = "player" })); // the link lives while the install shares this token
     live::Feed               feed;
     std::mutex               mutex;
     std::vector<std::string> said;

@@ -21,7 +21,7 @@ auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::pat
 // Writes text to path's .tmp, flushes it to disk, and renames it over path, so neither a crash nor a power cut leaves a
 // half-written path. Why not, if a step failed: a failure before the rename leaves path as it was; one after it (the
 // folder's own flush, on POSIX) leaves path new but maybe not yet on disk.
-auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>;
+[[nodiscard]] auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>;
 
 // Tests set it to make a step of replaceFile fail; empty in the game.
 inline std::function<bool(SaveStep)> failSave;

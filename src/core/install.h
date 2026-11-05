@@ -21,7 +21,7 @@ auto loadLink(const std::filesystem::path& config) -> std::optional<Linked>;
 
 // Written whole to a file only this user can open, flushed to disk, then renamed over the old token. Why not, if it was
 // not.
-auto saveLink(const std::filesystem::path& config, const Linked& link) -> std::optional<std::string>;
+[[nodiscard]] auto saveLink(const std::filesystem::path& config, const Linked& link) -> std::optional<std::string>;
 
 using LinkBack = std::function<bool(const std::filesystem::path& from, const std::filesystem::path& to)>;
 
@@ -30,13 +30,13 @@ using LinkBack = std::function<bool(const std::filesystem::path& from, const std
 auto removeLink(const std::filesystem::path& config, const std::string& token, const LinkBack& linkBack = {}) -> bool;
 
 // /memoria unlink: deletes whatever token is there. Why not, if one is still there.
-auto unlink(const std::filesystem::path& config) -> std::optional<std::string>;
+[[nodiscard]] auto unlink(const std::filesystem::path& config) -> std::optional<std::string>;
 
 // Whether any client sharing the install ran /memoria upload off.
 auto paused(const std::filesystem::path& config) -> bool;
 
 // /memoria upload off and on. Why not, if the pause did not change.
-auto setPaused(const std::filesystem::path& config, bool on) -> std::optional<std::string>;
+[[nodiscard]] auto setPaused(const std::filesystem::path& config, bool on) -> std::optional<std::string>;
 
 // True while uploads are not paused and the install's token file still holds token.
 auto sharing(const std::filesystem::path& config, const std::string& token) -> bool;

@@ -66,17 +66,17 @@ public:
     [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
 private:
-    auto run() -> void;
-    auto step(const std::filesystem::path& path, UploadFile& f, std::chrono::milliseconds idle) -> std::optional<std::string>;
-    auto sendLast(const std::string& name) -> void;
-    auto send(const std::filesystem::path& path, UploadFile& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
-    auto close(const std::filesystem::path& path, UploadFile& f, uint64_t size) -> std::optional<std::string>;
-    auto applyEnded(UploadFile& f, const HttpResponse& res) -> void;
-    auto writeRest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>;
-    auto load() -> void;
-    auto save() -> std::optional<std::string>;
-    auto saved() const -> UploadFiles;
-    auto file(const std::string& name) const -> UploadFile; // from memory while this client sends, else from the state file
+    auto               run() -> void;
+    auto               step(const std::filesystem::path& path, UploadFile& f, std::chrono::milliseconds idle) -> std::optional<std::string>;
+    auto               sendLast(const std::string& name) -> void;
+    auto               send(const std::filesystem::path& path, UploadFile& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
+    auto               close(const std::filesystem::path& path, UploadFile& f, uint64_t size) -> std::optional<std::string>;
+    auto               applyEnded(UploadFile& f, const HttpResponse& res) -> void;
+    auto               writeRest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>;
+    auto               load() -> void;
+    [[nodiscard]] auto save() -> std::optional<std::string>; // why uploads.txt was not replaced, if it was not
+    auto               saved() const -> UploadFiles;
+    auto               file(const std::string& name) const -> UploadFile; // from memory while this client sends, else from the state file
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;

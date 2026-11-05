@@ -32,6 +32,6 @@ using UploadFiles = std::map<std::string, UploadFile>; // by file name
 auto readUploads(const std::filesystem::path& path) -> UploadFiles;
 
 // Why the file was not replaced, if it was not.
-auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>;
+[[nodiscard]] auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>;
 
 } // namespace memoria::upload
