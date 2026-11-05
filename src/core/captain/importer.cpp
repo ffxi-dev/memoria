@@ -9,6 +9,7 @@
 #include <format>
 #include <fstream>
 #include <sstream>
+#include <tuple>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -131,7 +132,7 @@ auto Importer::run() -> void
         return;
     }
 
-    auto found = findCaptain(options_.captures, options_.quiet, stop_.get_token());
+    auto found = findCaptures(options_.captures, options_.quiet, stop_.get_token());
     if (stop_.stop_requested())
     {
         return;
@@ -163,11 +164,13 @@ auto Importer::run() -> void
         sent_             = 0;
         size_             = 0;
         const auto prefix = std::format("Captain {}/{} {}: ", i + 1, found.size(), c.folder);
-        const auto result = c.growing ? Outcome::Skipped : upload(c, prefix);
         if (c.growing)
         {
             say(prefix + "still being written; skipped.");
+            ++tally[Outcome::Skipped];
+            continue;
         }
+        const auto result = upload(c, prefix);
         if (result == Outcome::Stopped || result == Outcome::Failed)
         {
             return; // imports.txt stays, so the next start or link resumes
@@ -224,26 +227,8 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         return Outcome::Skipped;
     }
 
-    // A search log goes ahead of full.log in the same upload. It is staged alone before the create, which gives its length,
-    // then the upload's staged file is that stage followed by full.log's.
-    const auto searchLog    = c.dir / "SearchLog" / "search.log";
-    const auto staged       = options_.state / "imports" / std::format("{}-{}.zst", e.crc, e.size);
-    const auto searchStaged = options_.state / "imports" / std::format("{}-{}.search.zst", e.crc, e.size);
-    const auto forget       = [&]
-    {
-        entries_.erase(c.folder);
-        save();
-        std::error_code ec;
-        fs::remove(staged, ec);
-        fs::remove(searchStaged, ec);
-    };
-    const auto refused = [&](const HttpResponse& res)
-    {
-        forget();
-        say(prefix + std::format("refused: {}.", trim(res.body).empty() ? std::to_string(res.status) : trim(res.body)));
-        return Outcome::Refused;
-    };
     const auto  metadata = std::format("format {},manifest {},character {},crc32 {},size {},folder {}", base64("captain"), base64(manifest), base64(c.character), base64(e.crc), base64(std::to_string(e.size)), base64(c.folder));
+    const auto  staged   = stages(e).log;
     std::string replaces; // the capture this upload gives its search log, as the create said
 
     auto backoff = options_.retry;
@@ -256,76 +241,11 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         };
         if (e.url.empty())
         {
-            // A new create names the logs as they are now: no stage from an earlier create may go under it.
-            std::error_code ec;
-            fs::remove(staged, ec);
-            if (!ec && c.searchSize == 0)
+            if (const auto end = create(c, e, prefix, metadata, replaces))
             {
-                fs::remove(searchStaged, ec);
+                return *end;
             }
-            if (ec)
-            {
-                say(prefix + "cannot remove an old stage: " + ec.message() + ". Import stopped.");
-                return Outcome::Failed;
-            }
-            std::string search;
-            if (c.searchSize > 0)
-            {
-                const auto crc = crc32File(searchLog, stop_.get_token());
-                if (!crc)
-                {
-                    if (stop_.stop_requested())
-                    {
-                        return Outcome::Stopped;
-                    }
-                    forget();
-                    say(prefix + "cannot read its search.log; skipped.");
-                    return Outcome::Skipped;
-                }
-                if (const auto error = compressLog(searchLog, searchStaged, {}, stop_.get_token()))
-                {
-                    if (stop_.stop_requested())
-                    {
-                        return Outcome::Stopped;
-                    }
-                    say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
-                    return Outcome::Failed;
-                }
-                if (const auto staging = crc32File(searchLog, stop_.get_token()); !staging || staging->crc != crc->crc || staging->size != crc->size)
-                {
-                    if (stop_.stop_requested())
-                    {
-                        return Outcome::Stopped;
-                    }
-                    forget();
-                    say(prefix + "its search.log changed while it was staged; skipped.");
-                    return Outcome::Skipped;
-                }
-                search = std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(fs::file_size(searchStaged, ec))), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
-            }
-            const auto res = tus_.request("POST", "/v1/uploads/", { { "Upload-Defer-Length", "1" }, { "Upload-Metadata", metadata + search } });
-            if (res && res->status == 201)
-            {
-                replaces           = header(*res, "mogsafe-replaces");
-                e.url              = tus_.location(*res);
-                entries_[c.folder] = e;
-                // Saved before the first byte, so a crash resumes this upload. On failure imports.txt stays for the next start or link.
-                if (const auto error = save())
-                {
-                    say(prefix + *error + ". Import stopped; it goes on at the next start or link.");
-                    return Outcome::Stopped;
-                }
-            }
-            else if (res && res->status == 409)
-            {
-                forget();
-                return moved(c, prefix, std::format("already in Vault ({}).", header(*res, "mogsafe-capture")), Outcome::InVault);
-            }
-            else if (res && res->status >= 400 && res->status < 500)
-            {
-                return refused(*res);
-            }
-            else
+            if (e.url.empty())
             {
                 again();
                 continue;
@@ -338,7 +258,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             // Closed after an answer that was lost, or gone: a new create says which.
             e.url.clear();
             entries_[c.folder] = e;
-            save();
+            std::ignore        = save(); // a lost save costs one more HEAD at the next run
             again();
             continue;
         }
@@ -353,12 +273,12 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         if (!fs::exists(staged, ec))
         {
             // Another compression of either log may not match the bytes Mogsafe holds, or the search part's length it was given.
-            if (*offset > 0 || (c.searchSize > 0 && !fs::exists(searchStaged, ec)))
+            if (*offset > 0 || (c.searchSize > 0 && !fs::exists(stages(e).search, ec)))
             {
                 e.url.clear();
                 continue;
             }
-            if (const auto error = compressLog(log, staged, c.searchSize > 0 ? searchStaged : fs::path{}, stop_.get_token()))
+            if (const auto error = compressLog(log, staged, c.searchSize > 0 ? stages(e).search : fs::path{}, stop_.get_token()))
             {
                 if (stop_.stop_requested())
                 {
@@ -392,12 +312,12 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             {
                 e.url.clear();
                 entries_[c.folder] = e;
-                save();
+                std::ignore        = save();
                 continue;
             }
             if (sent->answer && sent->answer->status == 422)
             {
-                return refused(*sent->answer);
+                return refuse(c, e, prefix, *sent->answer);
             }
             if (sent->answer)
             {
@@ -410,7 +330,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         const auto                 close = tus_.request("POST", e.url + "/close", { { "Content-Type", "application/json" } }, std::span(reinterpret_cast<const uint8_t*>(body.data()), body.size()));
         if (close && close->status == 200)
         {
-            forget();
+            forget(c, e);
             const auto done = [&]() -> std::string
             {
                 if (!replaces.empty())
@@ -423,11 +343,11 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                 }
                 return "uploaded.";
             }();
-            return moved(c, prefix, done, Outcome::Uploaded);
+            return moveToUploaded(c, prefix, done, Outcome::Uploaded);
         }
         if (close && close->status >= 400 && close->status < 500 && close->status != 409 && close->status != 423)
         {
-            return refused(*close);
+            return refuse(c, e, prefix, *close);
         }
         again();
     }
@@ -438,7 +358,123 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
     return Outcome::Stopped;
 }
 
-auto Importer::moved(const CaptainCapture& c, const std::string& prefix, const std::string& done, const Outcome outcome) -> Outcome
+auto Importer::stages(const Entry& e) const -> Stages
+{
+    const auto dir = options_.state / "imports";
+    return { .log = dir / std::format("{}-{}.zst", e.crc, e.size), .search = dir / std::format("{}-{}.search.zst", e.crc, e.size) };
+}
+
+// Drops the capture from imports.txt, and its stages with it.
+auto Importer::forget(const CaptainCapture& c, const Entry& e) -> void
+{
+    entries_.erase(c.folder);
+    std::ignore = save(); // a line left behind costs one HEAD at the next run
+    std::error_code ec;
+    std::filesystem::remove(stages(e).log, ec);
+    std::filesystem::remove(stages(e).search, ec);
+}
+
+auto Importer::refuse(const CaptainCapture& c, const Entry& e, const std::string& prefix, const HttpResponse& res) -> Outcome
+{
+    forget(c, e);
+    say(prefix + std::format("refused: {}.", trim(res.body).empty() ? std::to_string(res.status) : trim(res.body)));
+    return Outcome::Refused;
+}
+
+// A new create names the logs as they are now, so no stage from an earlier create goes under it. A search log goes ahead
+// of full.log in the same upload: it is staged alone here, since the create gives its length. Nothing once created, or
+// with e.url still empty when Mogsafe could not be reached; otherwise how the capture ends.
+auto Importer::create(const CaptainCapture& c, Entry& e, const std::string& prefix, const std::string& metadata, std::string& replaces) -> std::optional<Outcome>
+{
+    namespace fs          = std::filesystem;
+    const auto      stage = stages(e);
+    std::error_code ec;
+    fs::remove(stage.log, ec);
+    if (!ec && c.searchSize == 0)
+    {
+        fs::remove(stage.search, ec);
+    }
+    if (ec)
+    {
+        say(prefix + "cannot remove an old stage: " + ec.message() + ". Import stopped.");
+        return Outcome::Failed;
+    }
+    std::string search;
+    if (c.searchSize > 0)
+    {
+        const auto staged = stageSearch(c, e, prefix);
+        if (!staged)
+        {
+            return staged.error();
+        }
+        search = *staged;
+    }
+    const auto res = tus_.request("POST", "/v1/uploads/", { { "Upload-Defer-Length", "1" }, { "Upload-Metadata", metadata + search } });
+    if (res && res->status == 201)
+    {
+        replaces           = header(*res, "mogsafe-replaces");
+        e.url              = tus_.location(*res);
+        entries_[c.folder] = e;
+        // Saved before the first byte, so a crash resumes this upload. On failure imports.txt stays for the next start or link.
+        if (const auto error = save())
+        {
+            say(prefix + *error + ". Import stopped; it goes on at the next start or link.");
+            return Outcome::Stopped;
+        }
+        return std::nullopt;
+    }
+    if (res && res->status == 409)
+    {
+        forget(c, e);
+        return moveToUploaded(c, prefix, std::format("already in Vault ({}).", header(*res, "mogsafe-capture")), Outcome::InVault);
+    }
+    if (res && res->status >= 400 && res->status < 500)
+    {
+        return refuse(c, e, prefix, *res);
+    }
+    return std::nullopt;
+}
+
+// The metadata that tells the create about the staged search log, or how the capture ends.
+auto Importer::stageSearch(const CaptainCapture& c, const Entry& e, const std::string& prefix) -> std::expected<std::string, Outcome>
+{
+    const auto searchLog = c.dir / "SearchLog" / "search.log";
+    const auto staged    = stages(e).search;
+    const auto crc       = crc32File(searchLog, stop_.get_token());
+    if (!crc)
+    {
+        if (stop_.stop_requested())
+        {
+            return std::unexpected(Outcome::Stopped);
+        }
+        forget(c, e);
+        say(prefix + "cannot read its search.log; skipped.");
+        return std::unexpected(Outcome::Skipped);
+    }
+    if (const auto error = compressLog(searchLog, staged, {}, stop_.get_token()))
+    {
+        if (stop_.stop_requested())
+        {
+            return std::unexpected(Outcome::Stopped);
+        }
+        say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
+        return std::unexpected(Outcome::Failed);
+    }
+    if (const auto staging = crc32File(searchLog, stop_.get_token()); !staging || staging->crc != crc->crc || staging->size != crc->size)
+    {
+        if (stop_.stop_requested())
+        {
+            return std::unexpected(Outcome::Stopped);
+        }
+        forget(c, e);
+        say(prefix + "its search.log changed while it was staged; skipped.");
+        return std::unexpected(Outcome::Skipped);
+    }
+    std::error_code ec;
+    return std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(std::filesystem::file_size(staged, ec))), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
+}
+
+auto Importer::moveToUploaded(const CaptainCapture& c, const std::string& prefix, const std::string& done, const Outcome outcome) -> Outcome
 {
     const auto to = moveAside(options_.captures, options_.uploaded, c.dir);
     if (!to)

@@ -343,7 +343,7 @@ auto Session::remind() -> void
 auto Session::offerImport(const std::stop_token& stop) -> void
 {
     // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && captain::remindImport(host_.config, host_.captain / "captures", stop))
+    if (linked() && captain::claimImportReminder(host_.config, host_.captain / "captures", stop))
     {
         post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }

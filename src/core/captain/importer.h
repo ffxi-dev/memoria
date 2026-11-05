@@ -9,6 +9,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -74,13 +75,25 @@ private:
         std::string url;
     };
 
-    auto upload(const CaptainCapture& c, const std::string& prefix) -> Outcome;
-    auto moved(const CaptainCapture& c, const std::string& prefix, const std::string& done, Outcome outcome) -> Outcome;
-    auto ready() -> bool;
-    auto wait(std::chrono::milliseconds time) -> void;
-    auto say(const std::string& text) -> void;
-    auto load() -> void;
-    auto save() -> std::optional<std::string>; // why imports.txt was not replaced, if it was not
+    // Where a capture's logs are compressed before they go: full.log's stage, and the search log's.
+    struct Stages
+    {
+        std::filesystem::path log;
+        std::filesystem::path search;
+    };
+
+    auto               upload(const CaptainCapture& c, const std::string& prefix) -> Outcome;
+    auto               create(const CaptainCapture& c, Entry& e, const std::string& prefix, const std::string& metadata, std::string& replaces) -> std::optional<Outcome>;
+    auto               stageSearch(const CaptainCapture& c, const Entry& e, const std::string& prefix) -> std::expected<std::string, Outcome>;
+    [[nodiscard]] auto stages(const Entry& e) const -> Stages;
+    auto               forget(const CaptainCapture& c, const Entry& e) -> void;
+    auto               refuse(const CaptainCapture& c, const Entry& e, const std::string& prefix, const HttpResponse& res) -> Outcome;
+    auto               moveToUploaded(const CaptainCapture& c, const std::string& prefix, const std::string& done, Outcome outcome) -> Outcome;
+    auto               ready() -> bool;
+    auto               wait(std::chrono::milliseconds time) -> void;
+    auto               say(const std::string& text) -> void;
+    auto               load() -> void;
+    [[nodiscard]] auto save() -> std::optional<std::string>; // why imports.txt was not replaced, if it was not
 
     ImportOptions                options_;
     std::unique_ptr<Http>        http_;

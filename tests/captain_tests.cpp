@@ -110,14 +110,14 @@ TEST_CASE("captain captures are found at any depth, and not inside one")
     fs::create_directories(in.captures / "tracker"); // an addon's own data
     std::ofstream(in.captures / "tracker/data.json") << "{}";
 
-    const auto found = findCaptain(in.captures);
+    const auto found = findCaptures(in.captures);
     REQUIRE(found.size() == 2);
     CHECK(found[0].folder == "2026-8-4_23_54/Mirabeth");
     CHECK(found[1].folder == "Mining/test_2026-8-4/Mirabeth");
     CHECK(found[1].character == "Mirabeth");
     CHECK(found[1].size == 3);
     CHECK(!found[1].growing);
-    CHECK(findCaptain(in.dir / "no such folder").empty());
+    CHECK(findCaptures(in.dir / "no such folder").empty());
 }
 
 TEST_CASE("a full.log changed in the last 10 minutes is left for later")
@@ -125,7 +125,7 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
     Install in;
     captainFolder(in.captures, "a/Mirabeth", "log", MANIFEST, std::chrono::minutes(2));
     captainFolder(in.captures, "b/Mirabeth", "log", MANIFEST, std::chrono::minutes(11));
-    const auto found = findCaptain(in.captures);
+    const auto found = findCaptures(in.captures);
     REQUIRE(found.size() == 2);
     CHECK(found[0].growing);
     CHECK(!found[1].growing);
@@ -675,12 +675,12 @@ TEST_CASE("the import runs on its own thread, and stops at once mid-append and m
 TEST_CASE("the import reminder shows once per install, to one client")
 {
     Install in;
-    CHECK(!remindImport(in.config, in.captures)); // nothing waiting
+    CHECK(!claimImportReminder(in.config, in.captures)); // nothing waiting
     CHECK(!fs::exists(in.config / "import-reminded"));
 
     captainFolder(in.captures, "s/Mirabeth", "log");
     fs::rename(in.config / "token", in.dir / "token");
-    CHECK(!remindImport(in.config, in.captures)); // not linked
+    CHECK(!claimImportReminder(in.config, in.captures)); // not linked
     fs::rename(in.dir / "token", in.config / "token");
 
     for (int round = 0; round < 5; ++round) // two clients logging in together, then later logins and restarts
@@ -695,7 +695,7 @@ TEST_CASE("the import reminder shows once per install, to one client")
                 clients.emplace_back([&]
                                      {
                                          go.arrive_and_wait();
-                                         shown += remindImport(in.config, in.captures) ? 1 : 0;
+                                         shown += claimImportReminder(in.config, in.captures) ? 1 : 0;
                                      });
             }
         }

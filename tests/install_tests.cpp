@@ -118,9 +118,9 @@ TEST_CASE("the import reminder goes to one caller, ever")
 {
     const auto dir = tempDir();
     CHECK_FALSE(importReminded(dir));
-    CHECK(claimImportReminder(dir));
+    CHECK(markImportReminded(dir));
     CHECK(importReminded(dir));
-    CHECK_FALSE(claimImportReminder(dir));
+    CHECK_FALSE(markImportReminded(dir));
     fs::remove_all(dir);
 }
 

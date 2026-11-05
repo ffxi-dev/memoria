@@ -41,10 +41,10 @@ auto setPaused(const std::filesystem::path& config, bool on) -> std::optional<st
 // True while uploads are not paused and the install's token file still holds token.
 auto sharing(const std::filesystem::path& config, const std::string& token) -> bool;
 
-// True for one caller only, ever, per install: the first to claim the captain import reminder.
-auto claimImportReminder(const std::filesystem::path& config) -> bool;
+// True for one caller only, ever, per install: the first to mark the captain import reminder as given.
+auto markImportReminded(const std::filesystem::path& config) -> bool;
 
-// Whether the captain import reminder was claimed.
+// Whether the captain import reminder was given.
 auto importReminded(const std::filesystem::path& config) -> bool;
 
 // upload.ini's "server = https://..." line, which points Memoria at another Mogsafe.

@@ -254,7 +254,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
         }
         else
         {
-            std::ignore = claimImportReminder(host_.config);
+            std::ignore = markImportReminded(host_.config);
             startImport(true);
         }
     }

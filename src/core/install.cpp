@@ -135,7 +135,7 @@ auto sharing(const std::filesystem::path& config, const std::string& token) -> b
     return !paused(config) && link && link->token == token;
 }
 
-auto claimImportReminder(const std::filesystem::path& config) -> bool
+auto markImportReminded(const std::filesystem::path& config) -> bool
 {
     return createNew(config / IMPORT_REMINDED);
 }

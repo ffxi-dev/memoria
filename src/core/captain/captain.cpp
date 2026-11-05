@@ -30,7 +30,7 @@ constexpr auto CRC_TABLE = []
 
 } // namespace
 
-auto findCaptain(const std::filesystem::path& root, const std::chrono::seconds quiet, const std::stop_token& stop) -> std::vector<CaptainCapture>
+auto findCaptures(const std::filesystem::path& root, const std::chrono::seconds quiet, const std::stop_token& stop) -> std::vector<CaptainCapture>
 {
     namespace fs = std::filesystem;
     std::vector<CaptainCapture> out;
@@ -125,18 +125,18 @@ auto moveAside(const std::filesystem::path& root, const std::filesystem::path& u
     return target;
 }
 
-auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root, const std::stop_token& stop) -> bool
+auto claimImportReminder(const std::filesystem::path& config, const std::filesystem::path& root, const std::stop_token& stop) -> bool
 {
     if (!loadLink(config) || importReminded(config))
     {
         return false;
     }
-    const auto found = findCaptain(root, std::chrono::minutes(10), stop);
+    const auto found = findCaptures(root, std::chrono::minutes(10), stop);
     return !stop.stop_requested() && std::ranges::any_of(found, [](const auto& c)
                                                          {
                                                              return !c.growing;
                                                          }) &&
-           claimImportReminder(config);
+           markImportReminded(config);
 }
 
 } // namespace memoria::captain
