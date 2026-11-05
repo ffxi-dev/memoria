@@ -43,6 +43,7 @@ struct ImportProgress
     std::string character;
     uint64_t    sent{};
     uint64_t    size{}; // of the staged log; 0 until staged
+    std::string error;  // why the last request failed, while the import retries it
 };
 
 // /memoria import: uploads captain's captures to Mogsafe as captain imports, one at a time, and moves each one Mogsafe holds to captures-uploaded.
@@ -92,6 +93,7 @@ private:
     auto               ready() -> bool;
     auto               wait(std::chrono::milliseconds time) -> void;
     auto               say(const std::string& text) -> void;
+    auto               retrying(std::string why) -> void; // shown in progress until bytes move or the next capture starts
     auto               load() -> void;
     [[nodiscard]] auto save() -> std::optional<std::string>; // why imports.txt was not replaced, if it was not
 
@@ -103,6 +105,7 @@ private:
     mutable std::mutex      mutex_;
     std::condition_variable wake_;
     std::string             character_;
+    std::string             error_;
 
     std::atomic<size_t>   index_{ 0 };
     std::atomic<size_t>   count_{ 0 };

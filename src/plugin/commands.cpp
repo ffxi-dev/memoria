@@ -37,7 +37,7 @@ auto Session::importLine() const -> std::string
     {
         return std::format("Import: {}/{} {}, preparing", p.index, p.count, p.character);
     }
-    return std::format("Import: {}/{} {}, {}/{} sent", p.index, p.count, p.character, sizeText(p.sent), sizeText(p.size));
+    return std::format("Import: {}/{} {}, {}/{} sent{}", p.index, p.count, p.character, sizeText(p.sent), sizeText(p.size), p.error.empty() ? "" : ", retrying: " + p.error);
 }
 
 auto Session::sayStatus() -> void
@@ -104,46 +104,24 @@ auto Session::sayStatus() -> void
     {
         say(importLine());
     }
+    sayUploads();
+}
+
+// "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
+auto Session::sayUploads() -> void
+{
     const auto link = linked();
     if (!link || paused(host_.config))
     {
         say("Uploads: " + paint(Color::Yellow, link ? "paused: /memoria upload on" : "not linked: /memoria link"));
         return;
     }
-    // "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
-    const auto                  files = uploader_->status();
-    uint64_t                    behind{ 0 };
-    uint64_t                    kept{ 0 }; // in recordings Mogsafe cut off: on this PC only
-    int                         cut{ 0 };
-    const upload::UploadStatus* failed{ nullptr };
-    int                         foreign{ 0 };
-    for (const auto& u : files)
+    const auto files                               = uploader_->status();
+    const auto [behind, kept, cut, foreign, error] = upload::totals(files);
+    const auto account                             = paint(Color::Grey, " · linked to " + link->account);
+    if (!error.empty())
     {
-        if (u.refused)
-        {
-            continue;
-        }
-        if (u.foreign)
-        {
-            ++foreign;
-            continue;
-        }
-        if (u.cutOff)
-        {
-            kept += u.size > u.sent ? u.size - u.sent : 0;
-            cut += u.size > u.sent ? 1 : 0;
-            continue;
-        }
-        behind += u.size > u.sent ? u.size - u.sent : 0;
-        if (!u.error.empty() && failed == nullptr)
-        {
-            failed = &u;
-        }
-    }
-    const auto account = paint(Color::Grey, " · linked to " + link->account);
-    if (failed != nullptr)
-    {
-        say("Uploads: " + paint(Color::Red, "cannot reach Mogsafe (" + failed->error + "), retrying") + account);
+        say("Uploads: " + paint(Color::Red, "retrying, " + error) + account);
     }
     else if (behind > 0)
     {
@@ -161,9 +139,9 @@ auto Session::sayStatus() -> void
     {
         say(paint(Color::Yellow, std::format("Not sent: {} {} uploaded under another account.", foreign, foreign == 1 ? "recording" : "recordings")) + " Link that account to send the rest.");
     }
-    if (const auto error = uploader_->saveError(); !error.empty())
+    if (const auto saveError = uploader_->saveError(); !saveError.empty())
     {
-        say(paint(Color::Red, "Cannot save upload progress: " + error));
+        say(paint(Color::Red, "Cannot save upload progress: " + saveError));
     }
     for (const auto& u : files | std::views::filter(&upload::UploadStatus::refused))
     {
@@ -175,7 +153,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
 {
     if (!recorder_)
     {
-        say("not recording: " + startError_);
+        say(paint(Color::Red, "Not recording: " + startError_));
         return;
     }
     const auto sub = args.size() > 1 ? args[1] : "status";
@@ -187,7 +165,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     else if (sub == "note" && !arg.empty())
     {
         recorder_->note(clock_.nowMs(), utf8FromShiftJis(args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>()));
-        say("noted");
+        say("Noted.");
     }
     else if (sub == "session" && arg == "start")
     {
@@ -245,7 +223,7 @@ auto Session::startSession(const std::string_view path) -> void
     if (linked())
     {
         sessionInVault_ = VaultSession{ .fromMs = clock_.nowMs(), .capture = recorder_->status().capture };
-        say("session recorded in Vault, as part of this recording");
+        say("Session recorded in Vault, as part of this recording.");
         return;
     }
     try
@@ -258,7 +236,7 @@ auto Session::startSession(const std::string_view path) -> void
         say(paint(Color::Red, std::format("No session: {}", error.what())));
         return;
     }
-    say(std::format("session to {}", path));
+    say(std::format("Session to {}.", path));
 }
 
 auto Session::stopSession() -> void
@@ -266,8 +244,13 @@ auto Session::stopSession() -> void
     const auto from = std::exchange(sessionInVault_, std::nullopt);
     if (!from)
     {
+        if (recorder_->status().session.empty())
+        {
+            say("No session is open.");
+            return;
+        }
         recorder_->sessionStop(clock_.nowMs());
-        say("session closed");
+        say("Session closed.");
         return;
     }
     const auto now     = clock_.nowMs();

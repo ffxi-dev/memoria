@@ -483,4 +483,35 @@ auto Uploader::status() const -> std::vector<UploadStatus>
     return out;
 }
 
+auto totals(const std::vector<UploadStatus>& files) -> UploadTotals
+{
+    UploadTotals t;
+    for (const auto& u : files)
+    {
+        const auto unsent = u.size > u.sent ? u.size - u.sent : 0;
+        if (u.refused)
+        {
+            continue;
+        }
+        if (u.foreign)
+        {
+            ++t.foreign;
+        }
+        else if (u.cutOff)
+        {
+            t.kept += unsent;
+            t.cut += unsent > 0 ? 1 : 0;
+        }
+        else
+        {
+            t.behind += unsent;
+            if (t.error.empty())
+            {
+                t.error = u.error;
+            }
+        }
+    }
+    return t;
+}
+
 } // namespace memoria::upload

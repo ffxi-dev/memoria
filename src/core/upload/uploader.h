@@ -41,6 +41,19 @@ struct UploadStatus
     std::string error;
 };
 
+// What /memoria status says about uploads, added up over every capture.
+struct UploadTotals
+{
+    uint64_t    behind{};  // bytes Mogsafe lacks, in captures still sending
+    uint64_t    kept{};    // bytes only on this PC, in recordings Mogsafe cut off
+    int         cut{};     // recordings that keep such bytes
+    int         foreign{}; // recordings uploaded under another account
+    std::string error;     // the first sending capture's error, if one failed
+};
+
+// Refused captures count nowhere: status lists them on their own.
+auto totals(const std::vector<UploadStatus>& files) -> UploadTotals;
+
 // Sends what each .xicap in the folder gained since Mogsafe's offset, and closes its upload with the file's hash once the capture is complete.
 class Uploader
 {

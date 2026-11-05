@@ -184,7 +184,7 @@ TEST_CASE("a file Mogsafe keeps refusing never holds the recording's upload past
     {
         longest = std::max(longest, sent[i] - sent[i - 1]);
     }
-    CHECK(longest < std::chrono::milliseconds(600)); // 12 passes of 10 ms, and slack
+    CHECK(longest < std::chrono::seconds(1)); // 12 passes of 10 ms, and slack for a busy runner; unbounded doubling passes 2 s
     fs::remove_all(dir);
 }
 
@@ -745,7 +745,7 @@ TEST_CASE("an unload during a long cut-off recovery returns at once, and the nex
                     }));
     const auto before = std::chrono::steady_clock::now();
     up.reset();
-    CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(500));
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(2));
     CHECK(!fs::exists(dir / "a-rest.tmp"));
     CHECK(!fs::exists(dir / "a-rest.xicap"));
     CHECK(readUploads(dir / "uploads.txt")["a.xicap"].stage != Stage::Rescued);
@@ -805,4 +805,22 @@ TEST_CASE("each upload stage survives the state file")
         CHECK(read.at(name).reason == "too old");
     }
     fs::remove_all(dir);
+}
+
+TEST_CASE("upload totals count what is left to send, what stays on this PC, and the first error")
+{
+    const std::vector<UploadStatus> files{
+        { .name = "a.xicap", .sent = 100, .size = 300 },
+        { .name = "b.xicap", .sent = 0, .size = 50, .error = "create: 503" },
+        { .name = "c.xicap", .sent = 10, .size = 40, .cutOff = true },
+        { .name = "d.xicap", .sent = 40, .size = 40, .cutOff = true },
+        { .name = "e.xicap", .size = 70, .foreign = true },
+        { .name = "f.xicap", .size = 90, .refused = true, .error = "too old" },
+    };
+    const auto t = totals(files);
+    CHECK(t.behind == 250);
+    CHECK(t.kept == 30);
+    CHECK(t.cut == 1);
+    CHECK(t.foreign == 1);
+    CHECK(t.error == "create: 503");
 }

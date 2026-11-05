@@ -86,7 +86,7 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
     catch (const std::exception& error)
     {
         startError_ = error.what();
-        say("not recording: " + startError_);
+        say(paint(Color::Red, "Not recording: " + startError_));
         return;
     }
     refreshChat();

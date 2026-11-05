@@ -456,6 +456,18 @@ TEST_CASE("a flush that fails is a failed save, and nothing that depends on it i
 #ifndef _WIN32
     steps.push_back(SaveStep::FolderFlush); // Windows writes the folder through with the rename
 #endif
+    struct Reset
+    {
+        Reset()                                = default;
+        Reset(const Reset&)                    = delete;
+        Reset(Reset&&)                         = delete;
+        auto operator=(const Reset&) -> Reset& = delete;
+        auto operator=(Reset&&) -> Reset&      = delete;
+        ~Reset()
+        {
+            failSave = {}; // even when a REQUIRE ends the test early
+        }
+    } const reset;
     for (const auto step : steps)
     {
         INFO(std::to_underlying(step));
@@ -485,5 +497,4 @@ TEST_CASE("a flush that fails is a failed save, and nothing that depends on it i
         CHECK(server.received == 500);
         fs::remove_all(dir);
     }
-    failSave = {};
 }

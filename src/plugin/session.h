@@ -92,6 +92,7 @@ private:
     auto say(const std::string& text) -> void;
     auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
     auto sayStatus() -> void;
+    auto sayUploads() -> void;
     auto startSession(std::string_view path) -> void;
     auto stopSession() -> void;
     auto importCaptain() -> void;

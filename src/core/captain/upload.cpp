@@ -122,6 +122,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         const auto offset = head && head->status == 200 ? parseU64(header(*head, "upload-offset")) : std::nullopt;
         if (!offset)
         {
+            retrying(head ? std::format("offset: {}", head->status) : head.error());
             again();
             continue;
         }
@@ -146,8 +147,13 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             }
         }
         const auto total = fs::file_size(staged, ec);
-        size_            = total;
-        sent_            = *offset;
+        if (ec)
+        {
+            e.url.clear(); // the stage went away: a new create stages again
+            continue;
+        }
+        size_ = total;
+        sent_ = *offset;
         if (*offset < total)
         {
             const auto sent = tus_.append(staged, e.url, *offset, total, [this](uint64_t at)
@@ -157,6 +163,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                                           });
             if (!sent)
             {
+                retrying(sent.error());
                 again();
                 continue;
             }
@@ -164,6 +171,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             if (sent->offset > *offset)
             {
                 backoff = options_.retry;
+                retrying({});
             }
             if (sent->answer && sent->answer->status == 410)
             {
@@ -178,6 +186,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             }
             if (sent->answer)
             {
+                retrying(std::format("append: {}", sent->answer->status));
                 again();
             }
             continue; // paused, stopped, or done: the next HEAD tells
@@ -206,6 +215,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
         {
             return refuse(c, e, prefix, *close);
         }
+        retrying(close ? std::format("close: {}", close->status) : close.error());
         again();
     }
     if (!stop_.stop_requested())
@@ -289,6 +299,7 @@ auto Importer::create(const CaptainCapture& c, Entry& e, const std::string& pref
     {
         return refuse(c, e, prefix, *res);
     }
+    retrying(res ? std::format("create: {}", res->status) : res.error());
     return std::nullopt;
 }
 
@@ -328,7 +339,13 @@ auto Importer::stageSearch(const CaptainCapture& c, const Entry& e, const std::s
         return std::unexpected(Outcome::Skipped);
     }
     std::error_code ec;
-    return std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(std::filesystem::file_size(staged, ec))), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
+    const auto      bytes = std::filesystem::file_size(staged, ec);
+    if (ec)
+    {
+        say(prefix + "cannot read the search log's stage: " + ec.message() + ". Import stopped.");
+        return std::unexpected(Outcome::Failed);
+    }
+    return std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(bytes)), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
 }
 
 auto Importer::moveToUploaded(const CaptainCapture& c, const std::string& prefix, const std::string& done, const Outcome outcome) -> Outcome

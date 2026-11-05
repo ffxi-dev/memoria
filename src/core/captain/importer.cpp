@@ -121,6 +121,7 @@ auto Importer::run() -> void
         {
             const std::scoped_lock lock(mutex_);
             character_ = c.character;
+            error_.clear();
         }
         index_            = i + 1;
         sent_             = 0;
@@ -184,6 +185,12 @@ auto Importer::wait(const std::chrono::milliseconds time) -> void
                    });
 }
 
+auto Importer::retrying(std::string why) -> void
+{
+    const std::scoped_lock lock(mutex_);
+    error_ = std::move(why);
+}
+
 auto Importer::say(const std::string& text) -> void
 {
     if (options_.say)
@@ -231,7 +238,7 @@ auto Importer::finished() const -> bool
 auto Importer::progress() const -> ImportProgress
 {
     const std::scoped_lock lock(mutex_);
-    return { .index = index_, .count = count_, .character = character_, .sent = sent_, .size = size_ };
+    return { .index = index_, .count = count_, .character = character_, .sent = sent_, .size = size_, .error = error_ };
 }
 
 auto Importer::unauthorized() -> bool

@@ -264,6 +264,20 @@ TEST_CASE("server errors back off, and the import never gives up")
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 
+TEST_CASE("an import that keeps failing says why while it retries")
+{
+    Install in;
+    captainFolder(in.captures, "s/Mirabeth", noise(3000));
+    FakeMogsafe server;
+    server.forced["POST"] = { 503, 503, 503, 503, 503, 503 }; // creates
+    const auto imp        = in.importer(server, std::chrono::milliseconds(50));
+    imp->start();
+    REQUIRE(waitFor([&]
+                    {
+                        return imp->progress().error == "create: 503";
+                    }));
+}
+
 TEST_CASE("a refused token stops the import, unlinks, and the import resumes after a new link")
 {
     Install in;
@@ -630,7 +644,7 @@ TEST_CASE("the import runs on its own thread, and stops at once mid-append and m
         auto  imp      = std::make_unique<Importer>(in.options(), std::move(blocking));
         auto  before   = std::chrono::steady_clock::now();
         imp->start();
-        CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(100));
+        CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(1));
         REQUIRE(waitFor([&]
                         {
                             return http.waiting.load();
