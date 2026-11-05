@@ -3,7 +3,7 @@
 ## 0.6.0-rc.4
 
 **Captures**
-- Memoria writes xicap format 5 (xicap 7.1), which has no signatures: Vault knows who sent a capture from the install's upload token. Only a Mogsafe that reads format 5 accepts these captures. Chat text is zeroed in place, so chat packets keep their length.
+- Memoria writes xicap format 5 (xicap 7.2), which has no signatures: Vault knows who sent a capture from the install's upload token. Only a Mogsafe that reads format 5 accepts these captures. Chat text is zeroed in place, so chat packets keep their length.
 - After a long network gap, the part of a recording Vault cut off goes up as a capture of its own, which names the one it continues. Before, it stayed on the PC.
 - A `/memoria note` in Japanese reaches the capture as readable text.
 

@@ -103,7 +103,7 @@ auto Feed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> voi
     {
         bytes = frame(packet, chat);
     }
-    catch (const std::exception&) // a packet too short to frame is a gap for viewers, never an error in the capture
+    catch (const std::exception&) // a packet too short to frame is a gap for viewers
     {
         std::lock_guard lock(mutex_);
         dropped_++;

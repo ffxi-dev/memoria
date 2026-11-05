@@ -46,16 +46,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 add_library(memoria_core STATIC
+    src/core/account/chat.cpp
+    src/core/account/link.cpp
     src/core/captain/captain.cpp
     src/core/captain/compress.cpp
     src/core/captain/importer.cpp
     src/core/capture/clock.cpp
     src/core/capture/event_queue.cpp
-    src/core/file.cpp
-    src/core/account/link.cpp
-    src/core/live/live.cpp
-    src/core/account/chat.cpp
     src/core/capture/recorder.cpp
+    src/core/file.cpp
+    src/core/live/live.cpp
     src/core/tus.cpp
     src/core/units.cpp
     src/core/upload/upload_state.cpp

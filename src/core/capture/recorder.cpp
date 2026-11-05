@@ -488,7 +488,7 @@ auto Recorder::finish() -> void
     writer_.reset();
 }
 
-// Replaced whole: a crash mid-write leaves the old state, never an empty one.
+// Replaced whole, so a crash mid-write leaves the old state.
 auto Recorder::saveState(const bool open) -> void
 {
     if (login_)

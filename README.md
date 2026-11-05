@@ -67,11 +67,19 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 
 ## Layout
 
-- `src/core/`: the event queue, clock, recorder, uploader, linking, live feed and captain importer. No Ashita headers.
+- `src/core/`: everything without Ashita code, built and tested on Windows and Linux. Each folder is a namespace: `capture/` (the event queue, clock and recorder), `upload/` (the uploader and its state file), `account/` (linking and the chat choice), `live/` (the live feed) and `captain/` (captain imports). `http.h`, `tus.*`, `file.*` and `units.*`, which several of them use, sit at the top.
 - `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe.
 - `tests/`: the core's tests, one file per module, with shared fakes in `support.h`.
 - `openspec/`: what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's CMake helper, unchanged.
+
+## Contributing
+
+- The game thread never waits: packet hooks only copy into the queue. Compression, writing, flushing and uploading run on Memoria's own threads.
+- Captures are written only through xicap's library, with its live preset.
+- Upload credentials and the link handle are never printed or logged.
+- A change in behaviour updates its spec in `openspec/` in the same commit.
+- CI builds the plugin with MSVC, runs the core's tests on Linux and as 32-bit Windows programs, and checks formatting with clang-format 23.
 
 ## Licence
 
