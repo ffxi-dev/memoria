@@ -55,7 +55,7 @@ public:
 
     // The rest belong to the live link that claimed the feed last: one stopped but still closing changes nothing.
     auto claim() -> uint64_t;                                       // closes the feed and returns the new owner's id
-    auto open(uint64_t owner, bool on) -> void;                     // on while someone watches; off empties the feed
+    auto setOpen(uint64_t owner, bool on) -> void;                  // on while someone watches; off empties the feed
     auto take(uint64_t owner) -> std::vector<std::vector<uint8_t>>; // frames back to back, at most MESSAGE_BYTES a message unless one frame is larger
     auto takeDropped(uint64_t owner) -> uint64_t;
 

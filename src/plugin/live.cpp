@@ -236,8 +236,8 @@ auto Live::run(const std::stop_token& stop) -> void
         }
         else if (s.status == 401)
         {
-            std::ignore = removeLink(config_, installToken_); // as uploads do
-            post_(paint(Color::Yellow, "Live off: Vault no longer accepts this install.") + " Run " + paint(Color::Cyan, "/memoria link") + ".");
+            // A newer token saved meanwhile stays, and so does the install's link.
+            post_(removeLink(config_, installToken_) ? paint(Color::Yellow, std::format("Live off: {}.", REFUSED)) + " Run " + paint(Color::Cyan, "/memoria link") + "." : ended);
             break;
         }
         else if (s.status == 404)
@@ -310,7 +310,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             }
             if (const bool watched = viewers_ > 0; watched != open)
             {
-                feed_.open(owner_, watched);
+                feed_.setOpen(owner_, watched);
                 open = watched;
             }
             bool ok{ true };
@@ -334,7 +334,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             }
         }
     }
-    feed_.open(owner_, false);
+    feed_.setOpen(owner_, false);
     viewers_ = 0;
     if (receiver.joinable())
     {

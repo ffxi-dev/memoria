@@ -97,7 +97,7 @@ private:
     auto finish() -> void;
     auto setError(const std::exception& error) -> void;    // shown in status until a capture writes again
     auto writeFailed(const std::exception& error) -> void; // drops the writer, as a crash would
-    auto wrote() -> void;
+    auto clearError() -> void;
     auto rollover() -> void;
     auto saveState(bool open) -> void;
 

@@ -202,7 +202,7 @@ auto Recorder::run() -> void
             try
             {
                 writer_->flush();
-                wrote();
+                clearError();
             }
             catch (const std::exception& error)
             {
@@ -500,12 +500,12 @@ auto Recorder::finish() -> void
     writer_.reset();
     if (closed)
     {
-        wrote();
+        clearError();
     }
 }
 
 // A capture reached disk: the last error no longer applies, and the next failure is said again.
-auto Recorder::wrote() -> void
+auto Recorder::clearError() -> void
 {
     failing_ = false;
     const std::scoped_lock lock(statusMutex_);

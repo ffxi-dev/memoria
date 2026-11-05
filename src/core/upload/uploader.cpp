@@ -419,9 +419,9 @@ auto Uploader::saveError() const -> std::string
     return saveError_;
 }
 
-auto Uploader::unauthorized() -> bool
+auto Uploader::takeUnauthorized() -> bool
 {
-    return tus_.unauthorized();
+    return tus_.takeUnauthorized();
 }
 
 auto Uploader::file(const std::string& name) const -> UploadFile

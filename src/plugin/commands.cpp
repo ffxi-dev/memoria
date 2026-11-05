@@ -340,7 +340,7 @@ auto Session::unlinkInstall() -> void
         say(paint(Color::Red, "Still linked: " + *error));
         return;
     }
-    unlinked("Unlinked");
+    sayUnlinked("Unlinked");
 }
 
 auto Session::setUploads(const bool on) -> void

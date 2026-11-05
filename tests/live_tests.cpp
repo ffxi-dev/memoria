@@ -76,7 +76,7 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
     {
         Recorder   rec(options(dir));
         const auto owner = rec.live().claim();
-        rec.live().open(owner, true);
+        rec.live().setOpen(owner, true);
         rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1, 0x017)); // chat to the client
         auto said      = gamePacket(T0 + 2, 0x0B5);
@@ -116,7 +116,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(owner).empty());
 
-    feed.open(owner, true);
+    feed.setOpen(owner, true);
     for (int i = 0; i < 3; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
@@ -137,7 +137,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
     CHECK(frames(messages).size() == 5000);
 
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
-    feed.open(owner, false);
+    feed.setOpen(owner, false);
     CHECK(feed.take(owner).empty());
 }
 
@@ -145,7 +145,7 @@ TEST_CASE("a full live feed drops packets and counts them")
 {
     live::Feed feed(size_t{ 3 } * 32);
     const auto owner = feed.claim();
-    feed.open(owner, true);
+    feed.setOpen(owner, true);
     for (int i = 0; i < 5; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
@@ -165,10 +165,10 @@ TEST_CASE("a live link stopped late cannot close the feed of the one that replac
 {
     live::Feed feed;
     const auto old = feed.claim();
-    feed.open(old, true);
+    feed.setOpen(old, true);
     const auto now = feed.claim(); // /memoria live off, then /memoria live, while the old send still hangs
-    feed.open(now, true);
-    feed.open(old, false); // the old link's send returns, and it closes what it thinks is its feed
+    feed.setOpen(now, true);
+    feed.setOpen(old, false); // the old link's send returns, and it closes what it thinks is its feed
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(old).empty());
     CHECK(frames(feed.take(now)).size() == 1);

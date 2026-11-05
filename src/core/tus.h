@@ -41,7 +41,7 @@ public:
     // Sends path's bytes from offset to size in 1 MiB appends, while go(offset) holds.
     auto append(const std::filesystem::path& path, const std::string& url, uint64_t offset, uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>;
 
-    [[nodiscard]] auto unauthorized() -> bool; // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto takeUnauthorized() -> bool; // true once each time Mogsafe refuses the token on disk, which it then deletes
 
     [[nodiscard]] auto token() const -> const std::string&; // as the last allowed() read it
 

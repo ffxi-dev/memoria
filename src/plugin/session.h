@@ -102,9 +102,9 @@ private:
     auto startUploads() -> void;
     auto link() -> void;
     auto waitForLink(const std::stop_token& stop) -> void;
-    auto cancelLink() -> bool;                     // true when a link was being made
-    auto unlinked(const std::string& why) -> void; // the token is gone: stops live and says so
-    auto linked() const -> std::optional<Linked>;  // read each time: clients sharing the install share its token
+    auto cancelLink() -> bool;                        // true when a link was being made
+    auto sayUnlinked(const std::string& why) -> void; // the token is gone: stops live and says so
+    auto linked() const -> std::optional<Linked>;     // read each time: clients sharing the install share its token
     auto greet() -> void;
     auto remind() -> void;
     auto offerImport(const std::stop_token& stop) -> void;

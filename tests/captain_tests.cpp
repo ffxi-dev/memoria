@@ -73,7 +73,7 @@ struct Install
     auto options(std::chrono::milliseconds retry = std::chrono::milliseconds(1)) -> ImportOptions
     {
         ImportOptions options{ .captures = captures, .uploaded = uploaded, .state = state, .server = "https://mogsafe.test", .config = config, .retry = retry };
-        options.say = [this](std::string text)
+        options.post = [this](std::string text)
         {
             const std::scoped_lock lock(mutex);
             said.push_back(std::move(text));
@@ -286,7 +286,7 @@ TEST_CASE("a refused token stops the import, unlinks, and the import resumes aft
     server.token = "revoked";
     auto imp     = in.importer(server);
     imp->run();
-    CHECK(imp->unauthorized());
+    CHECK(imp->takeUnauthorized());
     CHECK(!fs::exists(in.config / "token"));
     CHECK(in.saidAny("this install is not linked"));
     CHECK(fs::exists(in.captures / "s/Mirabeth"));

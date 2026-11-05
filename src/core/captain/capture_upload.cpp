@@ -67,7 +67,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
             {
                 return Outcome::Stopped;
             }
-            say(prefix + "cannot read its full.log; skipped.");
+            post(prefix + "cannot read its full.log; skipped.");
             return Outcome::Skipped;
         }
         e = { .crc = std::format("{:08x}", crc->crc), .size = crc->size };
@@ -80,7 +80,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
     }
     if (manifest.size() > MAX_MANIFEST)
     {
-        say(prefix + std::format("its manifest.txt is over {}, more than captain writes; skipped.", sizeText(MAX_MANIFEST)));
+        post(prefix + std::format("its manifest.txt is over {}, more than captain writes; skipped.", sizeText(MAX_MANIFEST)));
         return Outcome::Skipped;
     }
 
@@ -142,7 +142,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                 {
                     return Outcome::Stopped;
                 }
-                say(prefix + "cannot stage the log: " + *error + ". Import stopped.");
+                post(prefix + "cannot stage the log: " + *error + ". Import stopped.");
                 return Outcome::Failed;
             }
         }
@@ -220,7 +220,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
     }
     if (!stop_.stop_requested())
     {
-        say("Captain import stopped: this install is not linked. It goes on after /memoria link.");
+        post("Captain import stopped: this install is not linked. It goes on after /memoria link.");
     }
     return Outcome::Stopped;
 }
@@ -244,7 +244,7 @@ auto Importer::forget(const CaptainCapture& c, const Entry& e) -> void
 auto Importer::refuse(const CaptainCapture& c, const Entry& e, const std::string& prefix, const HttpResponse& res) -> Outcome
 {
     forget(c, e);
-    say(prefix + std::format("refused: {}.", trim(res.body).empty() ? std::to_string(res.status) : trim(res.body)));
+    post(prefix + std::format("refused: {}.", trim(res.body).empty() ? std::to_string(res.status) : trim(res.body)));
     return Outcome::Refused;
 }
 
@@ -263,7 +263,7 @@ auto Importer::create(const CaptainCapture& c, Entry& e, const std::string& pref
     }
     if (ec)
     {
-        say(prefix + "cannot remove an old stage: " + ec.message() + ". Import stopped.");
+        post(prefix + "cannot remove an old stage: " + ec.message() + ". Import stopped.");
         return Outcome::Failed;
     }
     std::string search;
@@ -285,7 +285,7 @@ auto Importer::create(const CaptainCapture& c, Entry& e, const std::string& pref
         // Saved before the first byte, so a crash resumes this upload. On failure imports.txt stays for the next start or link.
         if (const auto error = save())
         {
-            say(prefix + *error + ". Import stopped; it goes on at the next start or link.");
+            post(prefix + *error + ". Import stopped; it goes on at the next start or link.");
             return Outcome::Stopped;
         }
         return std::nullopt;
@@ -316,7 +316,7 @@ auto Importer::stageSearch(const CaptainCapture& c, const Entry& e, const std::s
             return std::unexpected(Outcome::Stopped);
         }
         forget(c, e);
-        say(prefix + "cannot read its search.log; skipped.");
+        post(prefix + "cannot read its search.log; skipped.");
         return std::unexpected(Outcome::Skipped);
     }
     if (const auto error = compressLog(searchLog, staged, {}, stop_.get_token()))
@@ -325,7 +325,7 @@ auto Importer::stageSearch(const CaptainCapture& c, const Entry& e, const std::s
         {
             return std::unexpected(Outcome::Stopped);
         }
-        say(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
+        post(prefix + "cannot stage the search log: " + *error + ". Import stopped.");
         return std::unexpected(Outcome::Failed);
     }
     if (const auto staging = crc32File(searchLog, stop_.get_token()); !staging || staging->crc != crc->crc || staging->size != crc->size)
@@ -335,14 +335,14 @@ auto Importer::stageSearch(const CaptainCapture& c, const Entry& e, const std::s
             return std::unexpected(Outcome::Stopped);
         }
         forget(c, e);
-        say(prefix + "its search.log changed while it was staged; skipped.");
+        post(prefix + "its search.log changed while it was staged; skipped.");
         return std::unexpected(Outcome::Skipped);
     }
     std::error_code ec;
     const auto      bytes = std::filesystem::file_size(staged, ec);
     if (ec)
     {
-        say(prefix + "cannot read the search log's stage: " + ec.message() + ". Import stopped.");
+        post(prefix + "cannot read the search log's stage: " + ec.message() + ". Import stopped.");
         return std::unexpected(Outcome::Failed);
     }
     return std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(bytes)), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
@@ -353,10 +353,10 @@ auto Importer::moveToUploaded(const CaptainCapture& c, const std::string& prefix
     const auto to = moveAside(options_.captures, options_.uploaded, c.dir);
     if (!to)
     {
-        say(prefix + "in Vault, but its folder could not move: " + to.error() + ".");
+        post(prefix + "in Vault, but its folder could not move: " + to.error() + ".");
         return Outcome::NotMoved;
     }
-    say(prefix + done);
+    post(prefix + done);
     return outcome;
 }
 

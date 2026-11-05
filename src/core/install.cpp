@@ -82,8 +82,8 @@ auto removeLink(const std::filesystem::path& config, const std::string& token, c
         return false;
     }
     const auto link = readLink(taken);
-    const bool refused{ link && link->token == token };
-    if (!refused)
+    const bool matched{ link && link->token == token };
+    if (!matched)
     {
         // A hard link fails where a token was saved since the rename, so the newer one stays. Where links fail for another
         // reason, a move that never replaces a file puts the taken token back; if that fails too, it stays in its file.
@@ -95,7 +95,7 @@ auto removeLink(const std::filesystem::path& config, const std::string& token, c
         }
     }
     std::filesystem::remove(taken, ec);
-    return refused;
+    return matched;
 }
 
 auto unlink(const std::filesystem::path& config) -> std::optional<std::string>

@@ -5,6 +5,7 @@ using namespace memoria::test;
 
 TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
 {
+    const auto dir = tempDir();
     struct Chat final : Http
     {
         std::string auth;
@@ -19,18 +20,21 @@ TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
             return HttpResponse{ .status = status, .body = body };
         }
     } mogsafe;
-    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == true);
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken") == true);
     CHECK(mogsafe.auth == "Bearer t0ken");
     mogsafe.body = R"({"save_chat":false})";
-    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == false);
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken") == false);
     for (const auto* bad : { R"({"save_chat":"yes"})", R"({})", "not json" })
     {
         mogsafe.body = bad;
-        CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+        CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken"));
     }
     mogsafe.body   = R"({"save_chat":true})";
-    mogsafe.status = 401;
-    CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+    mogsafe.status = 401; // a revoked install: its token goes, as uploads do, so captures redact again
+    REQUIRE(!saveLink(dir, { .token = "t0ken", .account = "player" }));
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == REFUSED);
+    CHECK(!loadLink(dir));
+    fs::remove_all(dir);
 }
 
 TEST_CASE("each capture takes the chat choice it opens with")
@@ -230,7 +234,7 @@ TEST_CASE("every chat range is zeroed in the capture, the session file and the l
         {
             Recorder   rec(opts);
             const auto owner = rec.live().claim();
-            rec.live().open(owner, true);
+            rec.live().setOpen(owner, true);
             rec.login(T0, who("Kalnor", 1));
             rec.sessionStart(T0, dir / "sessions" / "s.xicap");
             for (size_t i = 0; i < ranges.size(); ++i)

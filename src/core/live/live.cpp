@@ -36,7 +36,7 @@ try
     if (res && res->status == 401)
     {
         std::ignore = removeLink(config, installToken);
-        return std::unexpected("Vault no longer accepts this install");
+        return std::unexpected(REFUSED);
     }
     res = expect(std::move(res), 201);
     if (!res)
@@ -150,7 +150,7 @@ auto Feed::claim() -> uint64_t
     return ++owner_;
 }
 
-auto Feed::open(const uint64_t owner, const bool on) -> void
+auto Feed::setOpen(const uint64_t owner, const bool on) -> void
 {
     const std::scoped_lock lock(mutex_);
     if (owner != owner_)

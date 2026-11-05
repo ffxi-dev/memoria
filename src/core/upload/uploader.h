@@ -74,7 +74,7 @@ public:
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
     [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did
-    [[nodiscard]] auto unauthorized() -> bool;                                    // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto takeUnauthorized() -> bool;                                // true once each time Mogsafe refuses the token on disk, which it then deletes
     [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed: its bytes never go again
     [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
@@ -93,7 +93,7 @@ private:
 
     UploadOptions         options_;
     std::unique_ptr<Http> http_;
-    Tus                   tus_; // upload thread only, but for unauthorized()
+    Tus                   tus_; // upload thread only, but for takeUnauthorized()
 
     mutable std::mutex mutex_;
     UploadFiles        files_;

@@ -41,7 +41,7 @@ auto Tus::request(const std::string& method, const std::string& url, HttpHeaders
             unauthorized_ = true;
         }
         token_.clear();
-        return std::unexpected("Mogsafe refused this install's token");
+        return std::unexpected(REFUSED);
     }
     return res;
 }
@@ -87,7 +87,7 @@ auto Tus::append(const std::filesystem::path& path, const std::string& url, uint
     return Appended{ .offset = offset };
 }
 
-auto Tus::unauthorized() -> bool
+auto Tus::takeUnauthorized() -> bool
 {
     return unauthorized_.exchange(false);
 }

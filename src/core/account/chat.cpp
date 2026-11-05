@@ -3,13 +3,21 @@
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <tuple>
+#include <utility>
 
 namespace memoria::account
 {
 
-auto fetchSaveChat(Http& http, const std::string& server, const std::string& installToken) -> std::expected<bool, std::string>
+auto fetchSaveChat(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<bool, std::string>
 {
-    const auto res = expect(http.request("GET", server + "/v1/install/save-chat", { { "Authorization", "Bearer " + installToken } }, {}), 200);
+    auto res = http.request("GET", server + "/v1/install/save-chat", { { "Authorization", "Bearer " + installToken } }, {});
+    if (res && res->status == 401)
+    {
+        std::ignore = removeLink(config, installToken);
+        return std::unexpected(REFUSED);
+    }
+    res = expect(std::move(res), 200);
     if (!res)
     {
         return std::unexpected(res.error());
@@ -38,7 +46,7 @@ auto ChatChoice::refresh(Http& http, const std::string& server, const std::files
         {
             return;
         }
-        const auto saveChat = fetchSaveChat(http, server, asked->token);
+        const auto saveChat = fetchSaveChat(http, server, config, asked->token);
         const auto now      = loadLink(config);
         if (!now || now->token != asked->token)
         {

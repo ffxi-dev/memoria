@@ -282,8 +282,8 @@ TEST_CASE("a refused token is forgotten, and sending stops until a new link")
     auto up      = uploader(dir, server);
     append(dir / "a.xicap", std::string(500, 'x'));
     CHECK(up->uploadAll().has_value());
-    CHECK(up->unauthorized());
-    CHECK(!up->unauthorized()); // said once
+    CHECK(up->takeUnauthorized());
+    CHECK(!up->takeUnauthorized()); // said once
     CHECK(!fs::exists(dir / "config" / "token"));
 
     const auto requests = server.requests;
@@ -361,7 +361,7 @@ TEST_CASE("a refusal of an old token keeps the token another client just saved")
     Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .idle = std::chrono::milliseconds(0) }, std::make_unique<Relink>(server, dir / "config"));
     append(dir / "a.xicap", std::string(500, 'x'));
     CHECK(up.uploadAll().has_value()); // 401 for the old token
-    CHECK(!up.unauthorized());
+    CHECK(!up.takeUnauthorized());
     REQUIRE(loadLink(dir / "config"));
     CHECK(loadLink(dir / "config")->token == "t1");
     CHECK(!up.uploadAll());

@@ -12,7 +12,7 @@ namespace memoria::upload
 namespace
 {
 
-auto stateOf(const Stage stage) -> std::string_view
+auto stageText(const Stage stage) -> std::string_view
 {
     switch (stage)
     {
@@ -30,11 +30,11 @@ auto stateOf(const Stage stage) -> std::string_view
     return "0";
 }
 
-auto stageOf(const std::string_view state) -> Stage
+auto parseStage(const std::string_view state) -> Stage
 {
     for (const auto stage : { Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued })
     {
-        if (state == stateOf(stage))
+        if (state == stageText(stage))
         {
             return stage;
         }
@@ -64,7 +64,7 @@ auto readUploads(const std::filesystem::path& path) -> UploadFiles
             std::getline(fields, reason); // empty unless refused
             files[name] = {
                 .url       = url,
-                .stage     = stageOf(state),
+                .stage     = parseStage(state),
                 .refusedAt = parseU64(refused).value_or(0),
                 .sent      = parseU64(sent).value_or(0),
                 .reason    = reason,
@@ -95,7 +95,7 @@ auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -
     std::string text;
     for (const auto& [name, f] : files)
     {
-        text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, stateOf(f.stage), f.refusedAt, f.sent, f.reason);
+        text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, stageText(f.stage), f.refusedAt, f.sent, f.reason);
     }
     return replaceFile(path, text);
 }

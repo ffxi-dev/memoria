@@ -235,30 +235,30 @@ constexpr uintptr_t LIST_OFFSET    = 0x148; // in the lobby context
 constexpr uintptr_t VERSION_OFFSET = 0x1A08;
 
 // The content id getter: mov ecx,[esp+4]; index * 0x8C; mov ecx,[client]; mov eax,[ecx+eax*4+list]; ret
-auto getter() -> uintptr_t
+auto characterGetter() -> uintptr_t
 {
     static const auto address = find("8B4C24048D04CD000000002BC18B0D????????8D04808B8481????????C3");
     return address;
 }
 
 // The character list in FFXiMain's copy of the lobby context, which the client keeps after the login; 0 before it has one.
-auto list() -> uintptr_t
+auto characterList() -> uintptr_t
 {
-    const auto client = read32(read32(getter() + 15));
-    return client ? client + read32(getter() + 25) : 0;
+    const auto client = read32(read32(characterGetter() + 15));
+    return client ? client + read32(characterGetter() + 25) : 0;
 }
 
 } // namespace
 
 auto version() -> std::string
 {
-    if (getter() == 0)
+    if (characterGetter() == 0)
     {
         return {};
     }
     try
     {
-        const auto l = list();
+        const auto l = characterList();
         if (l == 0)
         {
             return {};
@@ -281,7 +281,7 @@ auto version() -> std::string
 
 auto fillCharacter(capture::Login& who) -> std::optional<std::string>
 {
-    if (getter() == 0)
+    if (characterGetter() == 0)
     {
         return "the character signature is missing";
     }
@@ -290,7 +290,7 @@ auto fillCharacter(capture::Login& who) -> std::optional<std::string>
     constexpr size_t   WORLD_NAME_SIZE = 16;
     try
     {
-        const auto list = lobby::list();
+        const auto list = lobby::characterList();
         if (list == 0)
         {
             return "no character list";

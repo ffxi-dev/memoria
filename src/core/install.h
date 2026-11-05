@@ -25,8 +25,11 @@ auto loadLink(const std::filesystem::path& config) -> std::optional<Linked>;
 
 using LinkBack = std::function<bool(const std::filesystem::path& from, const std::filesystem::path& to)>;
 
-// Deletes the link only while it holds this token: one saved since, even mid-call, stays. linkBack puts back a token
-// taken by mistake, as a hard link; tests make it fail.
+// What every Mogsafe call says when Mogsafe refuses the install's token (a 401), after removeLink.
+inline constexpr auto REFUSED = "Vault no longer accepts this install";
+
+// Deletes the link only while it holds this token: one saved since, even mid-call, stays. True when it deleted it.
+// linkBack puts back a token taken by mistake, as a hard link; tests make it fail.
 auto removeLink(const std::filesystem::path& config, const std::string& token, const LinkBack& linkBack = {}) -> bool;
 
 // /memoria unlink: deletes whatever token is there. Why not, if one is still there.

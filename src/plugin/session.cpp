@@ -264,9 +264,12 @@ auto Session::frame() -> void
         }
         greet();
     }
-    if (importer_ && importer_->unauthorized())
+    // Both workers may report the same refusal: it is said once.
+    const bool importRefused{ importer_ && importer_->takeUnauthorized() };
+    const bool uploadRefused{ uploader_ && uploader_->takeUnauthorized() };
+    if (importRefused || uploadRefused)
     {
-        unlinked("Vault no longer accepts this install");
+        sayUnlinked(REFUSED);
     }
     if (importer_ && importer_->finished())
     {
@@ -279,10 +282,6 @@ auto Session::frame() -> void
     if (live_ && live_->finished())
     {
         live_.reset();
-    }
-    if (uploader_ && uploader_->unauthorized())
-    {
-        unlinked("Vault no longer accepts this install");
     }
 }
 
@@ -361,7 +360,7 @@ auto Session::startImport(const bool asked) -> void
         .config   = host_.config,
         .mayRun   = turn(importMutex_, std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring()))),
     };
-    options.say = [this](std::string text)
+    options.post = [this](std::string text)
     {
         post(std::move(text));
     };
@@ -450,7 +449,7 @@ auto Session::linked() const -> std::optional<Linked>
     return loadLink(host_.config);
 }
 
-auto Session::unlinked(const std::string& why) -> void
+auto Session::sayUnlinked(const std::string& why) -> void
 {
     stopLive();
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");

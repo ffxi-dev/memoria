@@ -65,7 +65,7 @@ auto Importer::start(const bool asked) -> void
                               {
                                   if (asked)
                                   {
-                                      say("Another client sharing this install is importing.");
+                                      post("Another client sharing this install is importing.");
                                   }
                                   finished_ = true;
                                   return;
@@ -76,7 +76,7 @@ auto Importer::start(const bool asked) -> void
                               }
                               catch (const std::exception& error)
                               {
-                                  say(std::format("Captain import stopped: {}", error.what()));
+                                  post(std::format("Captain import stopped: {}", error.what()));
                               }
                               finished_ = true;
                           });
@@ -90,7 +90,7 @@ auto Importer::run() -> void
     load();
     if (const auto error = save()) // its existence marks the run as asked for until it ends
     {
-        say(std::format("Captain import stopped: {}.", *error));
+        post(std::format("Captain import stopped: {}.", *error));
         return;
     }
 
@@ -102,7 +102,7 @@ auto Importer::run() -> void
     count_ = found.size();
     if (found.empty())
     {
-        say("No captain captures to upload.");
+        post("No captain captures to upload.");
     }
     else
     {
@@ -111,7 +111,7 @@ auto Importer::run() -> void
         {
             total += c.growing ? 0 : c.size + c.searchSize;
         }
-        say(std::format("Uploading {} captain capture{} ({}) in the background.", found.size(), found.size() == 1 ? "" : "s", sizeText(total)));
+        post(std::format("Uploading {} captain capture{} ({}) in the background.", found.size(), found.size() == 1 ? "" : "s", sizeText(total)));
     }
 
     std::map<Outcome, size_t> tally;
@@ -129,7 +129,7 @@ auto Importer::run() -> void
         const auto prefix = std::format("Captain {}/{} {}: ", i + 1, found.size(), c.folder);
         if (c.growing)
         {
-            say(prefix + "still being written; skipped.");
+            post(prefix + "still being written; skipped.");
             ++tally[Outcome::Skipped];
             continue;
         }
@@ -152,7 +152,7 @@ auto Importer::run() -> void
     }
     if (!found.empty())
     {
-        say(summary + ". Uploaded folders are in addons/captain/captures-uploaded.");
+        post(summary + ". Uploaded folders are in addons/captain/captures-uploaded.");
     }
     fs::remove(options_.state / STATE_FILE, ec);
     fs::remove(options_.state / "imports", ec); // only once empty
@@ -191,11 +191,11 @@ auto Importer::retrying(std::string why) -> void
     error_ = std::move(why);
 }
 
-auto Importer::say(const std::string& text) -> void
+auto Importer::post(const std::string& text) -> void
 {
-    if (options_.say)
+    if (options_.post)
     {
-        options_.say(text);
+        options_.post(text);
     }
 }
 
@@ -241,9 +241,9 @@ auto Importer::progress() const -> ImportProgress
     return { .index = index_, .count = count_, .character = character_, .sent = sent_, .size = size_, .error = error_ };
 }
 
-auto Importer::unauthorized() -> bool
+auto Importer::takeUnauthorized() -> bool
 {
-    return tus_.unauthorized();
+    return tus_.takeUnauthorized();
 }
 
 } // namespace memoria::captain
