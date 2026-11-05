@@ -119,6 +119,7 @@ private:
     std::unique_ptr<Live>                  live_; // after recorder_, whose feed it reads
     std::vector<std::unique_ptr<Live>>     closing_;
     HANDLE                                 uploadMutex_{ nullptr };
+    HANDLE                                 importMutex_{ nullptr };
     std::unique_ptr<captain::Importer>     importer_;
     std::atomic<bool>                      reminding_{ false };
     std::string                            startError_;

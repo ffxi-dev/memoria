@@ -32,7 +32,7 @@ struct ImportOptions
     std::function<void(std::string)> say;
     std::chrono::milliseconds        retry{ 5000 };
     std::chrono::seconds             quiet{ std::chrono::minutes(10) };
-    std::string                      mutex; // Windows: a named mutex held for the run, so clients sharing the install import one at a time
+    std::function<bool()>            mayRun; // asked on the import thread: clients sharing an install import one at a time
 };
 
 struct ImportProgress

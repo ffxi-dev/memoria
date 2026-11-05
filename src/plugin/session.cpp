@@ -28,6 +28,21 @@ namespace
 
 Session* instance_ = nullptr; // for the search hooks, which take a plain function
 
+// Clients sharing an install take turns through a named mutex. The thread that takes it keeps it until it exits; Windows
+// then hands it to the next client. Without a mutex, every client may run.
+auto turn(HANDLE& mutex, const std::string& name) -> std::function<bool()>
+{
+    if (!mutex)
+    {
+        mutex = ::CreateMutexA(nullptr, FALSE, name.c_str());
+    }
+    return [mutex]
+    {
+        const auto r = mutex ? ::WaitForSingleObject(mutex, 0) : WAIT_OBJECT_0;
+        return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
+    };
+}
+
 } // namespace
 
 Session::Session(Host host)
@@ -126,9 +141,12 @@ Session::~Session()
         uploader_->finish(closed, std::chrono::seconds(3));
     }
     uploader_.reset();
-    if (uploadMutex_)
+    for (auto* const mutex : { uploadMutex_, importMutex_ })
     {
-        ::CloseHandle(std::exchange(uploadMutex_, nullptr));
+        if (mutex)
+        {
+            ::CloseHandle(mutex);
+        }
     }
 }
 
@@ -275,17 +293,8 @@ auto Session::startUploads() -> void
         .server = server_,
         .config = host_.config,
     };
-    // Clients sharing an install share its captures folder; the one whose upload thread holds this mutex uploads, and Windows hands it on when that client exits.
-    if (!uploadMutex_)
-    {
-        uploadMutex_ = ::CreateMutexA(nullptr, FALSE, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())).c_str());
-    }
-    options.mayRun = [mutex = uploadMutex_]
-    {
-        const auto r = ::WaitForSingleObject(mutex, 0);
-        return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
-    };
-    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
+    options.mayRun = turn(uploadMutex_, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())));
+    uploader_      = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
     uploader_->start();
 }
 
@@ -349,7 +358,7 @@ auto Session::startImport(const bool asked) -> void
         .state    = host_.captures,
         .server   = server_,
         .config   = host_.config,
-        .mutex    = std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring())),
+        .mayRun   = turn(importMutex_, std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring()))),
     };
     options.say = [this](std::string text)
     {

@@ -97,20 +97,16 @@ auto Importer::start(const bool asked) -> void
                           {
 #ifdef _WIN32
                               ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-                              // Taken on this thread, which releases it: Windows hands a mutex whose thread died to the next client.
-                              const auto mutex = options_.mutex.empty() ? nullptr : ::CreateMutexA(nullptr, FALSE, options_.mutex.c_str());
-                              const auto taken = mutex ? ::WaitForSingleObject(mutex, 0) : WAIT_OBJECT_0;
-                              if (taken != WAIT_OBJECT_0 && taken != WAIT_ABANDONED)
+#endif
+                              if (options_.mayRun && !options_.mayRun())
                               {
                                   if (asked)
                                   {
                                       say("Another client sharing this install is importing.");
                                   }
-                                  ::CloseHandle(mutex);
                                   finished_ = true;
                                   return;
                               }
-#endif
                               try
                               {
                                   run();
@@ -119,13 +115,6 @@ auto Importer::start(const bool asked) -> void
                               {
                                   say(std::format("Captain import stopped: {}", error.what()));
                               }
-#ifdef _WIN32
-                              if (mutex)
-                              {
-                                  ::ReleaseMutex(mutex);
-                                  ::CloseHandle(mutex);
-                              }
-#endif
                               finished_ = true;
                           });
 }

@@ -703,31 +703,20 @@ TEST_CASE("the import reminder shows once per install, to one client")
     }
 }
 
-#ifdef _WIN32
-TEST_CASE("a second client sharing the install does not import while the first does")
+TEST_CASE("a client whose turn another holds imports nothing, and says so only when asked")
 {
     Install     in;
-    FakeMogsafe first;
-    FakeMogsafe second;
-    captainFolder(in.captures, "s/Mirabeth", noise(3 << 20));
-    const auto mutex   = std::format("Local\\Memoria-import-test-{}", std::random_device{}());
-    auto       options = in.options();
-    options.mutex      = mutex;
-    auto  blocking     = std::make_unique<Blocking>(first, "PATCH");
-    auto& http         = *blocking;
-    auto  running      = std::make_unique<Importer>(options, std::move(blocking));
-    running->start();
-    REQUIRE(waitFor([&]
-                    {
-                        return http.waiting.load();
-                    }));
-
+    FakeMogsafe server;
+    captainFolder(in.captures, "s/Mirabeth", noise(3000));
     for (const bool asked : { true, false }) // /memoria import, then a resume at load
     {
         Install other;
-        auto    otherOptions = other.options();
-        otherOptions.mutex   = mutex;
-        Importer imp(otherOptions, std::make_unique<Forward>(second));
+        auto    options = other.options();
+        options.mayRun  = []
+        {
+            return false;
+        };
+        Importer imp(options, std::make_unique<Forward>(server));
         imp.start(asked);
         REQUIRE(waitFor([&]
                         {
@@ -735,10 +724,9 @@ TEST_CASE("a second client sharing the install does not import while the first d
                         }));
         CHECK(other.saidAny("Another client sharing this install is importing.") == asked);
     }
-    CHECK(second.requests == 0);
+    CHECK(server.requests == 0);
 
-    running.reset(); // the first client unloads, which frees the run for the next
-    Importer next(options, std::make_unique<Forward>(first));
+    Importer next(in.options(), std::make_unique<Forward>(server)); // the turn comes
     next.start(false);
     REQUIRE(waitFor([&]
                     {
@@ -746,7 +734,6 @@ TEST_CASE("a second client sharing the install does not import while the first d
                     }));
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
-#endif
 
 TEST_CASE("a log that cannot be staged stops the import and keeps its place for the next start")
 {
