@@ -1,6 +1,12 @@
 #pragma once
 
+#include "core/enums/save_step.h"
+
 #include <filesystem>
+#include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace memoria
 {
@@ -8,7 +14,15 @@ namespace memoria
 // Creates an empty file, failing when anything is already there. A secret one only the user running the game can open.
 auto createNew(const std::filesystem::path& path, bool secret = false) -> bool;
 
-// Whether only the user running the game can open path: what createNew gives a secret.
-auto ownerOnly(const std::filesystem::path& path) -> bool;
+// Renames from to to, failing when to exists: unlike std::filesystem::rename, it never replaces a file.
+auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::path& to) -> bool;
+
+// Writes text to path's .tmp, flushes it to disk, and renames it over path, so neither a crash nor a power cut leaves a
+// half-written path. Why not, if a step failed: a failure before the rename leaves path as it was; one after it (the
+// folder's own flush, on POSIX) leaves path new but maybe not yet on disk.
+auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>;
+
+// Tests set it to make a step of replaceFile fail; empty in the game.
+inline std::function<bool(SaveStep)> failSave;
 
 } // namespace memoria

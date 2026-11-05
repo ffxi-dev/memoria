@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 inline auto paint(const Color c, const std::string_view text) -> std::string
@@ -24,4 +24,4 @@ auto duration(uint64_t seconds) -> std::string;
 // The game and Ashita's commands speak Shift-JIS; captures hold UTF-8.
 auto utf8FromShiftJis(std::string_view text) -> std::string;
 
-} // namespace memoria
+} // namespace memoria::plugin

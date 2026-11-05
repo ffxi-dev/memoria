@@ -2,11 +2,12 @@
 
 #include "core/http.h"
 
+#include <atomic>
+#include <chrono>
 #include <memory>
-#include <mutex>
 #include <string_view>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 struct CloseInternetHandle
@@ -29,20 +30,41 @@ struct OpenRequest
 // Connects and opens a request for url; the error names the step that failed.
 auto openRequest(void* session, std::string_view method, const std::string& url) -> std::expected<OpenRequest, std::string>;
 
-// Requests block their thread, for at most the timeouts set in the constructor or until cancel.
+// How long each step of a request may wait on the network: WinHTTP's own limits, which nothing cuts short.
+struct HttpTimeouts
+{
+    std::chrono::milliseconds resolve;
+    std::chrono::milliseconds connect;
+    std::chrono::milliseconds send; // each write of the body, at most WRITE_SIZE bytes
+    std::chrono::milliseconds receive;
+};
+
+inline constexpr size_t WRITE_SIZE = size_t{ 64 } * 1024;
+
+// Uploads and imports. A 64 KiB write takes about 4 s at 128 kbit/s, the slowest line a player records on, so 32 s
+// leaves room for a congested one; Mogsafe answers a close only once it has hashed and stored the whole capture.
+inline constexpr HttpTimeouts UPLOAD_TIMEOUTS{ .resolve = std::chrono::seconds(12), .connect = std::chrono::seconds(12), .send = std::chrono::seconds(32), .receive = std::chrono::seconds(60) };
+
+// Linking and the chat choice: a few hundred bytes each way, which Mogsafe answers at once. 4 s is WinHTTP's tick: it
+// counts a request's timeouts in whole 4 s steps.
+inline constexpr HttpTimeouts QUICK_TIMEOUTS{ .resolve = std::chrono::seconds(4), .connect = std::chrono::seconds(4), .send = std::chrono::seconds(4), .receive = std::chrono::seconds(4) };
+
+// Sets a session's timeouts; false if WinHTTP refused them, which leaves no bound to rely on.
+auto setTimeouts(void* session, const HttpTimeouts& timeouts) -> bool;
+
+// Requests block their thread for at most one step's timeout at a time. cancel only signals: the request in flight
+// stops at its next step, between writes, or between reads of the answer, and its own thread closes its handles.
 class WinHttp final : public Http
 {
 public:
-    WinHttp();
+    explicit WinHttp(const HttpTimeouts& timeouts);
 
     auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override;
     auto cancel() -> void override;
 
 private:
-    InternetHandle session_;
-    std::mutex     mutex_;
-    void*          request_{ nullptr }; // the request in flight, which cancel closes
-    bool           cancelled_{ false };
+    InternetHandle    session_;
+    std::atomic<bool> cancelled_{ false };
 };
 
-} // namespace memoria
+} // namespace memoria::plugin

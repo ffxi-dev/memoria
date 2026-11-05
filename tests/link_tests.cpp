@@ -164,3 +164,101 @@ TEST_CASE("only the refused token is deleted")
     CHECK(fs::is_empty(dir));
     fs::remove_all(dir);
 }
+
+TEST_CASE("a link code that would poll at once or never expire is refused")
+{
+    struct Start final : Http
+    {
+        std::string body;
+
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            return HttpResponse{ .status = 201, .body = body };
+        }
+    } mogsafe;
+    mogsafe.body = R"({"code":"A","poll":"p","url":"https://mogsafe.test/link","interval":5,"expires":600})";
+    CHECK(startLink(mogsafe, "https://mogsafe.test").has_value());
+    for (const auto* bad : { R"({"code":"A","interval":0})", R"({"code":"A","interval":-5})", R"({"code":"A","expires":0})" })
+    {
+        INFO(bad);
+        mogsafe.body = bad;
+        CHECK(!startLink(mogsafe, "https://mogsafe.test").has_value());
+    }
+}
+
+TEST_CASE("a token taken by mistake goes back without replacing one saved meanwhile, where hard links fail")
+{
+    const auto dir  = tempDir();
+    const auto path = dir / "token";
+    const auto olds = [&]
+    {
+        return std::ranges::count_if(fs::directory_iterator(dir), [](const auto& e)
+                                     {
+                                         return e.path().extension() == ".old";
+                                     });
+    };
+    REQUIRE(saveLink(path, { .token = "a", .account = "player" }));
+    CHECK(!removeLink(path, "t0ken", [](const fs::path&, const fs::path&)
+                      {
+                          return false; // no hard links here
+                      }));
+    REQUIRE(loadLink(path));
+    CHECK(loadLink(path)->token == "a");
+    CHECK(olds() == 0);
+
+    CHECK(!removeLink(path, "t0ken", [&](const fs::path&, const fs::path&)
+                      {
+                          saveLink(path, { .token = "n3w", .account = "player" }); // another client links meanwhile
+                          return false;
+                      }));
+    REQUIRE(loadLink(path));
+    CHECK(loadLink(path)->token == "n3w");
+    CHECK(olds() == 1); // the taken token stays in its file
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an approval that comes with a stop is dropped, so no token is published after an unlink")
+{
+    struct Poll final : Http
+    {
+        std::function<HttpResponse()> answer;
+
+        auto request(const std::string&, const std::string&, const HttpHeaders&, std::span<const uint8_t>) -> std::expected<HttpResponse, std::string> override
+        {
+            return answer();
+        }
+    } mogsafe;
+    const LinkCode code{ .code = "A", .poll = "p", .url = "https://mogsafe.test/link", .interval = std::chrono::seconds(0), .expires = std::chrono::seconds(60) };
+    const auto     approved = []
+    {
+        return HttpResponse{ .status = 200, .body = R"({"token":"t0ken","account":"player"})" };
+    };
+
+    std::stop_source unlink;
+    int              polls{ 0 };
+    mogsafe.answer = [&]
+    {
+        if (++polls == 2)
+        {
+            unlink.request_stop(); // /memoria unlink while this poll is in flight
+            return approved();
+        }
+        return HttpResponse{ .status = 202 };
+    };
+    const auto stopped = waitForApproval(mogsafe, "https://mogsafe.test", code, unlink.get_token());
+    REQUIRE(!stopped);
+    CHECK(stopped.error() == "stopped");
+
+    mogsafe.answer   = approved;
+    const auto later = waitForApproval(mogsafe, "https://mogsafe.test", code, std::stop_source{}.get_token());
+    REQUIRE(later);
+    CHECK(later->token == "t0ken");
+
+    mogsafe.answer = []
+    {
+        return HttpResponse{ .status = 202 };
+    };
+    const auto expired = waitForApproval(mogsafe, "https://mogsafe.test", { .poll = "p", .interval = std::chrono::seconds(0), .expires = std::chrono::seconds(0) }, std::stop_source{}.get_token());
+    REQUIRE(!expired);
+    CHECK(expired.error() == "the code expired");
+}

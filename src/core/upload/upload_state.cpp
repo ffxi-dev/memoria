@@ -1,5 +1,6 @@
 #include "core/upload/upload_state.h"
 
+#include "core/file.h"
 #include "core/tus.h"
 
 #include <format>

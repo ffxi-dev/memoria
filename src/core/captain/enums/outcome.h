@@ -1,0 +1,19 @@
+#pragma once
+
+#include <cstdint>
+
+namespace memoria::captain
+{
+
+enum class Outcome : uint8_t
+{
+    Uploaded,
+    InVault,
+    Refused,
+    Skipped,
+    NotMoved,
+    Stopped,
+    Failed,
+};
+
+} // namespace memoria::captain

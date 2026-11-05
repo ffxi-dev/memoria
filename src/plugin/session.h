@@ -8,6 +8,7 @@
 #include "core/upload/uploader.h"
 #include "plugin/live.h"
 #include "plugin/text.h"
+#include "plugin/worker.h"
 
 #include <Windows.h>
 
@@ -23,7 +24,7 @@
 #include <thread>
 #include <vector>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 inline constexpr auto CAPTURE_AGENT = "Memoria " MEMORIA_VERSION_TEXT;
@@ -69,6 +70,13 @@ public:
     auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
 
 private:
+    // A /memoria session started while linked: Vault keeps it as a range of the recording, with no file here.
+    struct VaultSession
+    {
+        uint64_t              fromMs{};
+        std::filesystem::path capture; // the recording it started in; empty before the first capture opened
+    };
+
     struct ChunkKey
     {
         uintptr_t               pointer;
@@ -78,12 +86,14 @@ private:
         auto operator==(const ChunkKey&) const -> bool = default;
     };
 
-    auto record(bool clientToServer, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
+    auto record(xicap::PacketDirection direction, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto say(const std::string& text) -> void;
     auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
     auto status() -> void;
     auto startUploads() -> void;
     auto link() -> void;
+    auto waitForLink(const std::stop_token& stop) -> void;
+    auto cancelLink() -> bool; // true when a link was being made
     auto unlink(const std::string& why) -> void;
     auto linked() const -> std::optional<account::Linked>; // read each time: clients sharing the install share its token
     auto greet() -> void;
@@ -99,7 +109,9 @@ private:
     std::string                            server_{ "https://mogsafe.sruon.dev" };
     std::mutex                             inboxMutex_;
     std::vector<std::string>               inbox_;
-    std::optional<account::Linked>         arrived_; // from the link thread
+    std::optional<account::Linked>         arrived_;   // from the link thread
+    std::mutex                             linkMutex_; // the link thread saves a token only while no unlink cancels it
+    std::atomic<bool>                      linking_{ false };
     capture::Clock                         clock_;
     std::unique_ptr<capture::Recorder>     recorder_;
     std::unique_ptr<upload::Uploader>      uploader_;
@@ -114,14 +126,13 @@ private:
     xicap::Character                       character_;
     bool                                   loggedIn_{ false };
     bool                                   privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
-    std::optional<uint64_t>                sessionInVault_;        // a /cap session's start while linked: Vault keeps it as a range of the recording, with no file here
+    std::optional<VaultSession>            sessionInVault_;
     uint32_t                               loggedInAs_{ 0 };
-    std::array<std::optional<ChunkKey>, 2> lastChunk_;         // the last chunk seen in each direction
-    std::atomic<bool>                      saveChat_{ false }; // for the next capture: the linked account's choice
-    std::atomic<bool>                      fetchingChat_{ false };
-    std::jthread                           chatFetch_;
-    std::jthread                           reminder_;
-    std::jthread                           linker_; // last: destroyed first, before what its thread uses
+    std::array<std::optional<ChunkKey>, 2> lastChunk_; // the last chunk seen in each direction
+    account::ChatChoice                    chatChoice_;
+    std::atomic<bool>                      chatQueued_{ false }; // a refresh waits on the worker
+    Worker                                 worker_;              // after what its jobs use
+    std::jthread                           linker_;              // last: destroyed first, before what its thread uses
 };
 
-} // namespace memoria
+} // namespace memoria::plugin

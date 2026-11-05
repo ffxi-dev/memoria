@@ -19,6 +19,13 @@ struct HttpResponse
 
 using HttpHeaders = std::vector<std::pair<std::string, std::string>>;
 
+// The header's value, or empty; name in lower case.
+inline auto header(const HttpResponse& res, const std::string& name) -> std::string
+{
+    const auto it = res.headers.find(name);
+    return it == res.headers.end() ? std::string{} : it->second;
+}
+
 // WinHTTP in the plugin, a fake Mogsafe in the tests. Any HTTP status is a response; only a transport failure is an error.
 class Http
 {

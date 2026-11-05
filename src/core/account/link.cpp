@@ -5,10 +5,13 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <condition_variable>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <random>
 #include <thread>
+#include <tuple>
 
 namespace memoria::account
 {
@@ -41,13 +44,18 @@ try
     {
         return std::unexpected(std::format("Mogsafe answered {}", status));
     }
-    return LinkCode{
+    LinkCode code{
         .code     = body.value("code", ""),
         .poll     = body.value("poll", ""),
         .url      = body.value("url", ""),
         .interval = std::chrono::seconds(body.value("interval", 5)),
         .expires  = std::chrono::seconds(body.value("expires", 600)),
     };
+    if (code.interval <= std::chrono::seconds(0) || code.expires <= std::chrono::seconds(0))
+    {
+        return std::unexpected("Mogsafe sent a malformed answer"); // a poll every 0 s would hammer it
+    }
+    return code;
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
@@ -84,6 +92,39 @@ try
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
     return std::unexpected("Mogsafe sent a malformed answer");
+}
+
+auto waitForApproval(Http& http, const std::string& server, const LinkCode& code, const std::stop_token& stop) -> std::expected<Linked, std::string>
+{
+    std::mutex                  mutex;
+    std::condition_variable_any wake;
+    const auto                  until = std::chrono::steady_clock::now() + code.expires;
+    while (std::chrono::steady_clock::now() < until)
+    {
+        std::unique_lock lock(mutex);
+        if (wake.wait_for(lock, stop, code.interval, []
+                          {
+                              return false;
+                          }) ||
+            stop.stop_requested())
+        {
+            return std::unexpected("stopped");
+        }
+        const auto result = pollLink(http, server, code.poll);
+        if (stop.stop_requested())
+        {
+            return std::unexpected("stopped");
+        }
+        if (!result)
+        {
+            return std::unexpected(result.error());
+        }
+        if (*result)
+        {
+            return **result;
+        }
+    }
+    return std::unexpected("the code expired");
 }
 
 // Two lines: the token, then the account it belongs to.
@@ -131,7 +172,7 @@ auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool
     return false;
 }
 
-auto removeLink(const std::filesystem::path& path, const std::string& token) -> bool
+auto removeLink(const std::filesystem::path& path, const std::string& token, const LinkBack& linkBack) -> bool
 {
     std::random_device random;
     const auto         taken = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.old", random(), random()));
@@ -145,8 +186,14 @@ auto removeLink(const std::filesystem::path& path, const std::string& token) -> 
     const bool refused{ link && link->token == token };
     if (!refused)
     {
-        // A hard link fails where a token was saved since the rename, so the newer one stays.
-        std::filesystem::create_hard_link(taken, path, ec);
+        // A hard link fails where a token was saved since the rename, so the newer one stays. Where links fail for another
+        // reason, a move that never replaces a file puts the taken token back; if that fails too, it stays in its file.
+        const bool linked{ linkBack ? linkBack(taken, path) : (std::filesystem::create_hard_link(taken, path, ec), !ec) };
+        if (!linked)
+        {
+            std::ignore = moveNoReplace(taken, path);
+            return false;
+        }
     }
     std::filesystem::remove(taken, ec);
     return refused;

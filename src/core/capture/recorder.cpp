@@ -1,7 +1,6 @@
 #include "core/capture/recorder.h"
 
 #include "core/file.h"
-#include "core/tus.h"
 
 #include <picosha2.h>
 
@@ -26,7 +25,8 @@ auto stateFile(const std::filesystem::path& dir, const xicap::Character& charact
     return dir / std::format("state-{}.txt", character.characterId);
 }
 
-constexpr auto REOPEN_EVERY = std::chrono::minutes(1);
+constexpr auto   REOPEN_EVERY     = std::chrono::minutes(1);
+constexpr size_t GAME_HEADER_SIZE = 4;
 
 auto parseHex(const std::string_view text) -> std::optional<xicap::CaptureId>
 {
@@ -131,13 +131,13 @@ auto Recorder::status() const -> RecorderStatus
     return status_;
 }
 
-auto Recorder::stop() -> void
+auto Recorder::stop() -> std::vector<std::filesystem::path>
 {
     {
         const std::scoped_lock lock(wakeMutex_);
         if (stopping_)
         {
-            return;
+            return {};
         }
         stopping_ = true;
     }
@@ -146,6 +146,8 @@ auto Recorder::stop() -> void
     {
         thread_.join();
     }
+    const std::scoped_lock lock(wakeMutex_);
+    return std::exchange(closedAtStop_, {});
 }
 
 // A session is optional: its failure ends it and leaves the main capture recording.
@@ -263,6 +265,12 @@ auto Recorder::handle(const Event& event) -> void
                 closeSession();
                 break;
             case EventKind::Packet:
+                if (event.channel == xicap::Channel::Game && event.data.size() < GAME_HEADER_SIZE) // the writer refuses it
+                {
+                    const std::scoped_lock lock(statusMutex_);
+                    status_.dropped++;
+                    break;
+                }
                 if (!writer_ && login_ && std::chrono::steady_clock::now() >= reopenAt_)
                 {
                     auto again       = *login_; // the last capture broke on a write error
@@ -326,6 +334,7 @@ auto Recorder::open(const uint64_t timestamp, const Login& who) -> void
     }
     const std::scoped_lock lock(statusMutex_);
     status_.capture = path;
+    status_.chat    = chat_;
     status_.packets = 0;
     status_.bytes   = 0;
     status_.search  = 0;
@@ -337,7 +346,7 @@ auto Recorder::write(const Event& event) -> void
 {
     const auto packet = xicap::WritePacket{
         .timestamp  = event.timestamp,
-        .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
+        .direction  = event.direction,
         .provenance = event.provenance,
         .channel    = event.channel,
         .opcode     = event.opcode,
@@ -466,7 +475,7 @@ auto Recorder::broken(const std::exception& error) -> void
 }
 
 // The server ended the open capture: close it here, keep the login and session, and let the next packet start a capture
-// that names this one. Mogsafe never gets this capture's last bytes; they stay in its file.
+// that names this one. The uploader sends this capture's last bytes as a -rest capture of their own.
 auto Recorder::rollover() -> void
 {
     finish();
@@ -478,6 +487,13 @@ auto Recorder::rollover() -> void
 // Writes the trailer and drops the writer. A trailer that failed leaves the capture cut off, so the state stays open and the next capture names it.
 auto Recorder::finish() -> void
 {
+    {
+        const std::scoped_lock lock(wakeMutex_);
+        if (stopping_)
+        {
+            closedAtStop_.push_back(status().capture);
+        }
+    }
     bool closed{ true };
     try
     {

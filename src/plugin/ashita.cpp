@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 auto Plugin::GetName() const -> const char*
@@ -122,16 +122,16 @@ auto Plugin::HandleCommand(const int32_t mode, const char* command, const bool i
     return true;
 }
 
-} // namespace memoria
+} // namespace memoria::plugin
 
 extern "C" auto __stdcall expCreatePlugin(const char* /*args*/) -> IPlugin*
 {
-    return new memoria::Plugin();
+    return new memoria::plugin::Plugin();
 }
 
 extern "C" auto __stdcall expDestroyPlugin(void* instance) -> void
 {
-    delete static_cast<memoria::Plugin*>(instance);
+    delete static_cast<memoria::plugin::Plugin*>(instance);
 }
 
 extern "C" auto __stdcall expGetInterfaceVersion() -> double

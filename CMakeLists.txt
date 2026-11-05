@@ -22,19 +22,17 @@ set(XICAP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(XICAP_FETCH_ZSTD ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     xicap
-    GIT_REPOSITORY https://github.com/ffxi-dev/xicap.git
-    GIT_TAG        v7.2.0
-    GIT_SHALLOW    TRUE
+    URL      https://github.com/ffxi-dev/xicap/archive/refs/tags/v7.2.0.tar.gz
+    URL_HASH SHA256=1afd1fcae4590dba047f28c121f65abccd392a7bce36e3be868797651b8c7a8d
 )
 FetchContent_MakeAvailable(xicap)
 
 # Header only: SOURCE_SUBDIR keeps its test CMakeLists out of the build.
 FetchContent_Declare(
     picosha2
-    GIT_REPOSITORY https://github.com/okdshin/PicoSHA2.git
-    GIT_TAG        v1.0.1
-    GIT_SHALLOW    TRUE
-    SOURCE_SUBDIR  none
+    URL           https://github.com/okdshin/PicoSHA2/archive/refs/tags/v1.0.1.tar.gz
+    URL_HASH      SHA256=9983136544234e573fe07cc1a22fdf978ad7979043e7be2e9082f6d4991ff8a8
+    SOURCE_SUBDIR none
 )
 FetchContent_MakeAvailable(picosha2)
 
@@ -89,6 +87,8 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/text.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
+        src/plugin/worker.cpp
+        src/plugin/worker.h
     )
     set_target_properties(memoria PROPERTIES OUTPUT_NAME "Memoria" CXX_EXTENSIONS ON)
     if(MEMORIA_OUTPUT_DIR)
@@ -125,8 +125,8 @@ if(MEMORIA_BUILD_TESTS)
     enable_testing()
     FetchContent_Declare(
         Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG        v3.5.4
+        URL      https://github.com/catchorg/Catch2/archive/refs/tags/v3.5.4.tar.gz
+        URL_HASH SHA256=b7754b711242c167d8f60b890695347f90a1ebc95949a045385114165d606dbb
     )
     FetchContent_MakeAvailable(Catch2)
     add_executable(memoria_core_tests
@@ -137,8 +137,16 @@ if(MEMORIA_BUILD_TESTS)
         tests/live_tests.cpp
         tests/recorder_tests.cpp
         tests/upload_tests.cpp
+        tests/worker_tests.cpp
+        src/plugin/worker.cpp # the one piece of the plugin that needs only the standard library
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
+    if(WIN32)
+        # ownerOnly reads the token file's permissions; the WinHTTP tests build the plugin's network code on its own.
+        target_sources(memoria_core_tests PRIVATE tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
+        target_link_libraries(memoria_core_tests PRIVATE advapi32 bcrypt winhttp ws2_32 shell32 ole32)
+        target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")
+    endif()
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(memoria_core_tests)

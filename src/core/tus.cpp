@@ -19,33 +19,6 @@ auto parseU64(const std::string_view s) -> std::optional<uint64_t>
     return ec == std::errc{} && end == s.data() + s.size() ? std::optional(v) : std::nullopt;
 }
 
-auto header(const HttpResponse& res, const std::string& name) -> std::string
-{
-    const auto it = res.headers.find(name);
-    return it == res.headers.end() ? std::string{} : it->second;
-}
-
-auto replaceFile(const std::filesystem::path& path, const std::string_view text) -> std::optional<std::string>
-{
-    const auto tmp = std::filesystem::path(path).concat(".tmp");
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        out.write(text.data(), static_cast<std::streamsize>(text.size()));
-        out.close();
-        if (!out)
-        {
-            return std::format("cannot write {}", tmp.string());
-        }
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, path, ec);
-    if (ec)
-    {
-        return std::format("cannot save {}: {}", path.filename().string(), ec.message());
-    }
-    return std::nullopt;
-}
-
 Tus::Tus(std::string server, std::filesystem::path config, Http& http)
 : server_(std::move(server))
 , config_(std::move(config))
@@ -98,11 +71,12 @@ auto Tus::onServer(std::string_view url) const -> std::string
 
 auto Tus::append(const std::filesystem::path& path, const std::string& url, uint64_t offset, const uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>
 {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream        in(path, std::ios::binary);
+    std::vector<uint8_t> data;
     while (offset < size && go(offset))
     {
-        const auto           n = std::min(size - offset, CHUNK_SIZE);
-        std::vector<uint8_t> data(n);
+        const auto n = std::min(size - offset, CHUNK_SIZE);
+        data.resize(n);
         if (!in.seekg(static_cast<std::streamoff>(offset)) || !in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(n)))
         {
             return std::unexpected("cannot read " + path.filename().string());
@@ -124,6 +98,11 @@ auto Tus::append(const std::filesystem::path& path, const std::string& url, uint
 auto Tus::unauthorized() -> bool
 {
     return unauthorized_.exchange(false);
+}
+
+auto Tus::token() const -> const std::string&
+{
+    return token_;
 }
 
 } // namespace memoria

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/captain/captain.h"
+#include "core/captain/enums/outcome.h"
 #include "core/http.h"
 #include "core/tus.h"
 
@@ -65,17 +66,6 @@ public:
     [[nodiscard]] auto unauthorized() -> bool; // true once when Mogsafe refused the token, which is then deleted
 
 private:
-    enum class Outcome : uint8_t
-    {
-        Uploaded,
-        InVault,
-        Refused,
-        Skipped,
-        NotMoved,
-        Stopped,
-        Failed,
-    };
-
     struct Entry
     {
         std::string crc; // 8 hex digits

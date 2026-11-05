@@ -2,7 +2,7 @@
 
 #include <Windows.h>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 auto count(const uint64_t n) -> std::string
@@ -39,4 +39,4 @@ auto utf8FromShiftJis(const std::string_view text) -> std::string
     return utf8;
 }
 
-} // namespace memoria
+} // namespace memoria::plugin

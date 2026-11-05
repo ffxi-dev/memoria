@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace memoria::packets
+namespace memoria::plugin::packets
 {
 
 // GP_SERV_COMMAND_LOGIN (0x00A) and GP_SERV_COMMAND_LOGOUT (0x00B), after atom0s's XiPackets. Offsets count the
@@ -21,4 +21,4 @@ auto character(const uint8_t* login, uint32_t size) -> xicap::Character;
 // logout do not.
 auto leavesGame(uint8_t logoutState) -> bool;
 
-} // namespace memoria::packets
+} // namespace memoria::plugin::packets

@@ -6,7 +6,7 @@
 
 #include <memory>
 
-namespace memoria
+namespace memoria::plugin
 {
 
 // The Ashita v4 host: hands Ashita's callbacks to the session.
@@ -34,4 +34,4 @@ private:
     std::unique_ptr<Session> session_;
 };
 
-} // namespace memoria
+} // namespace memoria::plugin

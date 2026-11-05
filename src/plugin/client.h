@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string>
 
-namespace memoria::client
+namespace memoria::plugin::client
 {
 
 auto find(const char* pattern) -> uintptr_t; // first match in FFXiMain.dll, or 0
@@ -36,4 +36,4 @@ auto character(capture::Login& who) -> std::string; // why not, or empty
 
 } // namespace lobby
 
-} // namespace memoria::client
+} // namespace memoria::plugin::client

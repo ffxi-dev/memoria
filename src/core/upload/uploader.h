@@ -29,9 +29,6 @@ struct UploadOptions
     std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
 };
 
-// xicap's header, which Mogsafe wants whole in a file's first append.
-inline constexpr uint64_t CAPTURE_HEADER_SIZE = 160;
-
 struct UploadStatus
 {
     std::string name;
@@ -39,6 +36,7 @@ struct UploadStatus
     uint64_t    size{};
     bool        refused{}; // Mogsafe refused it for good; error says why
     bool        ended{};   // Mogsafe cut its upload off: bytes past sent stay only on this PC
+    bool        foreign{}; // uploaded under another account: not sent while this install keeps its token
     std::string error;
 };
 
@@ -55,8 +53,9 @@ public:
     auto operator=(Uploader&&) -> Uploader&      = delete;
 
     auto start() -> void;
-    // At unload, once the recorder closed name: sends its last bytes and closes its upload, waiting at most limit. Sends nothing after.
-    auto finish(const std::string& name, std::chrono::milliseconds limit) -> void;
+    // At unload, once the recorder closed names: sends their last bytes and closes their uploads, waiting at most limit in
+    // all. Sends nothing after.
+    auto finish(std::vector<std::string> names, std::chrono::milliseconds limit) -> void;
     auto pass() -> std::optional<std::string>; // the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
@@ -89,14 +88,14 @@ private:
     bool               last_{};  // upload thread only: finish() is sending the last bytes
     std::atomic<bool>  loaded_{ false };
 
-    std::thread             thread_;
-    std::mutex              wakeMutex_;
-    std::condition_variable wake_;
-    std::atomic<bool>       stopping_{ false };
-    std::atomic<bool>       finishing_{ false };
-    std::string             finish_;     // the file finish() names, under wakeMutex_
-    bool                    finished_{}; // under wakeMutex_
-    std::atomic<bool>       uploading_{ false };
+    std::thread              thread_;
+    std::mutex               wakeMutex_;
+    std::condition_variable  wake_;
+    std::atomic<bool>        stopping_{ false };
+    std::atomic<bool>        finishing_{ false };
+    std::vector<std::string> finish_;     // the files finish() names, under wakeMutex_
+    bool                     finished_{}; // under wakeMutex_
+    std::atomic<bool>        uploading_{ false };
 };
 
 } // namespace memoria::upload

@@ -7,8 +7,11 @@
 #include <atomic>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <mutex>
 #include <optional>
+#include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +36,10 @@ auto viewers(std::string_view message) -> std::optional<int>;
 // One packet as live viewers get it, redacted as a capture written with chat stores it. Little-endian: version 1 (u8),
 // channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet.
 auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<uint8_t>;
+
+// Sends messages in order through send until one fails or stop is requested: a stop sends nothing more. True when every
+// message went.
+auto sendAll(const std::vector<std::vector<uint8_t>>& messages, const std::stop_token& stop, const std::function<bool(std::span<const uint8_t>)>& send) -> bool;
 
 // Frames from the writer thread to the live thread. Takes nothing while closed; past maxBytes, drops and counts.
 class Feed

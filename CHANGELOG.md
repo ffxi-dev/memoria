@@ -3,15 +3,18 @@
 ## 0.6.0-rc.4
 
 **Captures**
-- Memoria writes xicap format 5 (xicap 7.2), which has no signatures: Vault knows who sent a capture from the install's upload token. Only a Mogsafe that reads format 5 accepts these captures. Chat text is zeroed in place, so chat packets keep their length.
+- Memoria writes xicap format 5 (xicap 7.2), which has no signatures: Vault knows who sent a capture from the install's upload token. Only a Mogsafe that reads format 5 accepts these captures.
 - After a long network gap, the part of a recording Vault cut off goes up as a capture of its own, which names the one it continues. Before, it stayed on the PC.
-- A `/memoria note` in Japanese reaches the capture as readable text.
+- A `/memoria note` in Japanese reaches the capture as readable text, and `/memoria session start` takes a Japanese file name.
+- A game packet too short for its header is dropped and counted; before, it stopped the capture for up to a minute.
 
 **Linking**
 - Memoria no longer has a signing key. `/memoria link` asks Vault for a code and a secret handle, and polls with the handle until you enter the code. `/memoria key` is gone. The old `key` file is no longer read; delete it if you like.
+- `/memoria unlink` also stops a link you started and have not finished.
 
 **Game**
 - A login no longer reads or writes Memoria's files on the game thread: the link and import reminders check them on a thread of their own.
+- Unloading while `/memoria live` reconnects no longer holds the game for its network timeouts.
 - When the disk cannot keep up, Memoria's packet queue holds at most 64 MB in all. Before, the batch being written did not count, so the queue could reach twice that.
 
 **Live**
@@ -20,11 +23,14 @@
 **Install**
 - Memoria creates its upload token so that only the Windows user running the game can open it; before, it took the Ashita folder's permissions, which often let every user of the PC read it. A token saved before keeps its old permissions. Linking now writes the token whole and swaps it in, so other clients never read half a token.
 
-**Chat**
-- When your account turns on Save chat on Vault's Memoria page, your captures keep all chat, other players' included; off, the default, chat is cut as before. A change applies from the next capture. `/memoria status` says which.
+**Uploads**
+- A recording uploaded under another account is skipped while this install stays linked to yours, without slowing the others; `/memoria status` counts it.
+- A capture Mogsafe refused for good costs no more requests.
+- The upload state is flushed to disk before it replaces the old one, so a power cut cannot leave it empty.
 
-**Docs**
-- The README lists every command and explains recording, uploads, live and imports.
+**Chat**
+- When your account turns on Save chat on Vault's Memoria page, your captures keep all chat, other players' included; off, the default, chat text is zeroed in place, so chat packets keep their length. A change applies from the next capture. `/memoria status` says which, for the open capture and the next.
+- The choice belongs to the link that made it: after an unlink, or a link to another account, captures cut chat until Vault answers for the new link.
 
 ## 0.6.0-rc.3
 

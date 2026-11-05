@@ -750,3 +750,130 @@ TEST_CASE("a second client sharing the install does not import while the first d
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 #endif
+
+TEST_CASE("a log that cannot be staged stops the import and keeps its place for the next start")
+{
+    Install    in;
+    const auto log = noise(3 << 20);
+    captainFolder(in.captures, "s/Mirabeth", log);
+    const std::atomic<bool> stop{ false };
+    const auto              crc = crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop);
+    REQUIRE(crc);
+    const auto blocker = in.state / "imports" / std::format("{:08x}-{}.zst.tmp", crc->crc, crc->size);
+    fs::create_directories(blocker);
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("cannot stage the log"));
+    CHECK(server.received == 0);
+    CHECK(Importer::pending(in.state));
+    fs::remove(blocker);
+    in.importer(server)->run();
+    CHECK(server.creates == 1); // the upload the first run created
+    CHECK(server.received == server.uploads.begin()->second.data.size());
+    CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
+    CHECK(!Importer::pending(in.state));
+}
+
+TEST_CASE("a search log changed after an interrupted create goes up as it is now, with metadata that matches")
+{
+    Install    in;
+    const auto log = noise(1 << 20);
+    const auto dir = captainFolder(in.captures, "s/Hoa", log);
+    searchFolder(dir, "old search");
+    FakeMogsafe server;
+    server.down   = true; // the create never answers
+    auto importer = in.importer(server);
+    importer->start();
+    REQUIRE(waitFor([&]
+                    {
+                        std::error_code ec;
+                        for (const auto& e : fs::directory_iterator(in.state / "imports", ec))
+                        {
+                            if (e.path().string().ends_with(".search.zst"))
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }));
+    importer.reset(); // the client stops
+    const std::string now = "new search, longer than the old one";
+    searchFolder(dir, now);
+    server.down = false;
+    in.importer(server)->run();
+    REQUIRE(server.uploads.size() == 1);
+    const auto&             u = server.uploads.begin()->second;
+    const std::atomic<bool> stop{ false };
+    CHECK(searchParts(u) == std::pair{ now, log });
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "s/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_size") == std::to_string(now.size()));
+}
+
+TEST_CASE("a manifest.txt larger than captain writes is refused for its folder, and the next one goes")
+{
+    Install in;
+    captainFolder(in.captures, "a/Hoa", noise(1000), std::string("StartTime = 1\n") + std::string(size_t{ 100 } * 1024, 'm'));
+    captainFolder(in.captures, "b/Ijs", noise(1000) + "b");
+    FakeMogsafe server;
+    in.importer(server)->run();
+    CHECK(in.saidAny("Captain 1/2 a/Hoa: its manifest.txt is over"));
+    CHECK(server.creates == 1);
+    CHECK(fs::exists(in.captures / "a/Hoa"));
+    CHECK(fs::exists(in.uploaded / "b/Ijs"));
+}
+
+TEST_CASE("a new create never sends a stage an earlier one made, with or without a search log now")
+{
+    for (const bool removed : { true, false })
+    {
+        INFO("search.log " << (removed ? "removed" : "emptied"));
+        Install           in;
+        const std::string log = "full log data";
+        const auto        dir = captainFolder(in.captures, "s/Hoa", log);
+        searchFolder(dir, "old search data");
+        FakeMogsafe server;
+        server.crashAtPatch = 0;
+        CHECK_THROWS(in.importer(server)->run());
+        REQUIRE(server.creates == 1);
+        server.uploads.clear(); // the upload expired
+        server.crashAtPatch = -1;
+        if (removed)
+        {
+            fs::remove(dir / "SearchLog" / "search.log");
+        }
+        else
+        {
+            searchFolder(dir, "");
+        }
+        in.importer(server)->run();
+        REQUIRE(server.creates == 2);
+        const auto& u = server.uploads.at("/v1/uploads/2");
+        CHECK(!u.meta.contains("search_bytes"));
+        CHECK(unzstd(u.data) == log);
+    }
+}
+
+TEST_CASE("an old stage that cannot be removed stops the import before a new create")
+{
+    Install           in;
+    const std::string log = "full log data";
+    const auto        dir = captainFolder(in.captures, "s/Hoa", log);
+    FakeMogsafe       server;
+    server.crashAtPatch = 0;
+    CHECK_THROWS(in.importer(server)->run());
+    server.uploads.clear();
+    server.crashAtPatch = -1;
+    const std::atomic<bool> stop{ false };
+    const auto              crc   = crc32File(dir / "PacketLogger" / "full.log", stop);
+    const auto              stage = in.state / "imports" / std::format("{:08x}-{}.zst", crc->crc, crc->size);
+    REQUIRE(fs::remove(stage));
+    fs::create_directories(stage / "inside"); // a folder that is not empty cannot be removed
+    in.importer(server)->run();
+    CHECK(in.saidAny("cannot remove an old stage"));
+    CHECK(server.creates == 1);
+    CHECK(Importer::pending(in.state));
+    fs::remove_all(stage);
+    in.importer(server)->run();
+    CHECK(server.creates == 2);
+    CHECK(unzstd(server.uploads.at("/v1/uploads/2").data) == log);
+}

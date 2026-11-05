@@ -22,4 +22,36 @@ auto fetchSaveChat(Http& http, const std::string& server, const std::string& ins
     return body["save_chat"].get<bool>();
 }
 
+auto ChatChoice::chat(const std::optional<Linked>& link) const -> xicap::Chat
+{
+    const std::scoped_lock lock(mutex_);
+    return link && saveChat_ && link->token == token_ ? xicap::Chat::Keep : xicap::Chat::Redact;
+}
+
+auto ChatChoice::refresh(Http& http, const std::string& server, const std::filesystem::path& tokenFile) -> void
+{
+    // Bounded: a token replaced on every answer is someone relinking in a loop, and the next refresh catches up.
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        const auto asked = loadLink(tokenFile);
+        if (!asked)
+        {
+            return;
+        }
+        const auto saveChat = fetchSaveChat(http, server, asked->token);
+        const auto now      = loadLink(tokenFile);
+        if (!now || now->token != asked->token)
+        {
+            continue;
+        }
+        if (saveChat)
+        {
+            const std::scoped_lock lock(mutex_);
+            token_    = asked->token;
+            saveChat_ = *saveChat;
+        }
+        return;
+    }
+}
+
 } // namespace memoria::account

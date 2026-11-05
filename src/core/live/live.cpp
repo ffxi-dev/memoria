@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <format>
@@ -174,6 +175,14 @@ auto Feed::takeDropped(const uint64_t owner) -> uint64_t
         return 0;
     }
     return std::exchange(dropped_, 0);
+}
+
+auto sendAll(const std::vector<std::vector<uint8_t>>& messages, const std::stop_token& stop, const std::function<bool(std::span<const uint8_t>)>& send) -> bool
+{
+    return std::ranges::all_of(messages, [&](const std::vector<uint8_t>& message)
+                               {
+                                   return !stop.stop_requested() && send(message);
+                               });
 }
 
 } // namespace memoria::live

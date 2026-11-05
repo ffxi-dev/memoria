@@ -23,8 +23,11 @@ struct CaptainCapture
     bool                  growing{};    // full.log changed within the quiet time: PacketLogger may still be writing it
 };
 
-// Every captain capture under root, at any depth, in path order. A match's own subfolders are not searched.
-auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet = std::chrono::minutes(10)) -> std::vector<CaptainCapture>;
+inline const std::atomic<bool> NEVER_STOP{ false };
+
+// Every captain capture under root, at any depth, in path order. A match's own subfolders are not searched. Stops early,
+// with what it found so far, once stop is set.
+auto findCaptain(const std::filesystem::path& root, std::chrono::seconds quiet = std::chrono::minutes(10), const std::atomic<bool>& stop = NEVER_STOP) -> std::vector<CaptainCapture>;
 
 struct Crc32
 {
@@ -39,6 +42,6 @@ auto crc32File(const std::filesystem::path& path, const std::atomic<bool>& stop)
 auto moveAside(const std::filesystem::path& root, const std::filesystem::path& uploaded, const std::filesystem::path& dir) -> std::expected<std::filesystem::path, std::string>;
 
 // True for one caller only, ever, per install: while linked and a capture waits, the first to create config's import-reminded file wins.
-auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root) -> bool;
+auto remindImport(const std::filesystem::path& config, const std::filesystem::path& root, const std::atomic<bool>& stop = NEVER_STOP) -> bool;
 
 } // namespace memoria::captain

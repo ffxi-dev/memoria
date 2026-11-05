@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace memoria
+namespace memoria::plugin
 {
 namespace
 {
@@ -67,7 +67,7 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
             .captureAgent = CAPTURE_AGENT,
             .chat         = [this]
             {
-                return saveChat_ ? xicap::Chat::Keep : xicap::Chat::Redact;
+                return chatChoice_.chat(linked());
             },
             .ended = [this](const std::filesystem::path& capture)
             {
@@ -114,27 +114,35 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
     host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, host_.captures.string()));
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape): only running out of memory throws here, and that ends the game anyway
+// NOLINTNEXTLINE(bugprone-exception-escape): only running out of memory throws here
 Session::~Session()
 {
-    linker_    = {};
-    chatFetch_ = {};
-    reminder_  = {};
+    cancelLink();
     importer_.reset();
-    stopLive();
+    if (live_)
+    {
+        live_->abort();
+        closing_.push_back(std::move(live_));
+    }
+    for (const auto& live : closing_)
+    {
+        live->abort();
+    }
     closing_.clear();
     client::search::remove();
-    std::filesystem::path capture;
+    std::vector<std::string> closed;
     if (recorder_)
     {
-        capture = recorder_->status().capture;
-        recorder_->stop();
+        for (const auto& capture : recorder_->stop())
+        {
+            closed.push_back(capture.filename().string());
+        }
         recorder_.reset();
     }
     // Mogsafe ends a silent recording after 5 minutes: without its last bytes and trailer now, Vault keeps it cut off.
-    if (uploader_ && !capture.empty())
+    if (uploader_ && !closed.empty())
     {
-        uploader_->finish(capture.filename().string(), std::chrono::seconds(3));
+        uploader_->finish(closed, std::chrono::seconds(3));
     }
     uploader_.reset();
     if (uploadMutex_)
@@ -168,7 +176,7 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
             }
         }
     }
-    record(false, size, data, modified, sizeChunk, dataChunk, injected, blocked);
+    record(xicap::PacketDirection::ServerToClient, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     if (id == packets::LOGOUT && size > packets::LOGOUT_STATE && packets::leavesGame(data[packets::LOGOUT_STATE]))
     {
         loggedIn_ = false;
@@ -180,11 +188,11 @@ auto Session::outgoing(const uint32_t size, const uint8_t* data, const uint8_t* 
 {
     if (recorder_)
     {
-        record(true, size, data, modified, sizeChunk, dataChunk, injected, blocked);
+        record(xicap::PacketDirection::ClientToServer, size, data, modified, sizeChunk, dataChunk, injected, blocked);
     }
 }
 
-auto Session::record(const bool clientToServer, const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
+auto Session::record(const xicap::PacketDirection direction, const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
 {
     uint16_t provenance{ 0 };
     if (injected)
@@ -204,7 +212,7 @@ auto Session::record(const bool clientToServer, const uint32_t size, const uint8
     {
         ChunkKey key{ .pointer = reinterpret_cast<uintptr_t>(dataChunk), .size = sizeChunk, .head = {} };
         std::memcpy(key.head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key.head.size()));
-        auto& last = lastChunk_[clientToServer ? 1 : 0];
+        auto& last = lastChunk_[std::to_underlying(direction)];
         if (last != key)
         {
             provenance |= xicap::PacketFlag::FirstInDatagram;
@@ -212,10 +220,10 @@ auto Session::record(const bool clientToServer, const uint32_t size, const uint8
         last = key;
     }
     recorder_->packet({
-        .timestamp      = clock_.nowMs(),
-        .clientToServer = clientToServer,
-        .provenance     = provenance,
-        .data           = { data, data + size },
+        .timestamp  = clock_.nowMs(),
+        .direction  = direction,
+        .provenance = provenance,
+        .data       = { data, data + size },
     });
 }
 
@@ -223,11 +231,11 @@ auto Session::record(const bool clientToServer, const uint32_t size, const uint8
 auto Session::recordSearch(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
 {
     recorder_->packet({
-        .timestamp      = clock_.nowMs(),
-        .clientToServer = clientToServer,
-        .channel        = xicap::Channel::Search,
-        .opcode         = data[0x0B],
-        .data           = { data, data + size },
+        .timestamp = clock_.nowMs(),
+        .direction = clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
+        .channel   = xicap::Channel::Search,
+        .opcode    = data[0x0B],
+        .data      = { data, data + size },
     });
 }
 
@@ -296,7 +304,7 @@ auto Session::startUploads() -> void
         const auto r = ::WaitForSingleObject(mutex, 0);
         return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
     };
-    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>());
+    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
     uploader_->start();
 }
 
@@ -311,19 +319,19 @@ auto Session::post(std::string text) -> void
     inbox_.push_back(std::move(text));
 }
 
-// At a login or link. The reminders read and write files, so they run on a thread of their own: a packet hook never waits on the disk.
+// At a login or link. The reminders read and write files, so they run on the worker: a packet hook never waits on the disk.
 auto Session::greet() -> void
 {
     if (reminding_.exchange(true))
     {
         return;
     }
-    reminder_ = std::jthread([this]
-                             {
-                                 remind();
-                                 offerImport();
-                                 reminding_ = false;
-                             });
+    worker_.post([this](const std::stop_token&)
+                 {
+                     reminding_ = false;
+                     remind();
+                     offerImport();
+                 });
 }
 
 // Once a day while unlinked: the date of the last reminder is kept across restarts.
@@ -345,7 +353,7 @@ auto Session::remind() -> void
 auto Session::offerImport() -> void
 {
     // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && captain::remindImport(host_.config, host_.captain / "captures"))
+    if (linked() && captain::remindImport(host_.config, host_.captain / "captures", worker_.stopping()))
     {
         post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }
@@ -366,76 +374,84 @@ auto Session::startImport(const bool asked) -> void
     {
         post(std::move(text));
     };
-    importer_ = std::make_unique<captain::Importer>(std::move(options), std::make_unique<WinHttp>());
+    importer_ = std::make_unique<captain::Importer>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
     importer_->start(asked);
 }
 
-// Asks for a code, then polls until the player approves it on the link page.
+// Asks for a code, then polls on a thread of its own until the player approves it on the link page.
 auto Session::link() -> void
 {
-    linker_ = std::jthread([this](const std::stop_token& stop)
-                           {
-                               WinHttp http;
-                               // Replacing or destroying linker_ joins this thread on the game thread: end a request in flight at once.
-                               const std::stop_callback cancel(stop, [&http]
-                                                               {
-                                                                   http.cancel();
-                                                               });
-                               const auto               code = account::startLink(http, server_);
-                               if (stop.stop_requested())
-                               {
-                                   return;
-                               }
-                               if (!code)
-                               {
-                                   post(paint(Color::Red, "Cannot start linking: " + code.error()));
-                                   return;
-                               }
-                               post("Sign in on the page that opened in your browser and enter " + paint(Color::Yellow, code->code));
-                               post(code->url);
-                               // Only Mogsafe's own link page: never a URL the server could swap for another.
-                               if (code->url.starts_with(server_ + "/link"))
-                               {
-                                   browse(code->url);
-                               }
-                               std::mutex                  mutex;
-                               std::condition_variable_any wake;
-                               const auto                  until = std::chrono::steady_clock::now() + code->expires;
-                               while (std::chrono::steady_clock::now() < until)
-                               {
-                                   std::unique_lock lock(mutex);
-                                   if (wake.wait_for(lock, stop, code->interval, []
-                                                     {
-                                                         return false;
-                                                     }) ||
-                                       stop.stop_requested())
-                                   {
-                                       return;
-                                   }
-                                   const auto result = account::pollLink(http, server_, code->poll);
-                                   if (stop.stop_requested())
-                                   {
-                                       return;
-                                   }
-                                   if (!result)
-                                   {
-                                       post(paint(Color::Red, "Not linked: " + result.error() + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
-                                       return;
-                                   }
-                                   if (*result)
-                                   {
-                                       if (!account::saveLink(host_.config / "token", **result))
-                                       {
-                                           post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
-                                           return;
-                                       }
-                                       const std::scoped_lock inbox(inboxMutex_);
-                                       arrived_ = **result;
-                                       return;
-                                   }
-                               }
-                               post(paint(Color::Red, "The code expired.") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
-                           });
+    cancelLink();
+    linking_ = true;
+    linker_  = std::jthread([this](const std::stop_token& stop)
+                            {
+                               waitForLink(stop);
+                               linking_ = false;
+                            });
+}
+
+auto Session::waitForLink(const std::stop_token& stop) -> void
+{
+    WinHttp http(QUICK_TIMEOUTS);
+    // Replacing or destroying linker_ joins this thread on the game thread: the request in flight stops at its next step.
+    const std::stop_callback cancel(stop, [&http]
+                                    {
+                                        http.cancel();
+                                    });
+    const auto               code = account::startLink(http, server_);
+    if (stop.stop_requested())
+    {
+        return;
+    }
+    if (!code)
+    {
+        post(paint(Color::Red, "Cannot start linking: " + code.error()));
+        return;
+    }
+    post("Sign in on the page that opened in your browser and enter " + paint(Color::Yellow, code->code));
+    post(code->url);
+    if (code->url.starts_with(server_ + "/link"))
+    {
+        worker_.post([url = code->url](const std::stop_token&)
+                     {
+                         browse(url);
+                     });
+    }
+    const auto linked = account::waitForApproval(http, server_, *code, stop);
+    if (!linked)
+    {
+        if (!stop.stop_requested())
+        {
+            post(paint(Color::Red, "Not linked: " + linked.error() + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
+        }
+        return;
+    }
+    const std::scoped_lock link(linkMutex_);
+    if (stop.stop_requested())
+    {
+        return;
+    }
+    if (!account::saveLink(host_.config / "token", *linked))
+    {
+        post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
+        return;
+    }
+    const std::scoped_lock inbox(inboxMutex_);
+    arrived_ = *linked;
+}
+
+// Ends a link being made: its request is cancelled, and a token it saves later than this never is.
+auto Session::cancelLink() -> bool
+{
+    {
+        const std::scoped_lock link(linkMutex_);
+        linker_.request_stop();
+    }
+    const bool was{ linking_ };
+    linker_ = {};
+    const std::scoped_lock inbox(inboxMutex_);
+    arrived_.reset();
+    return was;
 }
 
 auto Session::linked() const -> std::optional<account::Linked>
@@ -454,31 +470,24 @@ auto Session::hello() -> std::string
     return live::hello(character_.name, character_.world, client::lobby::version(), CAPTURE_AGENT);
 }
 
-// A linked install saves chat when its account chose to. The request runs on its own thread; while one is in flight,
-// another waits for the next call.
+// A linked install saves chat when its account chose to. The request runs on the worker; one queued covers every call
+// made before it starts.
 auto Session::refreshChat() -> void
 {
-    if (fetchingChat_.exchange(true))
+    if (chatQueued_.exchange(true))
     {
         return;
     }
-    chatFetch_ = std::jthread([this](const std::stop_token& stop)
-                              {
-                                  WinHttp                  http;
-                                  const std::stop_callback cancel(stop, [&]
-                                                                  {
-                                                                      http.cancel();
-                                                                  });
-                                  if (const auto link = linked(); !link) // read here: the caller may be a packet hook
-                                  {
-                                      saveChat_ = false;
-                                  }
-                                  else if (const auto saved = account::fetchSaveChat(http, server_, link->token))
-                                  {
-                                      saveChat_ = *saved;
-                                  }
-                                  fetchingChat_ = false;
-                              });
+    worker_.post([this](const std::stop_token& stop)
+                 {
+                     chatQueued_ = false;
+                     WinHttp                  http(QUICK_TIMEOUTS);
+                     const std::stop_callback cancel(stop, [&]
+                                                     {
+                                                         http.cancel();
+                                                     });
+                     chatChoice_.refresh(http, server_, host_.config / "token");
+                 });
 }
 
 // Ends the link without waiting: the live thread closes the connection, and a later frame joins it.
@@ -491,4 +500,4 @@ auto Session::stopLive() -> void
     }
 }
 
-} // namespace memoria
+} // namespace memoria::plugin
