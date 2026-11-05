@@ -91,9 +91,9 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
     }
     refreshChat();
     instance_       = this;
-    const auto sink = [](bool clientToServer, const uint8_t* data, uint32_t size)
+    const auto sink = [](xicap::PacketDirection direction, const uint8_t* data, uint32_t size)
     {
-        instance_->recordSearch(clientToServer, data, size);
+        instance_->recordSearch(direction, data, size);
     };
     searchError_ = client::search::install(sink).value_or("");
 
@@ -194,19 +194,7 @@ auto Session::outgoing(const uint32_t size, const uint8_t* data, const uint8_t* 
 
 auto Session::record(const xicap::PacketDirection direction, const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
 {
-    uint16_t provenance{ 0 };
-    if (injected)
-    {
-        provenance |= xicap::PacketFlag::Injected;
-    }
-    if (blocked)
-    {
-        provenance |= xicap::PacketFlag::Blocked;
-    }
-    if (modified && std::memcmp(data, modified, size) != 0)
-    {
-        provenance |= xicap::PacketFlag::Modified;
-    }
+    auto provenance = capture::packets::provenance(injected, blocked, data, modified, size);
     // Ashita hands each packet as a copy, so a new chunk shows as a new chunk pointer, size, or head (its sequence number).
     if (dataChunk && sizeChunk > 0)
     {
@@ -228,11 +216,11 @@ auto Session::record(const xicap::PacketDirection direction, const uint32_t size
 }
 
 // The opcode is byte 0x0B, the request type LSB's search server switches on.
-auto Session::recordSearch(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
+auto Session::recordSearch(const xicap::PacketDirection direction, const uint8_t* data, const uint32_t size) -> void
 {
     recorder_->packet({
         .timestamp = clock_.nowMs(),
-        .direction = clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
+        .direction = direction,
         .channel   = xicap::Channel::Search,
         .opcode    = data[0x0B],
         .data      = { data, data + size },

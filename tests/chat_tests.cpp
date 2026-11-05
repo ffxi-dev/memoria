@@ -107,7 +107,8 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
         }
         const auto e     = gamePacket(T0 + 1, 0x0B5);
         const auto frame = live::frame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = e.data }, saveChat ? xicap::Chat::Keep : xicap::Chat::Redact);
-        CHECK(std::ranges::count(frame | std::views::drop(16), 0) == zeroed);
+        REQUIRE(frame);
+        CHECK(std::ranges::count(*frame | std::views::drop(16), 0) == zeroed);
         fs::remove_all(dir);
     }
 }

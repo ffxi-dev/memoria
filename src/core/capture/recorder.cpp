@@ -213,7 +213,7 @@ auto Recorder::run() -> void
                           session.flush();
                       });
             lastFlush_ = now;
-            if (writer_ && options_.ended && options_.ended(status().capture))
+            if (writer_ && options_.ended && options_.ended(capture_))
             {
                 rollover();
             }
@@ -322,6 +322,7 @@ auto Recorder::open(const uint64_t timestamp, const Login& who) -> void
     login_          = who;
     reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
     writer_         = std::make_unique<xicap::Writer>(path, std::move(meta), xicap::FramePolicy::live(), chat_);
+    capture_        = path;
     previous_       = writer_->captureId();
     saveState(true);
     if (!who.midSession)
@@ -483,7 +484,7 @@ auto Recorder::finish() -> void
         const std::scoped_lock lock(wakeMutex_);
         if (stopping_)
         {
-            closedAtStop_.push_back(status().capture);
+            closedAtStop_.push_back(capture_);
         }
     }
     bool closed{ true };

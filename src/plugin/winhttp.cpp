@@ -3,6 +3,7 @@
 #include "core/units.h"
 
 #include <Windows.h>
+#include <shellapi.h>
 #include <winhttp.h>
 
 #include <algorithm>
@@ -153,6 +154,20 @@ auto CloseInternetHandle::operator()(void* handle) const -> void
 auto wide(const std::string_view ascii) -> std::wstring
 {
     return { ascii.begin(), ascii.end() };
+}
+
+auto browse(const std::string& url) -> void
+{
+    if (!url.starts_with("https://"))
+    {
+        return;
+    }
+    const auto com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    ::ShellExecuteW(nullptr, L"open", wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (SUCCEEDED(com))
+    {
+        ::CoUninitialize();
+    }
 }
 
 auto openSession() -> InternetHandle

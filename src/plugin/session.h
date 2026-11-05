@@ -68,7 +68,7 @@ public:
     // args[0] is the command's name; line is the command as typed, for a path that holds spaces.
     auto command(const std::vector<std::string>& args, std::string_view line) -> void;
 
-    auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
+    auto recordSearch(xicap::PacketDirection direction, const uint8_t* data, uint32_t size) -> void;
 
 private:
     // A /memoria session started while linked: Vault keeps it as a range of the recording, with no file here.

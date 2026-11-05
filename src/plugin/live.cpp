@@ -5,7 +5,6 @@
 #include "plugin/winhttp.h"
 
 #include <Windows.h>
-#include <shellapi.h>
 #include <winhttp.h>
 
 #include <array>
@@ -36,20 +35,6 @@ auto sendBytes(const HINTERNET ws, const WINHTTP_WEB_SOCKET_BUFFER_TYPE type, co
 }
 
 } // namespace
-
-auto browse(const std::string& url) -> void
-{
-    if (!url.starts_with("https://"))
-    {
-        return;
-    }
-    const auto com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    ::ShellExecuteW(nullptr, L"open", wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    if (SUCCEEDED(com))
-    {
-        ::CoUninitialize();
-    }
-}
 
 Live::Live(LiveOptions options, live::Feed& feed)
 : server_(std::move(options.server))

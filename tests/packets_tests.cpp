@@ -30,3 +30,14 @@ TEST_CASE("only a logout that takes the character out of the game leaves it")
     CHECK_FALSE(capture::packets::leavesGame(3)); // Mog House
     CHECK_FALSE(capture::packets::leavesGame(4)); // cancelled
 }
+
+TEST_CASE("a packet's provenance says who injected, blocked or changed it")
+{
+    const std::array<uint8_t, 8> data{ 0x0A, 0x02, 0, 0, 1, 2, 3, 4 };
+    auto                         changed = data;
+    changed[5]                           = 9;
+    CHECK(capture::packets::provenance(false, false, data.data(), nullptr, data.size()) == 0);
+    CHECK(capture::packets::provenance(false, false, data.data(), data.data(), data.size()) == 0);
+    CHECK(capture::packets::provenance(false, false, data.data(), changed.data(), data.size()) == xicap::PacketFlag::Modified);
+    CHECK(capture::packets::provenance(true, true, data.data(), nullptr, data.size()) == (xicap::PacketFlag::Injected | xicap::PacketFlag::Blocked));
+}

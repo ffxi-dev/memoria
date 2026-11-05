@@ -70,8 +70,8 @@ public:
     auto start() -> void;
     // At unload, once the recorder closed names: sends their last bytes and closes their uploads, waiting at most limit in
     // all. Sends nothing after.
-    auto finish(std::vector<std::string> names, std::chrono::milliseconds limit) -> void;
-    auto uploadAll() -> std::optional<std::string>; // one pass over the folder; the first error, if any
+    auto               finish(std::vector<std::string> names, std::chrono::milliseconds limit) -> void;
+    [[nodiscard]] auto uploadAll() -> std::optional<std::string>; // one pass over the folder; the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
     [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did

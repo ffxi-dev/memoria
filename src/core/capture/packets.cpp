@@ -25,6 +25,24 @@ auto character(const uint8_t* login, const uint32_t size) -> xicap::Character
     return c;
 }
 
+auto provenance(const bool injected, const bool blocked, const uint8_t* data, const uint8_t* modified, const uint32_t size) -> uint16_t
+{
+    uint16_t flags{ 0 };
+    if (injected)
+    {
+        flags |= xicap::PacketFlag::Injected;
+    }
+    if (blocked)
+    {
+        flags |= xicap::PacketFlag::Blocked;
+    }
+    if (modified && std::memcmp(data, modified, size) != 0)
+    {
+        flags |= xicap::PacketFlag::Modified;
+    }
+    return flags;
+}
+
 auto leavesGame(const uint8_t logoutState) -> bool
 {
     constexpr uint8_t ZONECHANGE = 2;

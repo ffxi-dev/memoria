@@ -15,9 +15,6 @@
 namespace memoria::plugin
 {
 
-// Opens an https URL in the default browser. Blocks while Windows starts it, so call it off the game thread.
-auto browse(const std::string& url) -> void;
-
 struct LiveOptions
 {
     std::string                      server;

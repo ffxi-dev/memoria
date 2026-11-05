@@ -35,9 +35,9 @@ auto hello(std::string_view character, std::string_view world, std::string_view 
 auto viewers(std::string_view message) -> std::optional<int>;
 
 // One packet as live viewers get it, redacted as a capture written with chat stores it. Little-endian: version 1 (u8),
-// channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet. Throws std::invalid_argument
-// for a game packet under 4 bytes.
-auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<uint8_t>;
+// channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet. Nothing for a game packet under
+// 4 bytes, which has no header to redact by.
+auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::optional<std::vector<uint8_t>>;
 
 // Sends messages in order through send until one fails or stop is requested: a stop sends nothing more. True when every
 // message went.

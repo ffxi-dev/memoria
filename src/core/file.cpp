@@ -54,6 +54,33 @@ auto userSid() -> std::wstring
     return text ? std::wstring(text) : std::wstring{};
 }
 
+// Writes text whole and flushes it to disk.
+auto writeAndFlush(const HANDLE file, const std::string_view text) -> bool
+{
+    DWORD written{ 0 };
+    return ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file);
+}
+
+} // namespace
+#else
+namespace
+{
+
+// Writes text whole and flushes it to disk.
+auto writeAndFlush(const int fd, const std::string_view text) -> bool
+{
+    for (size_t at = 0; at < text.size();)
+    {
+        const auto n = ::write(fd, text.data() + at, text.size() - at);
+        if (n <= 0)
+        {
+            return false;
+        }
+        at += static_cast<size_t>(n);
+    }
+    return ::fsync(fd) == 0;
+}
+
 } // namespace
 #endif
 
@@ -78,8 +105,7 @@ auto createNew(const std::filesystem::path& path, const bool secret, const std::
     {
         return false;
     }
-    DWORD      written{ 0 };
-    const bool ok{ text.empty() || (::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file)) };
+    const bool ok{ text.empty() || writeAndFlush(file, text) };
     return ::CloseHandle(file) && ok;
 #else
     const int fd{ ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, secret ? 0600 : 0644) };
@@ -87,14 +113,7 @@ auto createNew(const std::filesystem::path& path, const bool secret, const std::
     {
         return false;
     }
-    bool ok{ true };
-    for (size_t at = 0; ok && at < text.size();)
-    {
-        const auto n = ::write(fd, text.data() + at, text.size() - at);
-        ok           = n > 0;
-        at += ok ? static_cast<size_t>(n) : 0;
-    }
-    ok = ok && (text.empty() || ::fsync(fd) == 0);
+    const bool ok{ text.empty() || writeAndFlush(fd, text) };
     return ::close(fd) == 0 && ok;
 #endif
 }
@@ -128,8 +147,7 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
     {
         return unwritten(false);
     }
-    DWORD      written{ 0 };
-    const bool flushed{ ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file) && !(failSave && failSave(SaveStep::Flush)) };
+    const bool flushed{ writeAndFlush(file, text) && !(failSave && failSave(SaveStep::Flush)) };
     if (!::CloseHandle(file) || !flushed)
     {
         return unwritten(true);
@@ -146,14 +164,7 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
     {
         return unwritten(false);
     }
-    bool ok{ true };
-    for (size_t at = 0; ok && at < text.size();)
-    {
-        const auto n = ::write(fd, text.data() + at, text.size() - at);
-        ok           = n > 0;
-        at += ok ? static_cast<size_t>(n) : 0;
-    }
-    ok = ok && ::fsync(fd) == 0 && !(failSave && failSave(SaveStep::Flush));
+    const bool ok{ writeAndFlush(fd, text) && !(failSave && failSave(SaveStep::Flush)) };
     if (::close(fd) != 0 || !ok)
     {
         return unwritten(true);

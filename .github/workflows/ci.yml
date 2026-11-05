@@ -54,6 +54,7 @@ jobs:
           git clone -q --filter=blob:none --no-checkout --depth 1 --branch v4.3.1.1 https://github.com/AshitaXI/Ashita-v4beta.git "$sdk"
           git -C "$sdk" sparse-checkout set plugins/sdk
           git -C "$sdk" checkout -q
+          test "$(git -C "$sdk" rev-parse HEAD)" = 7f4133d844c68d52863c5b9455b45cd31c719769 # v4.3.1.1: a moved tag fails the build
           echo "ASHITA4_SDK_PATH=$sdk/plugins/sdk" >> "$GITHUB_ENV"
       - run: cmake -S . -B build -A Win32 -DMEMORIA_BUILD_PLUGIN=ON -DMEMORIA_BUILD_TESTS=OFF -DMEMORIA_OUTPUT_DIR="${GITHUB_WORKSPACE//\//}/out"
       - run: cmake --build build --config Release --parallel --target memoria

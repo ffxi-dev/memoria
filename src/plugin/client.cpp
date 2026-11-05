@@ -118,17 +118,17 @@ NextPage           nextPage_{};
 uintptr_t          connection_{};
 std::vector<Patch> patches_;
 
-auto record(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
+auto record(const xicap::PacketDirection direction, const uint8_t* data, const uint32_t size) -> void
 {
     if (sink_ && size >= 12 && size <= MAX_SIZE)
     {
-        sink_(clientToServer, data, size);
+        sink_(direction, data, size);
     }
 }
 
 auto __cdecl encryptHook(void* context, uint8_t* packet, int size) -> int
 {
-    record(true, packet, static_cast<uint32_t>(size));
+    record(xicap::PacketDirection::ClientToServer, packet, static_cast<uint32_t>(size));
     return encrypt_(context, packet, size);
 }
 
@@ -139,7 +139,7 @@ auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
     const bool ok{ decrypt_(context, packet) };
     if (ok && encrypted)
     {
-        record(false, packet, read32(reinterpret_cast<uintptr_t>(packet)));
+        record(xicap::PacketDirection::ServerToClient, packet, read32(reinterpret_cast<uintptr_t>(packet)));
     }
     return ok;
 }
@@ -149,7 +149,7 @@ auto __cdecl nextPageHook(void* connection) -> int
     const int result{ nextPage_(connection) };
     if (result == 0) // the request was queued
     {
-        record(true, NEXT_PAGE.data(), NEXT_PAGE.size());
+        record(xicap::PacketDirection::ClientToServer, NEXT_PAGE.data(), NEXT_PAGE.size());
     }
     return result;
 }

@@ -70,7 +70,7 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 - `src/core/`: everything that needs only the standard library and its dependencies, built and tested on Windows and Linux. Each folder is a namespace: `capture/` (the event queue, clock, recorder, and the login and logout packets), `upload/` (the uploader, its state file, and what it does when Mogsafe ends an upload), `account/` (linking, and the chat choice tied to the token that made it), `live/` (the live feed) and `captain/` (captain imports: finding the folders, the importer, and one capture's upload). At the top sit what several of them use: `install.*` (the config folder that clients sharing an install read: the token, the pause, upload.ini), `worker.*` (the short jobs a packet hook must not wait on), `http.h`, `tus.*`, `file.*` and `units.*`.
 - `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe; `text.*` formats chat lines.
 - `tests/`: one file per module, with shared fakes in `support.h`. They cover the core, and on Windows also the plugin's network and text code.
-- `openspec/`: what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
+- `openspec/`: the specs written so far for what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's CMake helper, unchanged.
 
 ## Contributing

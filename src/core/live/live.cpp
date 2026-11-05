@@ -8,7 +8,6 @@
 #include <bit>
 #include <cstring>
 #include <format>
-#include <stdexcept>
 #include <tuple>
 #include <utility>
 
@@ -70,7 +69,7 @@ auto viewers(const std::string_view message) -> std::optional<int>
     return json["viewers"].get<int>();
 }
 
-auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::vector<uint8_t>
+auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::optional<std::vector<uint8_t>>
 {
     auto data  = std::vector<uint8_t>(packet.data.begin(), packet.data.end());
     auto flags = static_cast<uint16_t>((packet.provenance & xicap::PacketFlag::Provenance) | std::to_underlying(packet.direction));
@@ -78,7 +77,7 @@ auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::vec
     {
         if (data.size() < 4)
         {
-            throw std::invalid_argument("a game packet is at least 4 bytes");
+            return std::nullopt;
         }
         if (chat == xicap::Chat::Redact && xicap::redact(data, packet.direction))
         {
@@ -108,35 +107,30 @@ auto Feed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> voi
     {
         return;
     }
-    std::vector<uint8_t> bytes;
-    try
+    auto                   bytes = frame(packet, chat);
+    const std::scoped_lock lock(mutex_);
+    if (!bytes)
     {
-        bytes = frame(packet, chat);
-    }
-    catch (const std::exception&) // a packet too short to frame is a gap for viewers
-    {
-        const std::scoped_lock lock(mutex_);
-        dropped_++;
+        dropped_++; // a gap for viewers
         return;
     }
-    const std::scoped_lock lock(mutex_);
     if (!open_)
     {
         return;
     }
-    if (bytes_ + bytes.size() > maxBytes_)
+    if (bytes_ + bytes->size() > maxBytes_)
     {
         dropped_++;
         return;
     }
-    bytes_ += bytes.size();
-    if (messages_.empty() || messages_.back().size() + bytes.size() > MESSAGE_BYTES)
+    bytes_ += bytes->size();
+    if (messages_.empty() || messages_.back().size() + bytes->size() > MESSAGE_BYTES)
     {
-        messages_.push_back(std::move(bytes));
+        messages_.push_back(std::move(*bytes));
     }
     else
     {
-        messages_.back().insert(messages_.back().end(), bytes.begin(), bytes.end());
+        messages_.back().insert(messages_.back().end(), bytes->begin(), bytes->end());
     }
 }
 
