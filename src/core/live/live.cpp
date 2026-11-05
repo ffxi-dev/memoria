@@ -32,19 +32,16 @@ auto append(std::vector<uint8_t>& out, const T value) -> void
 auto start(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<Link, std::string>
 try
 {
-    const auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
-    if (!res)
-    {
-        return std::unexpected(res.error());
-    }
-    if (res->status == 401)
+    auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
+    if (res && res->status == 401)
     {
         std::ignore = removeLink(config, installToken);
         return std::unexpected("Vault no longer accepts this install");
     }
-    if (res->status != 201)
+    res = expect(std::move(res), 201);
+    if (!res)
     {
-        return std::unexpected(std::format("Mogsafe answered {}", res->status));
+        return std::unexpected(res.error());
     }
     const auto body = nlohmann::json::parse(res->body, nullptr, false);
     if (!body.is_object() || body.value("token", "").empty() || !body.value("url", "").starts_with("https://"))

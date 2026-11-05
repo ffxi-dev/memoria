@@ -9,14 +9,10 @@ namespace memoria::account
 
 auto fetchSaveChat(Http& http, const std::string& server, const std::string& installToken) -> std::expected<bool, std::string>
 {
-    const auto res = http.request("GET", server + "/v1/install/save-chat", { { "Authorization", "Bearer " + installToken } }, {});
+    const auto res = expect(http.request("GET", server + "/v1/install/save-chat", { { "Authorization", "Bearer " + installToken } }, {}), 200);
     if (!res)
     {
         return std::unexpected(res.error());
-    }
-    if (res->status != 200)
-    {
-        return std::unexpected(std::format("Mogsafe answered {}", res->status));
     }
     const auto body = nlohmann::json::parse(res->body, nullptr, false);
     if (!body.is_object() || !body.contains("save_chat") || !body["save_chat"].is_boolean())
