@@ -92,11 +92,11 @@ private:
     auto closeSession() -> void;
     template <typename Op>
     auto onSession(Op op) -> void;
-    auto sessionFailed(const std::exception& error) -> void;
+    auto sessionFailed(const std::string& why) -> void;
     auto close() -> void;
     auto finish() -> void;
-    auto fail(const std::exception& error) -> void;
-    auto broken(const std::exception& error) -> void;
+    auto setError(const std::exception& error) -> void;    // shown in status until a capture writes again
+    auto writeFailed(const std::exception& error) -> void; // drops the writer, as a crash would
     auto wrote() -> void;
     auto rollover() -> void;
     auto saveState(bool open) -> void;
