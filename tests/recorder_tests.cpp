@@ -384,8 +384,17 @@ TEST_CASE("dropped packets leave a note in the capture")
         {
             rec.packet(gamePacket(T0 + 1 + i));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // one drain takes the full batch, the next frees it
-        rec.packet(gamePacket(T0 + 100));                            // carries the note
+        REQUIRE(waitFor([&]
+                        {
+                            return rec.status().dropped > 0; // noted, for the next packet written
+                        }));
+        const auto before = rec.status().packets;
+        uint64_t   at{ T0 + 100 };
+        REQUIRE(waitFor([&]
+                        {
+                            rec.packet(gamePacket(at++)); // dropped too until a drain frees the batch in hand
+                            return rec.status().packets > before;
+                        }));
         rec.stop();
         CHECK(rec.status().dropped > 0);
     }
