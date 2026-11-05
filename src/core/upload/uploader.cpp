@@ -152,11 +152,7 @@ auto Uploader::sendLast(const std::string& name) -> void
     {
         return; // another client sharing the folder sends it
     }
-    if (!loaded_)
-    {
-        load();
-        loaded_ = true;
-    }
+    load();
     UploadFile f;
     {
         const std::scoped_lock lock(mutex_);
@@ -179,12 +175,8 @@ auto Uploader::sendLast(const std::string& name) -> void
 
 auto Uploader::uploadAll() -> std::optional<std::string>
 {
-    uploading_ = true;
-    if (!loaded_)
-    {
-        load();
-        loaded_ = true; // status() trusts files_ once this is set
-    }
+    uploading_ = true; // the tests' way in as well as run()'s
+    load();
     std::optional<std::string> first;
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
@@ -392,11 +384,33 @@ auto Uploader::saved() const -> UploadFiles
     return readUploads(options_.dir / STATE_FILE);
 }
 
+// Once: status() trusts files_ from then on.
 auto Uploader::load() -> void
 {
-    auto                   files = saved();
-    const std::scoped_lock lock(mutex_);
-    files_ = std::move(files);
+    if (loaded_)
+    {
+        return;
+    }
+    auto files = saved();
+    {
+        const std::scoped_lock lock(mutex_);
+        files_ = std::move(files);
+    }
+    loaded_ = true;
+}
+
+// Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk
+// are the truth. True with the files when they came from disk.
+auto Uploader::snapshot() const -> std::pair<UploadFiles, bool>
+{
+    {
+        const std::scoped_lock lock(mutex_);
+        if (uploading_ && loaded_ && !files_.empty())
+        {
+            return { files_, false };
+        }
+    }
+    return { saved(), true };
 }
 
 auto Uploader::save() -> std::optional<std::string>
@@ -426,15 +440,7 @@ auto Uploader::takeUnauthorized() -> bool
 
 auto Uploader::file(const std::string& name) const -> UploadFile
 {
-    {
-        const std::scoped_lock lock(mutex_);
-        if (uploading_ && loaded_)
-        {
-            const auto it = files_.find(name);
-            return it == files_.end() ? UploadFile{} : it->second;
-        }
-    }
-    auto files = saved(); // another client sharing the folder sends it
+    auto files = snapshot().first;
     return files[name];
 }
 
@@ -452,20 +458,7 @@ auto Uploader::recordingId(const std::string& name) const -> std::string
 
 auto Uploader::status() const -> std::vector<UploadStatus>
 {
-    // Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk are the truth.
-    UploadFiles files;
-    {
-        const std::scoped_lock lock(mutex_);
-        if (uploading_ && loaded_)
-        {
-            files = files_;
-        }
-    }
-    const bool fromDisk{ files.empty() };
-    if (fromDisk)
-    {
-        files = saved();
-    }
+    auto [files, fromDisk] = snapshot();
     std::vector<UploadStatus> out;
     std::error_code           ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))

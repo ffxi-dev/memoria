@@ -18,6 +18,7 @@ namespace
 constexpr auto TOKEN           = "token";
 constexpr auto PAUSED          = "paused";
 constexpr auto IMPORT_REMINDED = "import-reminded";
+constexpr auto REMINDED        = "reminded"; // the date of the last daily reminder
 
 // Two lines: the token, then the account it belongs to.
 auto readLink(const std::filesystem::path& path) -> std::optional<Linked>
@@ -138,6 +139,14 @@ auto sharing(const std::filesystem::path& config, const std::string& token) -> b
 auto markImportReminded(const std::filesystem::path& config) -> bool
 {
     return createNew(config / IMPORT_REMINDED);
+}
+
+auto claimDailyReminder(const std::filesystem::path& config) -> bool
+{
+    const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
+    std::string last;
+    std::getline(std::ifstream(config / REMINDED), last);
+    return last != today && !replaceFile(config / REMINDED, today);
 }
 
 auto importReminded(const std::filesystem::path& config) -> bool

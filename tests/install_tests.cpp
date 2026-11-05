@@ -134,3 +134,13 @@ TEST_CASE("upload.ini names another server only over HTTPS")
     CHECK(!serverIn(dir));
     fs::remove_all(dir);
 }
+
+TEST_CASE("the daily reminder goes to one caller a day")
+{
+    const auto dir = tempDir();
+    CHECK(claimDailyReminder(dir));
+    CHECK_FALSE(claimDailyReminder(dir));
+    std::ofstream(dir / "reminded") << "2020-01-01"; // a reminder given on another day
+    CHECK(claimDailyReminder(dir));
+    fs::remove_all(dir);
+}

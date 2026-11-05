@@ -15,6 +15,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace memoria::upload
@@ -89,6 +90,7 @@ private:
     auto               load() -> void;
     [[nodiscard]] auto save() -> std::optional<std::string>; // why uploads.txt was not replaced, if it was not
     auto               saved() const -> UploadFiles;
+    auto               snapshot() const -> std::pair<UploadFiles, bool>;
     auto               file(const std::string& name) const -> UploadFile; // from memory while this client sends, else from the state file
 
     UploadOptions         options_;

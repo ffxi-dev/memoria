@@ -324,19 +324,13 @@ auto Session::greet() -> void
                  });
 }
 
-// Once a day while unlinked: the date of the last reminder is kept across restarts.
+// Once a day while unlinked, across restarts.
 auto Session::remind() -> void
 {
-    const auto  path  = host_.config / "reminded";
-    const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
-    std::string last;
-    std::getline(std::ifstream(path), last);
-    if (linked() || last == today)
+    if (!linked() && claimDailyReminder(host_.config))
     {
-        return;
+        post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
     }
-    std::ofstream(path, std::ios::trunc) << today;
-    post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
 }
 
 // Once per install, ever: while linked and captain captures wait.

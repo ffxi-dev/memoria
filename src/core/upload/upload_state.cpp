@@ -16,18 +16,18 @@ auto stageText(const Stage stage) -> std::string_view
 {
     switch (stage)
     {
+        case Stage::Open:
+            break;
         case Stage::Closed:
-            return "1";
+            return "closed";
         case Stage::Ended:
             return "ended";
         case Stage::CutOff:
             return "cut_off";
         case Stage::Rescued:
-            return "rest";
-        case Stage::Open:
-            break;
+            return "rescued";
     }
-    return "0";
+    return "open";
 }
 
 auto parseStage(const std::string_view state) -> Stage
