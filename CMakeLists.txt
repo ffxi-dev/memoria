@@ -135,15 +135,17 @@ if(MEMORIA_BUILD_TESTS)
         tests/fault_tests.cpp
         tests/link_tests.cpp
         tests/live_tests.cpp
+        tests/packets_tests.cpp
         tests/recorder_tests.cpp
         tests/upload_tests.cpp
         tests/worker_tests.cpp
-        src/plugin/worker.cpp # the one piece of the plugin that needs only the standard library
+        src/plugin/packets.cpp # the pieces of the plugin that need only the standard library
+        src/plugin/worker.cpp
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     if(WIN32)
-        # ownerOnly reads the token file's permissions; the WinHTTP tests build the plugin's network code on its own.
-        target_sources(memoria_core_tests PRIVATE tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
+        # ownerOnly reads the token file's permissions; the WinHTTP and text tests build the plugin's network and text code on its own.
+        target_sources(memoria_core_tests PRIVATE tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
         target_link_libraries(memoria_core_tests PRIVATE advapi32 bcrypt winhttp ws2_32 shell32 ole32)
         target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")
     endif()
