@@ -50,13 +50,14 @@ auto browse(const std::string& url) -> void
     }
 }
 
-Live::Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post)
+Live::Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post, std::function<void(std::string)> open)
 : server_(std::move(server))
 , config_(std::move(config))
 , installToken_(std::move(installToken))
 , feed_(feed)
 , owner_(feed.claim())
 , post_(std::move(post))
+, open_(std::move(open))
 , hello_(std::move(hello))
 , thread_([this](const std::stop_token& stop)
           {
@@ -114,7 +115,8 @@ auto Live::upgrade(void* session, const std::string& url, const std::string& hea
         return s;
     }
     // A receive waits as long as nobody joins or leaves: Mogsafe sends nothing else, so a short timeout would drop an
-    // idle link. The live thread ends the wait with WinHttpWebSocketClose, which WinHTTP lets cancel a pending receive.
+    // idle link. Set on the request before the upgrade, which the WebSocket keeps; the WebSocket itself takes only its
+    // own options. The live thread ends the wait with WinHttpWebSocketClose, which WinHTTP lets cancel a pending receive.
     DWORD forever{ 0 };
     DWORD closeMs{ static_cast<DWORD>(TIMEOUT.count()) };
     if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &forever, sizeof(forever)))
@@ -122,7 +124,7 @@ auto Live::upgrade(void* session, const std::string& url, const std::string& hea
         return failed();
     }
     s.ws.reset(WinHttpWebSocketCompleteUpgrade(req.get(), 0));
-    if (!s.ws || !WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &forever, sizeof(forever)) || !WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT, &closeMs, sizeof(closeMs)))
+    if (!s.ws || !WinHttpSetOption(s.ws.get(), WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT, &closeMs, sizeof(closeMs)))
     {
         s.ws.reset();
         return failed();
@@ -187,7 +189,7 @@ auto Live::run(const std::stop_token& stop) -> void
         const std::scoped_lock lock(mutex_);
         url_ = link->url;
     }
-    browse(link->url);
+    open_(link->url);
     post_(paint(Color::Green, "Live.") + " Anyone with the link can watch until " + paint(Color::Cyan, "/memoria live off") + ". Nothing is sent while nobody watches.");
     post_(link->url);
 
@@ -406,7 +408,7 @@ auto Live::wait(const std::stop_token& stop, const std::chrono::milliseconds tim
         reopen_        = false;
         const auto url = url_;
         lock.unlock();
-        browse(url);
+        open_(url);
         lock.lock();
     }
 }

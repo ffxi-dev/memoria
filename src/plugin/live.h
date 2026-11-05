@@ -31,7 +31,8 @@ class Live
 {
 public:
     // config holds the token and paused files: a pause or unlink in any client sharing the install ends the link.
-    Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post);
+    // open shows the link's page; the session hands it to a thread of its own, since a browser can take seconds to start.
+    Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post, std::function<void(std::string)> open);
     ~Live(); // aborts, then joins: the game waits for the step in flight to finish or time out, then the WebSocket close
 
     Live(const Live&)                    = delete;
@@ -65,6 +66,7 @@ private:
     live::Feed&                      feed_;
     uint64_t                         owner_; // the id the feed gave this link
     std::function<void(std::string)> post_;
+    std::function<void(std::string)> open_;
 
     mutable std::mutex          mutex_;
     std::condition_variable_any wake_;

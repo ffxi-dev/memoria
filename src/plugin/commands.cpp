@@ -290,10 +290,18 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     }
     else if (sub == "live" && link)
     {
-        live_ = std::make_unique<Live>(server_, host_.config, link->token, recorder_->live(), hello(), [this](std::string text)
-                                       {
-                                           post(std::move(text));
-                                       });
+        live_ = std::make_unique<Live>(
+            server_, host_.config, link->token, recorder_->live(), hello(), [this](std::string text)
+            {
+                post(std::move(text));
+            },
+            [this](std::string url)
+            {
+                worker_.post([url = std::move(url)](const std::stop_token&)
+                             {
+                                 browse(url);
+                             });
+            });
         say(paint(Color::Grey, "Asking Vault for a live link..."));
     }
     else if (sub == "unlink")
