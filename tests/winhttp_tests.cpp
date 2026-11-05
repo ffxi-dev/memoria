@@ -253,6 +253,19 @@ TEST_CASE("a cancelled request stops reading a slow body at its next read")
     CHECK(res.error() == "stopped");
 }
 
+TEST_CASE("a body cut short is an error, not a response")
+{
+    const Server    server([](const SOCKET peer, const std::string&, const std::atomic<bool>&)
+                           {
+                            const std::string answer = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"token\":";
+                            ::send(peer, answer.data(), static_cast<int>(answer.size()), 0); // then the connection closes
+                           });
+    plugin::WinHttp http(SECOND);
+    const auto      res = http.request("GET", server.url() + "/", {}, {});
+    REQUIRE(!res);
+    CHECK(res.error().starts_with("receive"));
+}
+
 TEST_CASE("a cancelled request waiting for its answer ends at its timeout, and none goes after it")
 {
     Server          server([](SOCKET, const std::string&, const std::atomic<bool>&)
