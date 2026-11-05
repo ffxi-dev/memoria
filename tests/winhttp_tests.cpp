@@ -7,9 +7,9 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
+#include "core/worker.h"
 #include "plugin/live.h"
 #include "plugin/winhttp.h"
-#include "plugin/worker.h"
 #include "support.h"
 
 #include <future>
@@ -322,7 +322,7 @@ TEST_CASE("an uploader, an importer and the worker each join within their reques
     }
     SECTION("the worker")
     {
-        auto worker = std::make_unique<plugin::Worker>();
+        auto worker = std::make_unique<Worker>();
         worker->post([&](const std::stop_token& stop)
                      {
                          plugin::WinHttp          http(SECOND);

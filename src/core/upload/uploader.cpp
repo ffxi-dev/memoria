@@ -1,5 +1,7 @@
 #include "core/upload/uploader.h"
 
+#include "core/units.h"
+
 #include <picosha2.h>
 #include <xicap/xicap.h>
 
@@ -299,7 +301,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     }
     if (f.url.empty())
     {
-        const auto res = tus_.request("POST", options_.server + "/v1/uploads/", { { "Upload-Defer-Length", "1" } });
+        const auto res = tus_.request("POST", "/v1/uploads/", { { "Upload-Defer-Length", "1" } });
         if (!res)
         {
             return res.error();

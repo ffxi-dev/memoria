@@ -21,6 +21,9 @@ auto count(uint64_t n) -> std::string;
 // 45 s, 12 min, 3 h 5 min
 auto duration(uint64_t seconds) -> std::string;
 
+// The rest of a typed command after word's first use, without the spaces and quotes around it: a path may hold spaces.
+auto restAfter(std::string_view line, std::string_view word) -> std::string_view;
+
 // The game and Ashita's commands speak Shift-JIS; captures hold UTF-8.
 auto utf8FromShiftJis(std::string_view text) -> std::string;
 

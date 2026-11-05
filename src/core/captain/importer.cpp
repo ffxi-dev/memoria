@@ -314,7 +314,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
                 }
                 search = std::format(",search_bytes {},search_crc32 {},search_size {}", base64(std::to_string(fs::file_size(searchStaged, ec))), base64(std::format("{:08x}", crc->crc)), base64(std::to_string(crc->size)));
             }
-            const auto res = tus_.request("POST", options_.server + "/v1/uploads/", { { "Upload-Defer-Length", "1" }, { "Upload-Metadata", metadata + search } });
+            const auto res = tus_.request("POST", "/v1/uploads/", { { "Upload-Defer-Length", "1" }, { "Upload-Metadata", metadata + search } });
             if (res && res->status == 201)
             {
                 replaces           = header(*res, "mogsafe-replaces");

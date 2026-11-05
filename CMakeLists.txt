@@ -51,6 +51,7 @@ add_library(memoria_core STATIC
     src/core/captain/importer.cpp
     src/core/capture/clock.cpp
     src/core/capture/event_queue.cpp
+    src/core/capture/packets.cpp
     src/core/capture/recorder.cpp
     src/core/file.cpp
     src/core/install.cpp
@@ -59,6 +60,7 @@ add_library(memoria_core STATIC
     src/core/units.cpp
     src/core/upload/upload_state.cpp
     src/core/upload/uploader.cpp
+    src/core/worker.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
 target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json libzstd_static)
@@ -80,16 +82,12 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/commands.cpp
         src/plugin/live.cpp
         src/plugin/live.h
-        src/plugin/packets.cpp
-        src/plugin/packets.h
         src/plugin/session.cpp
         src/plugin/session.h
         src/plugin/text.cpp
         src/plugin/text.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
-        src/plugin/worker.cpp
-        src/plugin/worker.h
     )
     set_target_properties(memoria PROPERTIES OUTPUT_NAME "Memoria" CXX_EXTENSIONS ON)
     if(MEMORIA_OUTPUT_DIR)
@@ -141,8 +139,6 @@ if(MEMORIA_BUILD_TESTS)
         tests/recorder_tests.cpp
         tests/upload_tests.cpp
         tests/worker_tests.cpp
-        src/plugin/packets.cpp # the pieces of the plugin that need only the standard library
-        src/plugin/worker.cpp
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     if(WIN32)

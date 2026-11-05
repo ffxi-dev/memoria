@@ -28,6 +28,22 @@ auto duration(const uint64_t seconds) -> std::string
     return std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
 }
 
+auto restAfter(std::string_view line, const std::string_view word) -> std::string_view
+{
+    const auto at = line.find(word);
+    if (at == std::string_view::npos)
+    {
+        return {};
+    }
+    line.remove_prefix(at + word.size());
+    const auto first = line.find_first_not_of(" \"");
+    if (first == std::string_view::npos)
+    {
+        return {};
+    }
+    return line.substr(first, line.find_last_not_of(" \"") - first + 1);
+}
+
 auto utf8FromShiftJis(const std::string_view text) -> std::string
 {
     constexpr UINT SHIFT_JIS = 932;

@@ -1,8 +1,8 @@
 #include "plugin/session.h"
 
+#include "core/capture/packets.h"
 #include "core/install.h"
 #include "plugin/client.h"
-#include "plugin/packets.h"
 #include "plugin/text.h"
 #include "plugin/winhttp.h"
 
@@ -139,9 +139,9 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         return;
     }
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
-    if (id == packets::LOGIN)
+    if (id == capture::packets::LOGIN)
     {
-        capture::Login who{ .character = packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
+        capture::Login who{ .character = capture::packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
             characterError_ = client::lobby::character(who);
@@ -158,7 +158,7 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         }
     }
     record(xicap::PacketDirection::ServerToClient, size, data, modified, sizeChunk, dataChunk, injected, blocked);
-    if (id == packets::LOGOUT && size > packets::LOGOUT_STATE && packets::leavesGame(data[packets::LOGOUT_STATE]))
+    if (id == capture::packets::LOGOUT && size > capture::packets::LOGOUT_STATE && capture::packets::leavesGame(data[capture::packets::LOGOUT_STATE]))
     {
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());

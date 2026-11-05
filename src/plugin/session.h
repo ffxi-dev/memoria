@@ -7,9 +7,9 @@
 #include "core/capture/recorder.h"
 #include "core/install.h"
 #include "core/upload/uploader.h"
+#include "core/worker.h"
 #include "plugin/live.h"
 #include "plugin/text.h"
-#include "plugin/worker.h"
 
 #include <Windows.h>
 

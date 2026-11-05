@@ -193,11 +193,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     }
     else if (sub == "session" && args.size() > 2 && args[2] == "start")
     {
-        // The rest of the line as typed: a path can hold spaces.
-        std::string_view path(line);
-        path.remove_prefix(path.find("start") + 5);
-        path.remove_prefix((std::min)(path.find_first_not_of(" \""), path.size()));
-        path = path.substr(0, path.find_last_not_of(" \"") + 1);
+        const auto path = restAfter(line, "start");
         if (path.empty())
         {
             say("/memoria session start <file.xicap>");

@@ -3,7 +3,6 @@
 #include "core/install.h"
 
 #include <algorithm>
-#include <charconv>
 #include <format>
 #include <fstream>
 #include <utility>
@@ -11,13 +10,6 @@
 
 namespace memoria
 {
-
-auto parseU64(const std::string_view s) -> std::optional<uint64_t>
-{
-    uint64_t v{};
-    const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    return ec == std::errc{} && end == s.data() + s.size() ? std::optional(v) : std::nullopt;
-}
 
 Tus::Tus(std::string server, std::filesystem::path config, Http& http)
 : server_(std::move(server))

@@ -1,9 +1,9 @@
-#include "plugin/worker.h"
+#include "core/worker.h"
 
 #include <tuple>
 #include <utility>
 
-namespace memoria::plugin
+namespace memoria
 {
 
 Worker::Worker()
@@ -63,4 +63,4 @@ auto Worker::run(const std::stop_token& stop) -> void
     }
 }
 
-} // namespace memoria::plugin
+} // namespace memoria

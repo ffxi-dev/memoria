@@ -31,7 +31,8 @@ public:
     // Read before each step and chunk: another client sharing the install may have paused, unlinked, or linked again.
     auto allowed() -> bool;
 
-    // Adds the tus version and the token, and sends to the server's origin whatever origin url names; a 401 deletes the token and is an error.
+    // Adds the tus version and the token, and sends to the server's origin whatever origin url names, or a bare path; a 401
+    // deletes the token and is an error.
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
 
     // The upload's URL from a create's Location, on the server's origin.
@@ -53,7 +54,5 @@ private:
     std::string           token_;
     std::atomic<bool>     unauthorized_{ false };
 };
-
-auto parseU64(std::string_view s) -> std::optional<uint64_t>;
 
 } // namespace memoria

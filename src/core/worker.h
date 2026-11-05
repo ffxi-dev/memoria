@@ -8,7 +8,7 @@
 #include <stop_token>
 #include <thread>
 
-namespace memoria::plugin
+namespace memoria
 {
 
 // One thread for the session's short jobs: reminders, the chat choice, opening the browser. A packet hook only queues a
@@ -40,4 +40,4 @@ private:
     std::jthread                thread_; // last: started once the rest is ready
 };
 
-} // namespace memoria::plugin
+} // namespace memoria
