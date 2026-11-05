@@ -65,9 +65,9 @@ auto Session::start(std::optional<LateLogin> late) -> void
         recorder_ = std::make_unique<Recorder>(RecorderOptions{
             .dir          = host_.captures,
             .captureAgent = CAPTURE_AGENT,
-            .policy       = [this]
+            .chat         = [this]
             {
-                return policyFor(saveChat_);
+                return saveChat_ ? xicap::Chat::Keep : xicap::Chat::Redact;
             },
             .ended = [this](const std::filesystem::path& capture)
             {
@@ -104,7 +104,7 @@ auto Session::start(std::optional<LateLogin> late) -> void
     // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
-        Login login{ .character = { .characterId = late->characterId, .name = late->name }, .network = client::network(), .midSession = true, .clientVersion = client::lobby::version() };
+        Login login{ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() };
         characterError_ = client::lobby::character(login);
         character_      = login.character;
         loggedIn_       = true;
@@ -151,7 +151,7 @@ auto Session::incoming(uint16_t id, uint32_t size, const uint8_t* data, const ui
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
     if (id == packets::LOGIN)
     {
-        Login who{ .character = packets::character(data, size), .network = client::network(), .clientVersion = client::lobby::version() };
+        Login who{ .character = packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
             characterError_ = client::lobby::character(who);
@@ -206,7 +206,7 @@ auto Session::record(bool clientToServer, uint32_t size, const uint8_t* data, co
         auto& last = lastChunk_[clientToServer ? 1 : 0];
         if (last != key)
         {
-            provenance |= xicap::PacketFlag::FirstInChunk;
+            provenance |= xicap::PacketFlag::FirstInDatagram;
         }
         last = key;
     }
@@ -224,7 +224,7 @@ auto Session::recordSearch(bool clientToServer, const uint8_t* data, uint32_t si
     recorder_->packet({
         .timestamp      = clock_.nowMs(),
         .clientToServer = clientToServer,
-        .channel        = std::to_underlying(xicap::Channel::Search),
+        .channel        = xicap::Channel::Search,
         .opcode         = data[0x0B],
         .data           = { data, data + size },
     });

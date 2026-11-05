@@ -22,13 +22,4 @@ auto fetchSaveChat(Http& http, const std::string& server, const std::string& ins
     return body["save_chat"].get<bool>();
 }
 
-auto policyFor(bool saveChat) -> xicap::ExclusionPolicy
-{
-    if (saveChat)
-    {
-        return { .name = "save-chat", .version = 1, .rules = {} };
-    }
-    return xicap::defaultExclusionPolicy();
-}
-
 } // namespace memoria

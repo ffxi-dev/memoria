@@ -65,7 +65,7 @@ auto find(const char* pattern) -> uintptr_t
     return Ashita::Memory::FindPattern(base, nt->OptionalHeader.SizeOfImage, pattern, 0, 0);
 }
 
-auto network() -> xicap::Network
+auto serverKind() -> xicap::ServerKind
 {
     // Square Enix's retail zone servers, 124.150.152.0/21.
     constexpr uint32_t RETAIL_FIRST = 0x7C969800;
@@ -75,24 +75,24 @@ auto network() -> xicap::Network
     static const uintptr_t sig = find("8B0D????????8D04808B8481????????C3");
     if (sig == 0)
     {
-        return xicap::Network::Unknown;
+        return xicap::ServerKind::Unknown;
     }
     try
     {
         const auto ip = std::byteswap(read32(read32(read32(sig + 2))));
         if (ip == 0)
         {
-            return xicap::Network::Unknown;
+            return xicap::ServerKind::Unknown;
         }
         if (ip >= RETAIL_FIRST && ip <= RETAIL_LAST)
         {
-            return xicap::Network::Retail;
+            return xicap::ServerKind::Retail;
         }
-        return xicap::Network::Private;
+        return xicap::ServerKind::Private;
     }
     catch (...) // /EHa: a bad read is an access violation
     {
-        return xicap::Network::Unknown;
+        return xicap::ServerKind::Unknown;
     }
 }
 

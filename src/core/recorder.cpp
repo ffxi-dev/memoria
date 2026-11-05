@@ -288,11 +288,10 @@ auto Recorder::metadata(const Login& who, const xicap::CaptureId& previous) cons
     return {
         .captureId         = randomCaptureId(),
         .previousCaptureId = previous,
-        .network           = who.network,
+        .serverKind        = who.serverKind,
         .captureAgent      = options_.captureAgent,
         .clientVersion     = who.clientVersion,
         .character         = who.character,
-        .policy            = policy_,
     };
 }
 
@@ -309,12 +308,12 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
             previous_ = parseHex(id).value_or(xicap::CaptureId{});
         }
     }
-    policy_         = options_.policy ? options_.policy() : xicap::defaultExclusionPolicy();
+    chat_           = options_.chat ? options_.chat() : xicap::Chat::Redact;
     auto       meta = metadata(who, previous_);
     const auto path = options_.dir / fileName(timestamp, who.character, meta.captureId);
     login_          = who;
     reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
-    writer_         = std::make_unique<xicap::Writer>(path, std::move(meta));
+    writer_         = std::make_unique<xicap::Writer>(path, std::move(meta), xicap::FramePolicy::live(), chat_);
     previous_       = writer_->captureId();
     saveState(true);
     if (!who.midSession)
@@ -332,24 +331,24 @@ auto Recorder::open(uint64_t timestamp, const Login& who) -> void
 
 auto Recorder::write(const Event& event) -> void
 {
-    const auto packet = xicap::OutPacket{
+    const auto packet = xicap::WritePacket{
         .timestamp  = event.timestamp,
         .direction  = event.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
-        .data       = std::as_bytes(std::span{ event.data }),
+        .provenance = event.provenance,
         .channel    = event.channel,
         .opcode     = event.opcode,
-        .provenance = event.provenance,
+        .data       = event.data,
     };
     onSession([&](xicap::Writer& session)
               {
                   session.write(packet);
               });
     writer_->write(packet);
-    live_.push(packet, policy_);
+    live_.push(packet, chat_);
     std::lock_guard lock(statusMutex_);
     status_.packets++;
     status_.bytes += event.data.size();
-    if (event.channel == std::to_underlying(xicap::Channel::Search))
+    if (event.channel == xicap::Channel::Search)
     {
         status_.search++;
     }
@@ -386,7 +385,7 @@ auto Recorder::openSession(const std::filesystem::path& path) -> void
         {
             throw std::runtime_error(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));
         }
-        session_ = std::make_unique<xicap::Writer>(path, metadata(*login_, writer_->captureId()));
+        session_ = std::make_unique<xicap::Writer>(path, metadata(*login_, writer_->captureId()), xicap::FramePolicy::live(), chat_);
     }
     catch (const std::exception& error)
     {

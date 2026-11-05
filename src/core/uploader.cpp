@@ -1,11 +1,12 @@
 #include "core/uploader.h"
 
 #include <picosha2.h>
-#include <xicap/transcode.h>
+#include <xicap/xicap.h>
 
 #include <algorithm>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <ranges>
 #include <utility>
 
@@ -49,6 +50,41 @@ auto sha256(const std::filesystem::path& path, uint64_t size, const std::atomic<
     }
     hasher.finish();
     return picosha2::get_hash_hex_string(hasher);
+}
+
+// Writes the packets of source from the first frame that does not end within its first fromByte bytes, as a new
+// capture at out that continues source. Returns the packets written; with none, it writes no file.
+auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, const std::filesystem::path& out) -> uint64_t
+{
+    xicap::Reader in(source);
+    auto          metadata     = in.metadata();
+    metadata.previousCaptureId = metadata.captureId;
+    metadata.captureId         = {};
+    std::optional<xicap::Writer> writer;
+    uint64_t                     packets{ 0 };
+    xicap::Packet                p;
+    while (in.next(p))
+    {
+        if (in.bytesRead() <= fromByte)
+        {
+            continue;
+        }
+
+        if (!writer)
+        {
+            writer.emplace(out, metadata);
+        }
+
+        writer->copy(p);
+        packets++;
+    }
+
+    if (writer)
+    {
+        writer->close();
+    }
+
+    return packets;
 }
 
 // Notes when the file's size last changed, which tells when it went quiet.
@@ -418,7 +454,7 @@ auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::op
         const auto tmp = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap: no pass sends it half written
         try
         {
-            if (xicap::continueFrom(path, f.sent, tmp) > 0)
+            if (continueFrom(path, f.sent, tmp) > 0)
             {
                 std::filesystem::rename(tmp, out);
             }

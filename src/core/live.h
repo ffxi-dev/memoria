@@ -2,7 +2,7 @@
 
 #include "core/http.h"
 
-#include <xicap/policy.h>
+#include <xicap/xicap.h>
 
 #include <atomic>
 #include <cstdint>
@@ -30,9 +30,9 @@ auto liveHello(std::string_view character, std::string_view world, std::string_v
 // Mogsafe's {"viewers": n}; nothing for any other message.
 auto liveViewers(std::string_view message) -> std::optional<int>;
 
-// One packet as live viewers get it, stored as a capture written with policy stores it. Little-endian: version 1 (u8),
+// One packet as live viewers get it, redacted as a capture written with chat stores it. Little-endian: version 1 (u8),
 // channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet.
-auto liveFrame(const xicap::OutPacket& packet, const xicap::ExclusionPolicy& policy) -> std::vector<uint8_t>;
+auto liveFrame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<uint8_t>;
 
 // Frames from the writer thread to the live thread. Takes nothing while closed; past maxBytes, drops and counts.
 class LiveFeed
@@ -42,7 +42,7 @@ public:
 
     explicit LiveFeed(size_t maxBytes = 1024 * 1024);
 
-    auto push(const xicap::OutPacket& packet, const xicap::ExclusionPolicy& policy) -> void;
+    auto push(const xicap::WritePacket& packet, xicap::Chat chat) -> void;
 
     // The rest belong to the live link that claimed the feed last: one stopped but still closing changes nothing.
     auto claim() -> uint64_t;                                       // closes the feed and returns the new owner's id
