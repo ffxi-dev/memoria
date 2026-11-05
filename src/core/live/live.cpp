@@ -1,4 +1,4 @@
-#include "core/live.h"
+#include "core/live/live.h"
 
 #include <nlohmann/json.hpp>
 
@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace memoria
+namespace memoria::live
 {
 namespace
 {
@@ -16,7 +16,7 @@ namespace
 static_assert(std::endian::native == std::endian::little, "frames are little-endian");
 
 template <typename T>
-auto append(std::vector<uint8_t>& out, T value) -> void
+auto append(std::vector<uint8_t>& out, const T value) -> void
 {
     const auto at = out.size();
     out.resize(at + sizeof(T));
@@ -25,7 +25,7 @@ auto append(std::vector<uint8_t>& out, T value) -> void
 
 } // namespace
 
-auto startLive(Http& http, const std::string& server, const std::string& installToken) -> std::expected<LiveLink, std::string>
+auto start(Http& http, const std::string& server, const std::string& installToken) -> std::expected<Link, std::string>
 try
 {
     const auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
@@ -38,19 +38,19 @@ try
     {
         return std::unexpected(std::format("Mogsafe answered {}", res->status));
     }
-    return LiveLink{ .token = body.value("token", ""), .url = body.value("url", "") };
+    return Link{ .token = body.value("token", ""), .url = body.value("url", "") };
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
     return std::unexpected("Mogsafe sent a malformed answer");
 }
 
-auto liveHello(std::string_view character, std::string_view world, std::string_view clientVersion, std::string_view agent) -> std::string
+auto hello(const std::string_view character, const std::string_view world, const std::string_view clientVersion, const std::string_view agent) -> std::string
 {
     return nlohmann::json{ { "hello", { { "character", character }, { "world", world }, { "client_version", clientVersion }, { "agent", agent } } } }.dump();
 }
 
-auto liveViewers(std::string_view message) -> std::optional<int>
+auto viewers(const std::string_view message) -> std::optional<int>
 {
     const auto json = nlohmann::json::parse(message, nullptr, false);
     if (!json.is_object() || !json.contains("viewers") || !json["viewers"].is_number_integer())
@@ -60,7 +60,7 @@ auto liveViewers(std::string_view message) -> std::optional<int>
     return json["viewers"].get<int>();
 }
 
-auto liveFrame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::vector<uint8_t>
+auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::vector<uint8_t>
 {
     auto data  = std::vector<uint8_t>(packet.data.begin(), packet.data.end());
     auto flags = static_cast<uint16_t>((packet.provenance & xicap::PacketFlag::Provenance) | std::to_underlying(packet.direction));
@@ -87,21 +87,21 @@ auto liveFrame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std:
     return frame;
 }
 
-LiveFeed::LiveFeed(size_t maxBytes)
+Feed::Feed(const size_t maxBytes)
 : maxBytes_(maxBytes)
 {
 }
 
-auto LiveFeed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> void
+auto Feed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> void
 {
     if (!open_)
     {
         return;
     }
-    std::vector<uint8_t> frame;
+    std::vector<uint8_t> bytes;
     try
     {
-        frame = liveFrame(packet, chat);
+        bytes = frame(packet, chat);
     }
     catch (const std::exception&) // a packet too short to frame is a gap for viewers, never an error in the capture
     {
@@ -114,23 +114,23 @@ auto LiveFeed::push(const xicap::WritePacket& packet, const xicap::Chat chat) ->
     {
         return;
     }
-    if (bytes_ + frame.size() > maxBytes_)
+    if (bytes_ + bytes.size() > maxBytes_)
     {
         dropped_++;
         return;
     }
-    bytes_ += frame.size();
-    if (messages_.empty() || messages_.back().size() + frame.size() > MESSAGE_BYTES)
+    bytes_ += bytes.size();
+    if (messages_.empty() || messages_.back().size() + bytes.size() > MESSAGE_BYTES)
     {
-        messages_.push_back(std::move(frame));
+        messages_.push_back(std::move(bytes));
     }
     else
     {
-        messages_.back().insert(messages_.back().end(), frame.begin(), frame.end());
+        messages_.back().insert(messages_.back().end(), bytes.begin(), bytes.end());
     }
 }
 
-auto LiveFeed::claim() -> uint64_t
+auto Feed::claim() -> uint64_t
 {
     std::lock_guard lock(mutex_);
     open_ = false;
@@ -140,7 +140,7 @@ auto LiveFeed::claim() -> uint64_t
     return ++owner_;
 }
 
-auto LiveFeed::open(uint64_t owner, bool on) -> void
+auto Feed::open(const uint64_t owner, const bool on) -> void
 {
     std::lock_guard lock(mutex_);
     if (owner != owner_)
@@ -155,7 +155,7 @@ auto LiveFeed::open(uint64_t owner, bool on) -> void
     }
 }
 
-auto LiveFeed::take(uint64_t owner) -> std::vector<std::vector<uint8_t>>
+auto Feed::take(const uint64_t owner) -> std::vector<std::vector<uint8_t>>
 {
     std::lock_guard lock(mutex_);
     if (owner != owner_)
@@ -166,7 +166,7 @@ auto LiveFeed::take(uint64_t owner) -> std::vector<std::vector<uint8_t>>
     return std::exchange(messages_, {});
 }
 
-auto LiveFeed::takeDropped(uint64_t owner) -> uint64_t
+auto Feed::takeDropped(const uint64_t owner) -> uint64_t
 {
     std::lock_guard lock(mutex_);
     if (owner != owner_)
@@ -176,4 +176,4 @@ auto LiveFeed::takeDropped(uint64_t owner) -> uint64_t
     return std::exchange(dropped_, 0);
 }
 
-} // namespace memoria
+} // namespace memoria::live

@@ -1,7 +1,7 @@
-#include "core/importer.h"
+#include "core/captain/importer.h"
 
-#include "core/compress.h"
-#include "core/link.h"
+#include "core/account/link.h"
+#include "core/captain/compress.h"
 #include "core/units.h"
 
 #include <algorithm>
@@ -19,7 +19,7 @@
 #include <windows.h>
 #endif
 
-namespace memoria
+namespace memoria::captain
 {
 namespace
 {
@@ -27,13 +27,13 @@ namespace
 constexpr auto STATE_FILE = "imports.txt";
 constexpr auto MAX_WAIT   = std::chrono::milliseconds(std::chrono::minutes(5));
 
-auto base64(std::string_view in) -> std::string
+auto base64(const std::string_view in) -> std::string
 {
     constexpr std::string_view digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string                out;
     for (size_t i = 0; i < in.size(); i += 3)
     {
-        uint32_t   v = static_cast<uint8_t>(in[i]) << 16;
+        uint32_t   v{ static_cast<uint32_t>(static_cast<uint8_t>(in[i])) << 16 };
         const auto n = std::min<size_t>(3, in.size() - i);
         if (n > 1)
         {
@@ -89,7 +89,7 @@ auto Importer::pending(const std::filesystem::path& state) -> bool
     return std::filesystem::exists(state / STATE_FILE, ec);
 }
 
-auto Importer::start(bool asked) -> void
+auto Importer::start(const bool asked) -> void
 {
     thread_ = std::thread([this, asked]
                           {
@@ -148,7 +148,7 @@ auto Importer::run() -> void
     }
     else
     {
-        uint64_t total = 0;
+        uint64_t total{ 0 };
         for (const auto& c : found)
         {
             total += c.growing ? 0 : c.size + c.searchSize;
@@ -185,7 +185,7 @@ auto Importer::run() -> void
         ++tally[result];
     }
 
-    std::string summary = std::format("Captain import done: {} uploaded, {} already in Vault, {} refused", tally[Outcome::Uploaded], tally[Outcome::InVault], tally[Outcome::Refused]);
+    std::string summary{ std::format("Captain import done: {} uploaded, {} already in Vault, {} refused", tally[Outcome::Uploaded], tally[Outcome::InVault], tally[Outcome::Refused]) };
     if (tally[Outcome::Skipped] > 0)
     {
         summary += std::format(", {} skipped", tally[Outcome::Skipped]);
@@ -422,7 +422,7 @@ auto Importer::upload(const CaptainCapture& c, const std::string& prefix) -> Out
     return Outcome::Stopped;
 }
 
-auto Importer::moved(const CaptainCapture& c, const std::string& prefix, const std::string& done, Outcome outcome) -> Outcome
+auto Importer::moved(const CaptainCapture& c, const std::string& prefix, const std::string& done, const Outcome outcome) -> Outcome
 {
     const auto to = moveAside(options_.captures, options_.uploaded, c.dir);
     if (!to)
@@ -443,7 +443,7 @@ auto Importer::ready() -> bool
             return true;
         }
         // The token decides, not the paused file, which /memoria upload on may delete between the two reads.
-        if (!loadLink(options_.config / "token"))
+        if (!account::loadLink(options_.config / "token"))
         {
             return false;
         }
@@ -452,7 +452,7 @@ auto Importer::ready() -> bool
     return false;
 }
 
-auto Importer::wait(std::chrono::milliseconds time) -> void
+auto Importer::wait(const std::chrono::milliseconds time) -> void
 {
     std::unique_lock lock(mutex_);
     wake_.wait_for(lock, time, [this]
@@ -516,4 +516,4 @@ auto Importer::unauthorized() -> bool
     return tus_.unauthorized();
 }
 
-} // namespace memoria
+} // namespace memoria::captain

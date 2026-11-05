@@ -1,9 +1,9 @@
-#include "core/clock.h"
+#include "core/capture/clock.h"
 
 #include <chrono>
 #include <utility>
 
-namespace memoria
+namespace memoria::capture
 {
 namespace
 {
@@ -21,7 +21,7 @@ Clock::Clock()
 {
 }
 
-Clock::Clock(Source wallMs, Source steadyMs)
+Clock::Clock(const Source wallMs, Source steadyMs)
 : steadyMs_(std::move(steadyMs))
 , startWallMs_(wallMs())
 , startSteadyMs_(steadyMs_())
@@ -33,4 +33,4 @@ auto Clock::nowMs() const -> uint64_t
     return startWallMs_ + (steadyMs_() - startSteadyMs_);
 }
 
-} // namespace memoria
+} // namespace memoria::capture

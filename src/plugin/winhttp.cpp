@@ -17,7 +17,7 @@ namespace memoria
 namespace
 {
 
-auto narrow(std::wstring_view s) -> std::string
+auto narrow(const std::wstring_view s) -> std::string
 {
     return s | std::views::transform([](wchar_t c)
                                      {
@@ -31,13 +31,13 @@ auto failed(const char* what) -> std::unexpected<std::string>
     return std::unexpected(std::format("{}: WinHTTP error {}", what, GetLastError()));
 }
 
-auto trim(std::string_view s) -> std::string_view
+auto trim(const std::string_view s) -> std::string_view
 {
     const auto first = s.find_first_not_of(' ');
     return first == std::string_view::npos ? std::string_view{} : s.substr(first);
 }
 
-auto perform(HINTERNET req, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
+auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
 {
     std::wstring lines;
     for (const auto& [name, value] : headers)
@@ -52,8 +52,8 @@ auto perform(HINTERNET req, const HttpHeaders& headers, std::span<const uint8_t>
     }
 
     HttpResponse res;
-    DWORD        status = 0;
-    DWORD        len    = sizeof(status);
+    DWORD        status{ 0 };
+    DWORD        len{ sizeof(status) };
     WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &len, WINHTTP_NO_HEADER_INDEX);
     res.status = static_cast<int>(status);
 
@@ -81,7 +81,7 @@ auto perform(HINTERNET req, const HttpHeaders& headers, std::span<const uint8_t>
     for (DWORD available = 0; WinHttpQueryDataAvailable(req, &available) && available > 0;)
     {
         std::string chunk(available, '\0');
-        DWORD       read = 0;
+        DWORD       read{ 0 };
         if (!WinHttpReadData(req, chunk.data(), available, &read) || read == 0)
         {
             break;
@@ -99,7 +99,7 @@ auto CloseInternetHandle::operator()(void* handle) const -> void
 }
 
 // URLs and headers here are ASCII.
-auto wide(std::string_view ascii) -> std::wstring
+auto wide(const std::string_view ascii) -> std::wstring
 {
     return { ascii.begin(), ascii.end() };
 }
@@ -109,7 +109,7 @@ auto openSession() -> InternetHandle
     return InternetHandle(WinHttpOpen(L"Memoria/" MEMORIA_VERSION_TEXT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
 }
 
-auto openRequest(void* session, std::string_view method, const std::string& url) -> std::expected<OpenRequest, std::string>
+auto openRequest(void* session, const std::string_view method, const std::string& url) -> std::expected<OpenRequest, std::string>
 {
     const auto     wurl = wide(url);
     URL_COMPONENTS parts{ .dwStructSize = sizeof(URL_COMPONENTS), .dwHostNameLength = DWORD(-1), .dwUrlPathLength = DWORD(-1), .dwExtraInfoLength = DWORD(-1) };
@@ -118,7 +118,7 @@ auto openRequest(void* session, std::string_view method, const std::string& url)
         return failed("bad URL");
     }
     const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-    const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) + std::wstring(parts.lpszExtraInfo, parts.dwExtraInfoLength);
+    const std::wstring path{ std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) + std::wstring(parts.lpszExtraInfo, parts.dwExtraInfoLength) };
 
     OpenRequest open{ .connection = InternetHandle(WinHttpConnect(session, host.c_str(), parts.nPort, 0)) };
     if (!open.connection)
@@ -143,7 +143,7 @@ WinHttp::WinHttp()
     }
 }
 
-auto WinHttp::request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
+auto WinHttp::request(const std::string& method, const std::string& url, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string>
 {
     if (!session_)
     {

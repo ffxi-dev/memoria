@@ -341,7 +341,7 @@ TEST_CASE("a refusal of an old token keeps the token another client just saved")
         {
         }
 
-        auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
+        auto request(const std::string& method, const std::string& url, const HttpHeaders& headers, const std::span<const uint8_t> body) -> std::expected<HttpResponse, std::string> override
         {
             if (to_.token == "t0ken")
             {
@@ -592,8 +592,8 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
 {
     const auto  dir = tempDir();
     FakeMogsafe server;
-    auto        up   = uploader(dir, server);
-    int         told = 0;
+    auto        up = uploader(dir, server);
+    int         told{ 0 };
     auto        opts = options(dir);
     opts.ended       = [&](const fs::path& capture)
     {

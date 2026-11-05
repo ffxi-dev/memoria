@@ -13,34 +13,34 @@
 #include <string_view>
 #include <vector>
 
-namespace memoria
+namespace memoria::live
 {
 
-struct LiveLink
+struct Link
 {
     std::string token;
     std::string url;
 };
 
 // Asks Mogsafe for a live link with the install's token.
-auto startLive(Http& http, const std::string& server, const std::string& installToken) -> std::expected<LiveLink, std::string>;
+auto start(Http& http, const std::string& server, const std::string& installToken) -> std::expected<Link, std::string>;
 
-auto liveHello(std::string_view character, std::string_view world, std::string_view clientVersion, std::string_view agent) -> std::string;
+auto hello(std::string_view character, std::string_view world, std::string_view clientVersion, std::string_view agent) -> std::string;
 
 // Mogsafe's {"viewers": n}; nothing for any other message.
-auto liveViewers(std::string_view message) -> std::optional<int>;
+auto viewers(std::string_view message) -> std::optional<int>;
 
 // One packet as live viewers get it, redacted as a capture written with chat stores it. Little-endian: version 1 (u8),
 // channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet.
-auto liveFrame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<uint8_t>;
+auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<uint8_t>;
 
 // Frames from the writer thread to the live thread. Takes nothing while closed; past maxBytes, drops and counts.
-class LiveFeed
+class Feed
 {
 public:
     static constexpr size_t MESSAGE_BYTES = 64 * 1024;
 
-    explicit LiveFeed(size_t maxBytes = 1024 * 1024);
+    explicit Feed(size_t maxBytes = 1024 * 1024);
 
     auto push(const xicap::WritePacket& packet, xicap::Chat chat) -> void;
 
@@ -60,4 +60,4 @@ private:
     uint64_t                          owner_{ 0 };
 };
 
-} // namespace memoria
+} // namespace memoria::live

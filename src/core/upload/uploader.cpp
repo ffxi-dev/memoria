@@ -1,4 +1,4 @@
-#include "core/uploader.h"
+#include "core/upload/uploader.h"
 
 #include <picosha2.h>
 #include <xicap/xicap.h>
@@ -10,7 +10,7 @@
 #include <ranges>
 #include <utility>
 
-namespace memoria
+namespace memoria::upload
 {
 namespace
 {
@@ -33,7 +33,7 @@ auto oneLine(std::string text) -> std::string
 }
 
 // Only the first size bytes: the file may still be growing.
-auto sha256(const std::filesystem::path& path, uint64_t size, const std::atomic<bool>& stopping) -> std::optional<std::string>
+auto sha256(const std::filesystem::path& path, const uint64_t size, const std::atomic<bool>& stopping) -> std::optional<std::string>
 {
     std::ifstream                in(path, std::ios::binary);
     std::vector<char>            chunk(Tus::CHUNK_SIZE);
@@ -88,7 +88,7 @@ auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, 
 }
 
 // Notes when the file's size last changed, which tells when it went quiet.
-auto watch(UploadFile& f, uint64_t size, std::chrono::steady_clock::time_point now) -> void
+auto watch(UploadFile& f, const uint64_t size, const std::chrono::steady_clock::time_point now) -> void
 {
     if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
     {
@@ -130,7 +130,7 @@ auto Uploader::run() -> void
     auto wait = options_.every;
     while (true)
     {
-        bool failed = true;
+        bool failed{ true };
         try
         {
             uploading_ = !options_.mayRun || options_.mayRun();
@@ -167,7 +167,7 @@ auto Uploader::run() -> void
     }
 }
 
-auto Uploader::finish(const std::string& name, std::chrono::milliseconds limit) -> void
+auto Uploader::finish(const std::string& name, const std::chrono::milliseconds limit) -> void
 {
     if (!thread_.joinable())
     {
@@ -261,7 +261,7 @@ auto Uploader::pass() -> std::optional<std::string>
     return first;
 }
 
-auto Uploader::step(const std::filesystem::path& path, UploadFile& f, std::chrono::milliseconds idle) -> std::optional<std::string>
+auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std::chrono::milliseconds idle) -> std::optional<std::string>
 {
     if (f.closed || f.ended)
     {
@@ -354,7 +354,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, std::chron
     return std::nullopt;
 }
 
-auto Uploader::send(const std::filesystem::path& path, UploadFile& f, uint64_t offset, uint64_t size) -> std::optional<std::string>
+auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint64_t offset, const uint64_t size) -> std::optional<std::string>
 {
     const auto sent = tus_.append(path, f.url, offset, size, [this](uint64_t)
                                   {
@@ -377,7 +377,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, uint64_t o
     return std::nullopt;
 }
 
-auto Uploader::close(const std::filesystem::path& path, UploadFile& f, uint64_t size) -> std::optional<std::string>
+auto Uploader::close(const std::filesystem::path& path, UploadFile& f, const uint64_t size) -> std::optional<std::string>
 {
     const auto hash = sha256(path, size, stopping_);
     if (!hash)
@@ -543,7 +543,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
             files = files_;
         }
     }
-    const bool fromDisk = files.empty();
+    const bool fromDisk{ files.empty() };
     if (fromDisk)
     {
         files = saved();
@@ -556,12 +556,12 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         {
             continue;
         }
-        const auto& f       = files[entry.path().filename().string()];
-        const auto  size    = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
-        const bool  refused = !f.closed && f.refused == size && !f.reason.empty();
+        const auto& f    = files[entry.path().filename().string()];
+        const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
+        const bool  refused{ !f.closed && f.refused == size && !f.reason.empty() };
         out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && (!f.cutOff || f.rescued)) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff && !f.rescued, .error = refused ? f.reason : f.error });
     }
     return out;
 }
 
-} // namespace memoria
+} // namespace memoria::upload

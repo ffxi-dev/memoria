@@ -1,4 +1,4 @@
-#include "core/upload_state.h"
+#include "core/upload/upload_state.h"
 
 #include "core/tus.h"
 
@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace memoria
+namespace memoria::upload
 {
 namespace
 {
@@ -79,4 +79,4 @@ auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -
     return replaceFile(path, text);
 }
 
-} // namespace memoria
+} // namespace memoria::upload

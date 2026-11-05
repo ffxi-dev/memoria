@@ -5,7 +5,7 @@
 namespace memoria
 {
 
-auto count(uint64_t n) -> std::string
+auto count(const uint64_t n) -> std::string
 {
     auto text = std::to_string(n);
     for (auto at = static_cast<std::ptrdiff_t>(text.size()) - 3; at > 0; at -= 3)
@@ -15,7 +15,7 @@ auto count(uint64_t n) -> std::string
     return text;
 }
 
-auto duration(uint64_t seconds) -> std::string
+auto duration(const uint64_t seconds) -> std::string
 {
     if (seconds < 60)
     {
@@ -28,7 +28,7 @@ auto duration(uint64_t seconds) -> std::string
     return std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
 }
 
-auto utf8FromShiftJis(std::string_view text) -> std::string
+auto utf8FromShiftJis(const std::string_view text) -> std::string
 {
     constexpr UINT SHIFT_JIS = 932;
     const auto     size      = static_cast<int>(text.size());

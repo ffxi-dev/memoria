@@ -1,4 +1,4 @@
-#include "core/link.h"
+#include "core/account/link.h"
 
 #include "core/file.h"
 
@@ -10,7 +10,7 @@
 #include <random>
 #include <thread>
 
-namespace memoria
+namespace memoria::account
 {
 namespace
 {
@@ -141,8 +141,8 @@ auto removeLink(const std::filesystem::path& path, const std::string& token) -> 
     {
         return false;
     }
-    const auto link    = loadLink(taken);
-    const bool refused = link && link->token == token;
+    const auto link = loadLink(taken);
+    const bool refused{ link && link->token == token };
     if (!refused)
     {
         // A hard link fails where a token was saved since the rename, so the newer one stays.
@@ -164,9 +164,9 @@ auto sharing(const std::filesystem::path& config, const std::string& token) -> b
     return !paused(config) && link && link->token == token;
 }
 
-auto captureLink(const std::string& server, const std::string& id, uint64_t fromMs, uint64_t toMs) -> std::string
+auto captureLink(const std::string& server, const std::string& id, const uint64_t fromMs, const uint64_t toMs) -> std::string
 {
     return std::format("{}/captures/{}?from={}&to={}", server, id, fromMs, toMs);
 }
 
-} // namespace memoria
+} // namespace memoria::account

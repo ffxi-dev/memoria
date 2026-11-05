@@ -32,12 +32,12 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     {
         std::ofstream(cut, std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(n));
     };
-    uint64_t most   = 0;
-    bool     opened = false;
+    uint64_t most{ 0 };
+    bool     opened{ false };
     for (size_t n = CAPTURE_HEADER_SIZE; n < bytes.size(); ++n)
     {
         write(n);
-        uint64_t packets = 0;
+        uint64_t packets{ 0 };
         try
         {
             xicap::Reader r(cut);
@@ -217,8 +217,8 @@ TEST_CASE("timestamps that step back or leap ahead lose no packet")
         rec.stop();
     }
     xicap::Reader r(captures(dir)[0]);
-    uint64_t      last = 0;
-    int           n    = 0;
+    uint64_t      last{ 0 };
+    int           n{ 0 };
     for (const auto& p : r)
     {
         CHECK(p.timestamp >= last);
@@ -299,7 +299,7 @@ TEST_CASE("sessions: a stop without a start, a start over a running one, and a c
 // Points every descriptor open on path at /dev/full: from here its writes fail as on a full disk.
 static auto fill(const fs::path& path) -> void
 {
-    const int full = ::open("/dev/full", O_WRONLY);
+    const int full{ ::open("/dev/full", O_WRONLY) };
     REQUIRE(full >= 0);
     for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
     {
@@ -380,8 +380,8 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
                             std::error_code ec;
                             return !path.empty() && fs::file_size(path, ec) > CAPTURE_HEADER_SIZE;
                         }));
-        cut            = readCapture(path).id;
-        const int full = ::open("/dev/full", O_WRONLY);
+        cut = readCapture(path).id;
+        const int full{ ::open("/dev/full", O_WRONLY) };
         REQUIRE(full >= 0);
         for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
         {

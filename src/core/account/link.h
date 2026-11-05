@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace memoria
+namespace memoria::account
 {
 
 struct LinkCode
@@ -47,4 +47,4 @@ auto paused(const std::filesystem::path& config) -> bool;
 // True while uploads are not paused and the install's token file still holds token.
 auto sharing(const std::filesystem::path& config, const std::string& token) -> bool;
 
-} // namespace memoria
+} // namespace memoria::account
