@@ -1,0 +1,42 @@
+name: release
+
+# A v<version> tag publishes a GitHub release with Memoria.dll; v<version>-<suffix>, such as v0.6.0-rc.1, a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: memoria
+          path: out
+      - name: Check the tag names the built version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          base="${version%%-*}"
+          suffix="${version#"$base"}"
+          grep -q "project(memoria VERSION ${base} " CMakeLists.txt && grep -q "set(MEMORIA_PRERELEASE \"${suffix#-}\")" CMakeLists.txt || { echo "tag $GITHUB_REF_NAME does not match CMakeLists.txt" >&2; exit 1; }
+      - name: Checksum
+        id: sum
+        run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            out/Memoria.dll
+            THIRD_PARTY_NOTICES.md
+          body: SHA-256 ${{ steps.sum.outputs.sha256 }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
