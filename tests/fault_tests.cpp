@@ -359,9 +359,7 @@ TEST_CASE("a full disk is said once, ends the session with a reason, and counts 
     }
     fs::remove_all(dir);
 }
-#endif
 
-#ifdef __linux__
 TEST_CASE("a capture whose close fails is still named by the next one, after a restart")
 {
     const auto       dir  = tempDir();
@@ -381,17 +379,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
                             return !path.empty() && fs::file_size(path, ec) > xicap::HEADER_SIZE;
                         }));
         cut = readCapture(path).id;
-        const int full{ ::open("/dev/full", O_WRONLY) };
-        REQUIRE(full >= 0);
-        for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
-        {
-            std::error_code ec;
-            if (fs::read_symlink(fd.path(), ec) == fs::canonical(path))
-            {
-                ::dup2(full, std::stoi(fd.path().filename().string()));
-            }
-        }
-        ::close(full);
+        fill(path);
         rec.stop(); // the trailer never lands
         CHECK(!rec.status().error.empty());
     }
@@ -405,6 +393,34 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
     REQUIRE(files.size() == 2);
     const auto first = readCapture(files[0]).id == cut ? readCapture(files[1]) : readCapture(files[0]);
     CHECK(first.previous == cut);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a close that fails at a character switch is shown until the next capture writes")
+{
+    const auto dir  = tempDir();
+    auto       opts = options(dir);
+    opts.flushEvery = std::chrono::hours(1); // only closes write
+    Recorder rec(opts);
+    rec.login(T0, who("Kalnor", 1));
+    rec.packet(gamePacket(T0 + 1));
+    rec.packet(gamePacket(T0 + 6'000)); // over the live preset's 5 s a frame: the first frame reaches disk
+    fs::path kalnor;
+    REQUIRE(waitFor([&]
+                    {
+                        kalnor = rec.status().capture;
+                        std::error_code ec;
+                        return !kalnor.empty() && fs::file_size(kalnor, ec) > xicap::HEADER_SIZE;
+                    }));
+    fill(kalnor);
+    rec.login(T0 + 7'000, who("Mule", 2)); // Kalnor's trailer fails
+    REQUIRE(waitFor([&]
+                    {
+                        return !rec.status().error.empty();
+                    }));
+    rec.packet(gamePacket(T0 + 7'001));
+    rec.stop(); // Mule's capture closes whole
+    CHECK(rec.status().error.empty());
     fs::remove_all(dir);
 }
 #endif

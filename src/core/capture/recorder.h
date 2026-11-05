@@ -97,6 +97,7 @@ private:
     auto finish() -> void;
     auto fail(const std::exception& error) -> void;
     auto broken(const std::exception& error) -> void;
+    auto wrote() -> void;
     auto rollover() -> void;
     auto saveState(bool open) -> void;
 

@@ -202,11 +202,7 @@ auto Recorder::run() -> void
             try
             {
                 writer_->flush();
-                if (std::exchange(failing_, false))
-                {
-                    const std::scoped_lock lock(statusMutex_);
-                    status_.error.clear();
-                }
+                wrote();
             }
             catch (const std::exception& error)
             {
@@ -506,6 +502,18 @@ auto Recorder::finish() -> void
     }
     saveState(!closed);
     writer_.reset();
+    if (closed)
+    {
+        wrote();
+    }
+}
+
+// A capture reached disk: the last error no longer applies, and the next failure is said again.
+auto Recorder::wrote() -> void
+{
+    failing_ = false;
+    const std::scoped_lock lock(statusMutex_);
+    status_.error.clear();
 }
 
 // Replaced whole, so a crash mid-write leaves the old state.
