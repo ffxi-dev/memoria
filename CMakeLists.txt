@@ -23,7 +23,7 @@ set(XICAP_FETCH_ZSTD ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     xicap
     GIT_REPOSITORY https://github.com/ffxi-dev/xicap.git
-    GIT_TAG        v7.1.1
+    GIT_TAG        v7.2.0
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(xicap)

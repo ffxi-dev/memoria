@@ -15,11 +15,11 @@ namespace memoria
 // Who logged in, as the plugin read it at the zone-in after character select.
 struct Login
 {
-    xicap::Character character;
-    uint16_t         worldId{}; // 0 when unknown; the capture keeps only the world's name
-    xicap::Network   network    = xicap::Network::Unknown;
-    bool             midSession = false; // the plugin loaded after the login
-    std::string      clientVersion;      // as the client told the lobby
+    xicap::Character  character;
+    uint16_t          worldId{}; // 0 when unknown; the capture keeps only the world's name
+    xicap::ServerKind serverKind = xicap::ServerKind::Unknown;
+    bool              midSession = false; // the plugin loaded after the login
+    std::string       clientVersion;      // as the client told the lobby
 };
 
 struct Event
@@ -37,7 +37,7 @@ struct Event
     Kind                 kind = Kind::Packet;
     uint64_t             timestamp{};
     bool                 clientToServer{};
-    uint8_t              channel{};
+    xicap::Channel       channel{ xicap::Channel::Game };
     uint16_t             opcode{}; // off the game channel; game packets carry their own
     uint16_t             provenance{};
     std::vector<uint8_t> data;

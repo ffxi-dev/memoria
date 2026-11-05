@@ -38,30 +38,40 @@ TEST_CASE("each capture takes the chat choice it opens with")
     const auto        dir  = tempDir();
     auto              opts = options(dir);
     std::atomic<bool> saveChat{ false };
-    opts.policy = [&]
+    opts.chat = [&]
     {
-        return policyFor(saveChat);
+        return saveChat ? xicap::Chat::Keep : xicap::Chat::Redact;
+    };
+    const auto said = [](const uint64_t t)
+    {
+        auto e           = gamePacket(t, 0x0B5); // chat, from the client
+        e.clientToServer = true;
+        return e;
     };
     {
         Recorder rec(opts);
         rec.login(T0, who("Kalnor", 1));
-        rec.packet(gamePacket(T0 + 1));
+        rec.packet(said(T0 + 1));
         REQUIRE(waitFor([&]
                         {
                             return !rec.status().capture.empty();
                         }));
-        saveChat = true; // the open capture keeps its policy
-        rec.packet(gamePacket(T0 + 2));
+        saveChat = true; // the open capture keeps its choice
+        rec.packet(said(T0 + 2));
         rec.login(T0 + 10'000, who("Mirabeth", 2));
-        rec.packet(gamePacket(T0 + 10'001));
+        rec.packet(said(T0 + 10'001));
         rec.stop();
     }
-    std::set<std::string> policies;
+    std::set<std::pair<std::string, bool>> redacted;
     for (const auto& path : captures(dir))
     {
-        policies.insert(xicap::Reader(path).metadata().policy.name);
+        xicap::Reader r(path);
+        for (const auto& p : r)
+        {
+            redacted.emplace(r.metadata().character.name, (p.flags & xicap::PacketFlag::Redacted) != 0);
+        }
     }
-    CHECK(policies == std::set<std::string>{ "xicap-default", "save-chat" });
+    CHECK(redacted == std::set<std::pair<std::string, bool>>{ { "Kalnor", true }, { "Mirabeth", false } });
     fs::remove_all(dir);
 }
 
@@ -71,9 +81,9 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
     {
         const auto dir  = tempDir();
         auto       opts = options(dir);
-        opts.policy     = [saveChat]
+        opts.chat       = [saveChat]
         {
-            return policyFor(saveChat);
+            return saveChat ? xicap::Chat::Keep : xicap::Chat::Redact;
         };
         {
             Recorder rec(opts);
@@ -88,11 +98,11 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
             xicap::Reader r(captures(dir)[0]);
             for (const auto& p : r)
             {
-                CHECK(std::ranges::count(p.data, std::byte{ 0 }) == zeroed);
+                CHECK(std::ranges::count(p.data, uint8_t{ 0 }) == zeroed);
             }
         }
         const auto e     = gamePacket(T0 + 1, 0x0B5);
-        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = std::as_bytes(std::span{ e.data }) }, policyFor(saveChat));
+        const auto frame = liveFrame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = e.data }, saveChat ? xicap::Chat::Keep : xicap::Chat::Redact);
         CHECK(std::ranges::count(frame | std::views::drop(16), 0) == zeroed);
         fs::remove_all(dir);
     }

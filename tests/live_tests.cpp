@@ -67,7 +67,7 @@ TEST_CASE("a live frame is version, channel, flags, time, length, then the packe
         0xAB,
         0xAB,
     };
-    CHECK(liveFrame(outPacket(e), xicap::defaultExclusionPolicy()) == want);
+    CHECK(liveFrame(outPacket(e), xicap::Chat::Redact) == want);
 }
 
 TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
@@ -83,7 +83,7 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
         said.clientToServer = true;
         rec.packet(std::move(said));
         rec.packet(gamePacket(T0 + 3, 0x015));
-        rec.packet({ .timestamp = T0 + 4, .clientToServer = true, .channel = 1, .opcode = 0x05, .data = std::vector<uint8_t>(40, 0xCD) });
+        rec.packet({ .timestamp = T0 + 4, .clientToServer = true, .channel = xicap::Channel::Search, .opcode = 0x05, .data = std::vector<uint8_t>(40, 0xCD) });
         rec.stop();
 
         const auto live = frames(rec.live().take(owner));
@@ -100,10 +100,10 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
         for (const auto& f : live)
         {
             REQUIRE(r.next(p));
-            CHECK(f.channel == p.channel);
+            CHECK(f.channel == std::to_underlying(p.channel));
             CHECK(f.flags == p.flags);
             CHECK(f.timestamp == p.timestamp);
-            CHECK(std::ranges::equal(std::as_bytes(std::span{ f.data }), p.data));
+            CHECK(std::ranges::equal(f.data, p.data));
         }
     }
     fs::remove_all(dir);
@@ -113,13 +113,13 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
 {
     LiveFeed   feed;
     const auto owner = feed.claim();
-    feed.push(outPacket(gamePacket(T0)), xicap::defaultExclusionPolicy());
+    feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(owner).empty());
 
     feed.open(owner, true);
     for (int i = 0; i < 3; ++i)
     {
-        feed.push(outPacket(gamePacket(T0 + i)), xicap::defaultExclusionPolicy());
+        feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
     }
     auto messages = feed.take(owner);
     REQUIRE(messages.size() == 1);
@@ -129,14 +129,14 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
     // 5,000 frames of 32 bytes do not fit one 64 KiB message.
     for (int i = 0; i < 5000; ++i)
     {
-        feed.push(outPacket(gamePacket(T0 + i)), xicap::defaultExclusionPolicy());
+        feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
     }
     messages = feed.take(owner);
     REQUIRE(messages.size() == 3);
     CHECK(messages[0].size() <= LiveFeed::MESSAGE_BYTES);
     CHECK(frames(messages).size() == 5000);
 
-    feed.push(outPacket(gamePacket(T0)), xicap::defaultExclusionPolicy());
+    feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     feed.open(owner, false);
     CHECK(feed.take(owner).empty());
 }
@@ -148,16 +148,16 @@ TEST_CASE("a full live feed drops packets and counts them")
     feed.open(owner, true);
     for (int i = 0; i < 5; ++i)
     {
-        feed.push(outPacket(gamePacket(T0 + i)), xicap::defaultExclusionPolicy());
+        feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
     }
     CHECK(feed.takeDropped(owner) == 2);
     CHECK(feed.takeDropped(owner) == 0);
     CHECK(frames(feed.take(owner)).size() == 3);
-    feed.push(outPacket(gamePacket(T0)), xicap::defaultExclusionPolicy());
+    feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.takeDropped(owner) == 0);
 
-    const std::vector<std::byte> stub(2); // a game packet the policy cannot apply to
-    feed.push({ .timestamp = T0, .direction = xicap::PacketDirection::ServerToClient, .data = stub }, xicap::defaultExclusionPolicy());
+    const std::vector<uint8_t> stub(2); // a game packet too short to frame
+    feed.push({ .timestamp = T0, .direction = xicap::PacketDirection::ServerToClient, .data = stub }, xicap::Chat::Redact);
     CHECK(feed.takeDropped(owner) == 1);
 }
 
@@ -169,7 +169,7 @@ TEST_CASE("a live link stopped late cannot close the feed of the one that replac
     const auto now = feed.claim(); // /memoria live off, then /memoria live, while the old send still hangs
     feed.open(now, true);
     feed.open(old, false); // the old link's send returns, and it closes what it thinks is its feed
-    feed.push(outPacket(gamePacket(T0)), xicap::defaultExclusionPolicy());
+    feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(old).empty());
     CHECK(frames(feed.take(now)).size() == 1);
 }

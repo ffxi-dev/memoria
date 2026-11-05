@@ -79,7 +79,7 @@ inline auto who(const char* name, uint32_t id) -> Login
     return {
         .character     = { .contentId = id, .characterId = id, .name = name, .world = "Asura" },
         .worldId       = 42,
-        .network       = xicap::Network::Retail,
+        .serverKind    = xicap::ServerKind::Retail,
         .clientVersion = "30261006_0",
     };
 }
@@ -379,9 +379,9 @@ inline auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_pt
     return std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
 }
 
-inline auto outPacket(const Event& e) -> xicap::OutPacket
+inline auto outPacket(const Event& e) -> xicap::WritePacket
 {
-    return { .timestamp = e.timestamp, .direction = e.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient, .data = std::as_bytes(std::span{ e.data }), .channel = e.channel, .opcode = e.opcode, .provenance = e.provenance };
+    return { .timestamp = e.timestamp, .direction = e.clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient, .provenance = e.provenance, .channel = e.channel, .opcode = e.opcode, .data = e.data };
 }
 
 inline auto noise(size_t n) -> std::string

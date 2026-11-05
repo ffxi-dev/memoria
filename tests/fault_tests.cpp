@@ -57,7 +57,7 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     CHECK(most == 12); // a cut inside the trailer still reads every packet
 
     // Killed mid-frame: the uploader sends every byte, and stops at a close Mogsafe refuses until the file changes.
-    write(bytes.size() / 2);
+    write(CAPTURE_HEADER_SIZE + (bytes.size() - CAPTURE_HEADER_SIZE) / 2);
     FakeMogsafe server;
     auto        up = uploader(cut.parent_path(), server);
     CHECK(!up->pass());
