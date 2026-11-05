@@ -36,7 +36,7 @@ struct UploadStatus
     uint64_t    sent{};
     uint64_t    size{};
     bool        refused{}; // Mogsafe refused it for good; error says why
-    bool        ended{};   // Mogsafe cut its upload off: bytes past sent stay only on this PC
+    bool        cutOff{};  // Mogsafe cut its upload off: bytes past sent stay only on this PC
     bool        foreign{}; // uploaded under another account: not sent while this install keeps its token
     std::string error;
 };
@@ -57,7 +57,7 @@ public:
     // At unload, once the recorder closed names: sends their last bytes and closes their uploads, waiting at most limit in
     // all. Sends nothing after.
     auto finish(std::vector<std::string> names, std::chrono::milliseconds limit) -> void;
-    auto pass() -> std::optional<std::string>; // the first error, if any
+    auto uploadAll() -> std::optional<std::string>; // one pass over the folder; the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
     [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did
@@ -68,11 +68,11 @@ public:
 private:
     auto run() -> void;
     auto step(const std::filesystem::path& path, UploadFile& f, std::chrono::milliseconds idle) -> std::optional<std::string>;
-    auto last(const std::string& name) -> void;
+    auto sendLast(const std::string& name) -> void;
     auto send(const std::filesystem::path& path, UploadFile& f, uint64_t offset, uint64_t size) -> std::optional<std::string>;
     auto close(const std::filesystem::path& path, UploadFile& f, uint64_t size) -> std::optional<std::string>;
-    auto end(UploadFile& f, const HttpResponse& res) -> void;
-    auto rest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>;
+    auto applyEnded(UploadFile& f, const HttpResponse& res) -> void;
+    auto writeRest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>;
     auto load() -> void;
     auto save() -> std::optional<std::string>;
     auto saved() const -> UploadFiles;

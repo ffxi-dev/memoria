@@ -141,7 +141,7 @@ auto Uploader::run() -> void
         try
         {
             uploading_ = !options_.mayRun || options_.mayRun();
-            failed     = uploading_ && pass().has_value();
+            failed     = uploading_ && uploadAll().has_value();
         }
         catch (const std::exception&) // out of memory, or the folder went away
         {
@@ -163,7 +163,7 @@ auto Uploader::run() -> void
                 {
                     try
                     {
-                        last(name);
+                        sendLast(name);
                     }
                     catch (const std::exception&) // NOLINT(bugprone-empty-catch)
                     {
@@ -196,7 +196,7 @@ auto Uploader::finish(std::vector<std::string> names, const std::chrono::millise
 }
 
 // Up to three steps: the last bytes, then the close the trailer allows. The game waits on it, so finish() bounds it.
-auto Uploader::last(const std::string& name) -> void
+auto Uploader::sendLast(const std::string& name) -> void
 {
     if (!uploading_ || !tus_.allowed())
     {
@@ -213,7 +213,7 @@ auto Uploader::last(const std::string& name) -> void
         f = files_[name];
     }
     last_ = true;
-    for (int i = 0; i < 3 && !f.closed && !f.ended && !stop_.stop_requested(); ++i)
+    for (int i = 0; i < 3 && f.stage == Stage::Open && !stop_.stop_requested(); ++i)
     {
         if (step(options_.dir / name, f, std::chrono::milliseconds(0)))
         {
@@ -227,7 +227,7 @@ auto Uploader::last(const std::string& name) -> void
     std::ignore = save();
 }
 
-auto Uploader::pass() -> std::optional<std::string>
+auto Uploader::uploadAll() -> std::optional<std::string>
 {
     uploading_ = true;
     if (!loaded_)
@@ -275,9 +275,9 @@ auto Uploader::pass() -> std::optional<std::string>
 
 auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std::chrono::milliseconds idle) -> std::optional<std::string>
 {
-    if (f.closed || f.ended)
+    if (f.stage != Stage::Open)
     {
-        return f.cutOff && !f.rescued ? rest(path, f) : std::nullopt;
+        return f.stage == Stage::CutOff ? writeRest(path, f) : std::nullopt;
     }
     if (!f.deniedFor.empty())
     {
@@ -295,7 +295,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     }
     const auto now = std::chrono::steady_clock::now();
     watch(f, size, now);
-    if (size < xicap::HEADER_SIZE || (!f.reason.empty() && f.refused == size))
+    if (size < xicap::HEADER_SIZE || (!f.reason.empty() && f.refusedAt == size))
     {
         return std::nullopt;
     }
@@ -310,8 +310,8 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         {
             return std::format("create: {}", res->status);
         }
-        f.url     = tus_.location(*res);
-        f.refused = 0;
+        f.url       = tus_.location(*res);
+        f.refusedAt = 0;
         f.reason.clear();
         f.sent = 0;
         {
@@ -336,7 +336,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     }
     if (res->status == 410)
     {
-        end(f, *res);
+        applyEnded(f, *res);
         return std::nullopt;
     }
     if (res->status == 403)
@@ -351,7 +351,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         {
             return error;
         }
-        if (!f.closed && !f.ended)
+        if (f.stage == Stage::Open)
         {
             f.url.clear(); // Mogsafe holds none of it, so the whole file goes again
         }
@@ -372,7 +372,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
     {
         return send(path, f, *offset, size);
     }
-    if (now - f.seen >= idle && f.refused != size)
+    if (now - f.seen >= idle && f.refusedAt != size)
     {
         return close(path, f, size);
     }
@@ -392,7 +392,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
     f.sent = sent->offset;
     if (sent->answer && sent->answer->status == 410)
     {
-        end(f, *sent->answer);
+        applyEnded(f, *sent->answer);
         return std::nullopt;
     }
     if (sent->answer)
@@ -418,20 +418,20 @@ auto Uploader::close(const std::filesystem::path& path, UploadFile& f, const uin
     switch (res->status)
     {
         case 200:
-            f.closed = true;
+            f.stage = Stage::Closed;
             f.error.clear();
             return std::nullopt;
         case 409: // no trailer yet, or bytes missing: wait for the file to change
-            f.refused = size;
+            f.refusedAt = size;
             return std::nullopt;
         case 404: // Mogsafe never kept it; the caller decides
             return std::nullopt;
         case 410:
-            end(f, *res);
+            applyEnded(f, *res);
             return std::nullopt;
         case 422: // refused for good: keep the file, stop sending it
-            f.refused = size;
-            f.reason  = oneLine(res->body);
+            f.refusedAt = size;
+            f.reason    = oneLine(res->body);
             return std::nullopt;
         default:
             return std::format("close: {}", res->status);
@@ -441,21 +441,27 @@ auto Uploader::close(const std::filesystem::path& path, UploadFile& f, const uin
 // Mogsafe answered 410. A complete capture whose close answer was lost is closed; any other ended upload is dropped,
 // and its file never sent again: a recording still running goes on in a new file and upload. Its URL stays: it names
 // the recording in Vault, which a session's link still points at.
-auto Uploader::end(UploadFile& f, const HttpResponse& res) -> void
+auto Uploader::applyEnded(UploadFile& f, const HttpResponse& res) -> void
 {
-    if (header(res, "mogsafe-ended") == "complete")
+    const auto ended = header(res, "mogsafe-ended");
+    if (ended == "complete")
     {
-        f.closed = true;
-        return;
+        f.stage = Stage::Closed;
     }
-    f.ended  = true;
-    f.cutOff = header(res, "mogsafe-ended") != "refused" && !header(res, "mogsafe-ended").empty();
+    else if (ended == "refused" || ended.empty())
+    {
+        f.stage = Stage::Ended;
+    }
+    else
+    {
+        f.stage = Stage::CutOff;
+    }
 }
 
 // Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
 // kept go to <name>-rest.xicap, which uploads as a capture of its own. sent may be below what Mogsafe holds, if an
 // append's answer was lost: then a few packets reach Vault twice.
-auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>
+auto Uploader::writeRest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>
 {
     if (f.restFailed)
     {
@@ -500,7 +506,7 @@ auto Uploader::rest(const std::filesystem::path& path, UploadFile& f) -> std::op
             return std::format("cannot write the cut-off tail: {}", error.what());
         }
     }
-    f.rescued = true;
+    f.stage = Stage::Rescued;
     return std::nullopt;
 }
 
@@ -557,7 +563,8 @@ auto Uploader::file(const std::string& name) const -> UploadFile
 
 auto Uploader::ended(const std::string& name) const -> bool
 {
-    return file(name).ended;
+    const auto stage = file(name).stage;
+    return stage != Stage::Open && stage != Stage::Closed;
 }
 
 auto Uploader::recordingId(const std::string& name) const -> std::string
@@ -592,8 +599,9 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         }
         const auto& f    = files[entry.path().filename().string()];
         const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
-        const bool  refused{ !f.closed && f.refused == size && !f.reason.empty() };
-        out.push_back({ .name = entry.path().filename().string(), .sent = f.closed || (f.ended && (!f.cutOff || f.rescued)) ? size : f.sent, .size = size, .refused = refused, .ended = f.cutOff && !f.rescued, .foreign = !f.deniedFor.empty(), .error = refused ? f.reason : f.error });
+        const bool  refused{ f.stage != Stage::Closed && f.refusedAt == size && !f.reason.empty() };
+        const bool  sending{ f.stage == Stage::Open || f.stage == Stage::CutOff };
+        out.push_back({ .name = entry.path().filename().string(), .sent = sending ? f.sent : size, .size = size, .refused = refused, .cutOff = f.stage == Stage::CutOff, .foreign = !f.deniedFor.empty(), .error = refused ? f.reason : f.error });
     }
     return out;
 }

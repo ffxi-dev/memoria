@@ -131,7 +131,7 @@ auto Session::status() -> void
             ++foreign;
             continue;
         }
-        if (u.ended)
+        if (u.cutOff)
         {
             kept += u.size > u.sent ? u.size - u.sent : 0;
             cut += u.size > u.sent ? 1 : 0;

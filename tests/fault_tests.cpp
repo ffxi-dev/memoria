@@ -60,10 +60,10 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     write(xicap::HEADER_SIZE + (bytes.size() - xicap::HEADER_SIZE) / 2);
     FakeMogsafe server;
     auto        up = uploader(cut.parent_path(), server);
-    CHECK(!up->pass());
-    CHECK(!up->pass()); // close refused: no trailer
+    CHECK(!up->uploadAll());
+    CHECK(!up->uploadAll()); // close refused: no trailer
     const auto requests = server.requests;
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests + 1); // a HEAD, no close
     CHECK(server.uploads.begin()->second.data == readAll(cut));
     CHECK(up->status()[0].sent == up->status()[0].size);
@@ -78,9 +78,9 @@ TEST_CASE("an append cut off mid-body resumes from the bytes the server kept")
     server.cutAtPatch = 1;
     append(file, noise(3 * Tus::CHUNK_SIZE + 77));
     auto up = uploader(dir, server);
-    CHECK(up->pass().has_value());
+    CHECK(up->uploadAll().has_value());
     CHECK(server.uploads.begin()->second.data.size() == Tus::CHUNK_SIZE * 3 / 2);
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.creates == 1);
     CHECK(server.uploads.begin()->second.data == readAll(file));
     fs::remove_all(dir);
@@ -106,11 +106,11 @@ TEST_CASE("any failed answer at any step is retried, and the upload ends whole")
             {
                 server.forced[method] = { status, status };
             }
-            CHECK(up->pass().has_value());
+            CHECK(up->uploadAll().has_value());
             server.down = false;
             for (int i = 0; i < 3; ++i)
             {
-                std::ignore = up->pass();
+                std::ignore = up->uploadAll();
             }
             append(file, TRAILER);
             if (status != 0)
@@ -119,13 +119,13 @@ TEST_CASE("any failed answer at any step is retried, and the upload ends whole")
             }
             for (int i = 0; i < 4; ++i)
             {
-                std::ignore = up->pass();
+                std::ignore = up->uploadAll();
             }
             CHECK(server.creates == 1);
             REQUIRE(server.uploads.size() == 1);
             CHECK(server.uploads.begin()->second.data == readAll(file));
             CHECK(server.uploads.begin()->second.closed);
-            CHECK(!up->pass());
+            CHECK(!up->uploadAll());
             fs::remove_all(dir);
         }
     }
@@ -146,7 +146,7 @@ TEST_CASE("an upload thread never spins: a dead server or an ended upload costs 
         const auto  dir = tempDir();
         FakeMogsafe server;
         append(dir / "a.xicap", std::string(500, 'x'));
-        CHECK(!uploader(dir, server)->pass());
+        CHECK(!uploader(dir, server)->uploadAll());
         append(dir / "a.xicap", std::string(100, 'x'));
         auto& u = server.uploads.begin()->second;
         switch (fault)
@@ -168,7 +168,7 @@ TEST_CASE("an upload thread never spins: a dead server or an ended upload costs 
         auto          up = std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
         if (fault == Fault::Duplicate)
         {
-            CHECK(up->pass().has_value()); // the 409
+            CHECK(up->uploadAll().has_value()); // the 409
             u.cutOff = true;
         }
         const auto before = server.requests;
@@ -193,11 +193,11 @@ TEST_CASE("a server holding more than the file on disk gets nothing, and no requ
     FakeMogsafe server;
     auto        up = uploader(dir, server);
     append(file, std::string(600, 'x'));
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     fs::resize_file(file, 500); // a power cut lost the file's tail, already sent
-    CHECK(!up->pass());         // its close is refused
+    CHECK(!up->uploadAll());    // its close is refused
     const auto requests = server.requests;
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests + 1); // a HEAD
     CHECK(server.uploads.begin()->second.data.size() == 600);
     fs::remove_all(dir);
@@ -474,13 +474,13 @@ TEST_CASE("a flush that fails is a failed save, and nothing that depends on it i
         FakeMogsafe server;
         auto        up = uploader(dir, server);
         append(dir / "a.xicap", std::string(500, 'x'));
-        CHECK(up->pass().has_value());
+        CHECK(up->uploadAll().has_value());
         CHECK(!up->saveError().empty());
-        CHECK(up->pass().has_value());
+        CHECK(up->uploadAll().has_value());
         CHECK(server.creates == 1);
         CHECK(server.received == 0); // no PATCH until the save holds
         failSave = {};
-        CHECK(!up->pass());
+        CHECK(!up->uploadAll());
         CHECK(up->saveError().empty());
         CHECK(server.received == 500);
         fs::remove_all(dir);

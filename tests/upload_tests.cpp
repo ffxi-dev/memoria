@@ -11,15 +11,15 @@ TEST_CASE("an upload follows a growing file and closes once it is complete")
     auto        up = uploader(dir, server);
 
     append(file, std::string(100, 'x'));
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.creates == 0); // no header yet
 
     append(file, std::string(400, 'x'));
-    CHECK(!up->pass());
-    CHECK(!up->pass()); // all sent; the close is refused: no trailer yet
+    CHECK(!up->uploadAll());
+    CHECK(!up->uploadAll()); // all sent; the close is refused: no trailer yet
     append(file, std::string(50, 'x') + TRAILER);
-    CHECK(!up->pass()); // sends the rest
-    CHECK(!up->pass()); // closes
+    CHECK(!up->uploadAll()); // sends the rest
+    CHECK(!up->uploadAll()); // closes
     REQUIRE(server.creates == 1);
     const auto& u = server.uploads.begin()->second;
     CHECK(u.closed);
@@ -40,7 +40,7 @@ TEST_CASE("a client that is not uploading reports what the uploading one sent")
     CHECK(other->status().empty());
 
     append(file, std::string(500, 'x'));
-    CHECK(!sender->pass());
+    CHECK(!sender->uploadAll());
     append(file, std::string(100, 'x'));
     const auto status = other->status();
     REQUIRE(status.size() == 1);
@@ -57,7 +57,7 @@ TEST_CASE("a recording's Mogsafe id is the end of its upload's URL, in every cli
     auto        other  = uploader(dir, server);
     CHECK(sender->recordingId("a.xicap").empty()); // no upload yet
     append(dir / "a.xicap", std::string(500, 'x'));
-    CHECK(!sender->pass());
+    CHECK(!sender->uploadAll());
     CHECK(sender->recordingId("a.xicap") == "1");
     CHECK(other->recordingId("a.xicap") == "1"); // read from uploads.txt
     CHECK(sender->recordingId("b.xicap").empty());
@@ -70,9 +70,9 @@ TEST_CASE("a restart resumes the same upload")
     const auto  file = dir / "a.xicap";
     FakeMogsafe server;
     append(file, std::string(500, 'x'));
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     append(file, std::string(300, 'x'));
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     CHECK(server.creates == 1);
     CHECK(server.uploads.begin()->second.data == readAll(file));
 }
@@ -86,9 +86,9 @@ TEST_CASE("a crash during the first pass resumes the upload it created")
         FakeMogsafe server;
         server.crashAtPatch = crashAt;
         append(file, std::string(size_t{ 3 } * 512 * 1024, 'x'));
-        CHECK_THROWS(uploader(dir, server)->pass()); // no save at the end of the pass, as in a crash
+        CHECK_THROWS(uploader(dir, server)->uploadAll()); // no save at the end of the pass, as in a crash
         server.crashAtPatch = -1;
-        CHECK(!uploader(dir, server)->pass());
+        CHECK(!uploader(dir, server)->uploadAll());
         CHECK(server.creates == 1);
         CHECK(server.uploads.begin()->second.data == readAll(file));
         fs::remove_all(dir);
@@ -103,15 +103,15 @@ TEST_CASE("no byte goes until the upload's URL is saved, so a restart after a fa
     auto        up = uploader(dir, server);
     append(file, std::string(500, 'x'));
     fs::create_directory(dir / "uploads.txt.tmp");
-    CHECK(up->pass().has_value());
+    CHECK(up->uploadAll().has_value());
     CHECK(!up->saveError().empty());
-    CHECK(up->pass().has_value()); // the URL in memory does not skip the save
+    CHECK(up->uploadAll().has_value()); // the URL in memory does not skip the save
     CHECK(server.creates == 1);
     CHECK(server.received == 0);
     SECTION("the save works again")
     {
         fs::remove(dir / "uploads.txt.tmp");
-        CHECK(!up->pass());
+        CHECK(!up->uploadAll());
         CHECK(up->saveError().empty());
         CHECK(server.creates == 1);
     }
@@ -119,7 +119,7 @@ TEST_CASE("no byte goes until the upload's URL is saved, so a restart after a fa
     {
         up.reset();
         fs::remove(dir / "uploads.txt.tmp");
-        CHECK(!uploader(dir, server)->pass());
+        CHECK(!uploader(dir, server)->uploadAll());
         CHECK(server.creates == 2); // the first upload holds nothing
     }
     CHECK(server.received == 500);
@@ -134,17 +134,17 @@ TEST_CASE("outages only delay, and an upload the server never kept starts over")
     FakeMogsafe server;
     auto        up = uploader(dir, server);
     append(file, std::string(500, 'x'));
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
 
     server.down = true;
     append(file, std::string(100, 'x'));
-    CHECK(up->pass().has_value());
+    CHECK(up->uploadAll().has_value());
     CHECK(up->status()[0].error.find("refused") != std::string::npos);
 
     server.down = false;
     server.uploads.clear();
-    CHECK(!up->pass()); // 404, and a close answers 404: Mogsafe holds none of it
-    CHECK(!up->pass()); // a new upload of the whole file
+    CHECK(!up->uploadAll()); // 404, and a close answers 404: Mogsafe holds none of it
+    CHECK(!up->uploadAll()); // a new upload of the whole file
     CHECK(server.creates == 2);
     CHECK(server.uploads.rbegin()->second.data == readAll(file));
     CHECK(up->status()[0].error.empty());
@@ -157,7 +157,7 @@ TEST_CASE("a file Mogsafe keeps refusing never holds the recording's upload past
     const auto  dir = tempDir();
     FakeMogsafe server;
     append(dir / "old.xicap", std::string(500, 'x'));
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     append(dir / "old.xicap", std::string(100, 'x'));
     server.foreign.insert(server.uploads.begin()->first);
 
@@ -199,8 +199,8 @@ TEST_CASE("an upload's URL keeps Mogsafe's HTTPS origin, whatever Location says"
         server.origin = origin;
         append(dir / "a.xicap", std::string(500, 'x') + TRAILER);
         auto up = uploader(dir, server);
-        CHECK(!up->pass());
-        CHECK(!up->pass());
+        CHECK(!up->uploadAll());
+        CHECK(!up->uploadAll());
         CHECK(server.strayed.empty());
         CHECK(server.uploads.begin()->second.closed);
         fs::remove_all(dir);
@@ -210,12 +210,12 @@ TEST_CASE("an upload's URL keeps Mogsafe's HTTPS origin, whatever Location says"
         const auto  dir = tempDir();
         FakeMogsafe server;
         append(dir / "a.xicap", std::string(500, 'x'));
-        CHECK(!uploader(dir, server)->pass());
+        CHECK(!uploader(dir, server)->uploadAll());
         std::ofstream(dir / "uploads.txt", std::ios::trunc) << "a.xicap\thttp://mogsafe.test/v1/uploads/1\t0\t0\t500\n";
         append(dir / "a.xicap", TRAILER);
         auto up = uploader(dir, server);
-        CHECK(!up->pass());
-        CHECK(!up->pass());
+        CHECK(!up->uploadAll());
+        CHECK(!up->uploadAll());
         CHECK(server.strayed.empty());
         CHECK(server.creates == 1);
         CHECK(server.uploads.begin()->second.closed);
@@ -281,17 +281,17 @@ TEST_CASE("a refused token is forgotten, and sending stops until a new link")
     server.token = "revoked";
     auto up      = uploader(dir, server);
     append(dir / "a.xicap", std::string(500, 'x'));
-    CHECK(up->pass().has_value());
+    CHECK(up->uploadAll().has_value());
     CHECK(up->unauthorized());
     CHECK(!up->unauthorized()); // said once
     CHECK(!fs::exists(dir / "config" / "token"));
 
     const auto requests = server.requests;
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests);
 
     saveLink(dir / "config", { .token = "revoked", .account = "player" });
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
     fs::remove_all(dir);
 }
@@ -308,23 +308,23 @@ TEST_CASE("pause, unlink, and a new link govern every client sharing the install
 
     append(file, std::string(500, 'x'));
     touch(paused); // /memoria upload off in a client that is not uploading
-    CHECK(!first->pass());
+    CHECK(!first->uploadAll());
     first.reset(); // the uploading client exits, and the other takes the upload mutex
-    CHECK(!second->pass());
+    CHECK(!second->uploadAll());
     CHECK(server.requests == 0);
 
     fs::remove(paused);
-    CHECK(!second->pass());
+    CHECK(!second->uploadAll());
     CHECK(server.uploads.begin()->second.data.size() == 500);
 
     fs::remove(token); // /memoria unlink in another client
     append(file, std::string(100, 'x'));
-    CHECK(!second->pass());
+    CHECK(!second->uploadAll());
     CHECK(server.uploads.begin()->second.data.size() == 500);
 
     server.token = "t1"; // /memoria link in another client
     saveLink(dir / "config", { .token = "t1", .account = "player" });
-    CHECK(!second->pass());
+    CHECK(!second->uploadAll());
     CHECK(server.uploads.begin()->second.data == readAll(file));
     fs::remove_all(dir);
 }
@@ -360,11 +360,11 @@ TEST_CASE("a refusal of an old token keeps the token another client just saved")
     saveLink(dir / "config", { .token = "t0ken", .account = "player" });
     Uploader up(UploadOptions{ .dir = dir, .server = "https://mogsafe.test", .config = dir / "config", .idle = std::chrono::milliseconds(0) }, std::make_unique<Relink>(server, dir / "config"));
     append(dir / "a.xicap", std::string(500, 'x'));
-    CHECK(up.pass().has_value()); // 401 for the old token
+    CHECK(up.uploadAll().has_value()); // 401 for the old token
     CHECK(!up.unauthorized());
     REQUIRE(loadLink(dir / "config"));
     CHECK(loadLink(dir / "config")->token == "t1");
-    CHECK(!up.pass());
+    CHECK(!up.uploadAll());
     CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
     fs::remove_all(dir);
 }
@@ -376,13 +376,13 @@ TEST_CASE("a capture Mogsafe refused stays refused, with its reason, after a res
     FakeMogsafe server;
     append(file, std::string(500, 'x') + TRAILER);
     auto up = uploader(dir, server);
-    CHECK(!up->pass());              // sends
+    CHECK(!up->uploadAll());         // sends
     server.forced["POST"] = { 422 }; // the close: refused for good
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     REQUIRE(up->status()[0].refused);
     up.reset();
     auto again = uploader(dir, server);
-    CHECK(!again->pass());
+    CHECK(!again->uploadAll());
     auto status = again->status();
     REQUIRE(status.size() == 1);
     CHECK(status[0].refused);
@@ -473,12 +473,12 @@ TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from V
     append(dir / "a.xicap", std::string(500, 'x'));
     auto up               = uploader(dir, server);
     server.forced["HEAD"] = { 410 }; // Mogsafe-Ended: refused, a recording it already holds
-    CHECK(!up->pass());
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
+    CHECK(!up->uploadAll());
     CHECK(up->ended("a.xicap"));
     const auto status = up->status();
     REQUIRE(status.size() == 1);
-    CHECK(!status[0].ended);
+    CHECK(!status[0].cutOff);
     CHECK(status[0].sent == status[0].size);
     fs::remove_all(dir);
 }
@@ -515,19 +515,19 @@ TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, onc
     const auto  bytes = readAll(source);
     FakeMogsafe server;
     append(file, std::string(bytes.begin(), bytes.begin() + held));
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     append(file, std::string(bytes.begin() + held, bytes.end())); // a long outage, or a killed client, then the file was closed
     server.uploads.begin()->second.cutOff = true;
 
     auto up = uploader(dir, server);
-    CHECK(!up->pass()); // 410: ended
-    CHECK(!up->pass()); // writes a-rest.xicap
-    CHECK(!up->pass()); // sends it
-    CHECK(!up->pass()); // closes it
+    CHECK(!up->uploadAll()); // 410: ended
+    CHECK(!up->uploadAll()); // writes a-rest.xicap
+    CHECK(!up->uploadAll()); // sends it
+    CHECK(!up->uploadAll()); // closes it
     const auto rest = dir / "a-rest.xicap";
     REQUIRE(fs::exists(rest));
     const auto written = fs::last_write_time(rest);
-    CHECK(!uploader(dir, server)->pass()); // a restart writes nothing again
+    CHECK(!uploader(dir, server)->uploadAll()); // a restart writes nothing again
     CHECK(fs::last_write_time(rest) == written);
     const auto tail = readCapture(rest);
     CHECK(tail.complete);
@@ -541,7 +541,7 @@ TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, onc
     CHECK(server.uploads.rbegin()->second.closed);
     for (const auto& s : uploader(dir, server)->status())
     {
-        CHECK(!s.ended); // nothing left only on this PC
+        CHECK(!s.cutOff); // nothing left only on this PC
         CHECK(s.sent == s.size);
     }
     fs::remove_all(dir);
@@ -553,20 +553,20 @@ TEST_CASE("a tail that cannot be written stays on this PC and counts as not in V
     FakeMogsafe server;
     append(dir / "a.xicap", std::string(500, 'x'));
     append(dir / "b.xicap", std::string(500, 'x'));
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     append(dir / "a.xicap", std::string(100, 'y'));
     append(dir / "b.xicap", std::string(100, 'y'));
     server.uploads.begin()->second.cutOff = true;
     server.foreignEnd                     = server.uploads.rbegin()->first; // b: Mogsafe-Ended: refused
     auto up                               = uploader(dir, server);
-    CHECK(!up->pass());
-    CHECK(up->pass().has_value()); // not a capture: xicap cannot read it
-    CHECK(!up->pass());            // tried once a run, not every pass
+    CHECK(!up->uploadAll());
+    CHECK(up->uploadAll().has_value()); // not a capture: xicap cannot read it
+    CHECK(!up->uploadAll());            // tried once a run, not every pass
     const auto status = up->status();
     REQUIRE(status.size() == 2);
-    CHECK(status[0].ended);
+    CHECK(status[0].cutOff);
     CHECK(status[0].sent == 500);
-    CHECK(!status[1].ended);
+    CHECK(!status[1].cutOff);
     CHECK(!fs::exists(dir / "a-rest.xicap"));
     CHECK(!fs::exists(dir / "a-rest.tmp"));
     fs::remove_all(dir);
@@ -578,10 +578,10 @@ TEST_CASE("a lost close answer for a capture the server holds complete counts as
     const auto  file = dir / "a.xicap";
     FakeMogsafe server;
     append(file, std::string(500, 'x') + TRAILER);
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     server.uploads.begin()->second.closed = true; // closed, its answer lost
     auto up                               = uploader(dir, server);
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(!up->ended("a.xicap"));
     CHECK(up->status()[0].sent == 524);
     CHECK(server.creates == 1);
@@ -626,7 +626,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
                             return false;
                         }
                     }));
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     REQUIRE(server.creates == 1);
     auto& cut = server.uploads.begin()->second;
     REQUIRE(!cut.data.empty());
@@ -638,7 +638,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
                     {
                         return rec.status().packets == 2;
                     }));
-    CHECK(!up->pass()); // 410
+    CHECK(!up->uploadAll()); // 410
     REQUIRE(waitFor([&]
                     {
                         return rec.status().capture.empty();
@@ -652,7 +652,7 @@ TEST_CASE("a recording whose upload the server ended goes on in a new capture th
     rec.stop();
     for (int i = 0; i < 3; ++i)
     {
-        CHECK(!up->pass()); // the new capture and the first one's tail: written, sent, closed
+        CHECK(!up->uploadAll()); // the new capture and the first one's tail: written, sent, closed
     }
 
     CHECK(told == 1);
@@ -679,19 +679,19 @@ TEST_CASE("an upload another account made is skipped while this token stays, and
     FakeMogsafe server;
     append(dir / "old.xicap", std::string(500, 'x'));
     auto up = uploader(dir, server);
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     append(dir / "old.xicap", std::string(100, 'x'));
     server.foreign.insert(server.uploads.begin()->first);
-    CHECK(!up->pass()); // a 403: not a failure, so no backoff for the other files
+    CHECK(!up->uploadAll()); // a 403: not a failure, so no backoff for the other files
     REQUIRE(up->status().size() == 1);
     CHECK(up->status()[0].foreign);
     const auto requests = server.requests;
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests); // the same token asks nothing
     server.foreign.clear();
     server.token = "n3w";
     saveLink(dir / "config", { .token = "n3w", .account = "owner" });
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests > requests);
     CHECK(!up->status()[0].foreign);
     CHECK(server.uploads.begin()->second.data.size() == 600);
@@ -704,13 +704,13 @@ TEST_CASE("a capture Mogsafe refused for good costs no request")
     FakeMogsafe server;
     append(dir / "a.xicap", std::string(500, 'x') + TRAILER);
     auto up = uploader(dir, server);
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     server.forced["POST"] = { 422 };
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     REQUIRE(up->status()[0].refused);
     const auto requests = server.requests;
-    CHECK(!up->pass());
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests);
     fs::remove_all(dir);
 }
@@ -732,7 +732,7 @@ TEST_CASE("an unload during a long cut-off recovery returns at once, and the nex
     const auto  bytes = readAll(source);
     FakeMogsafe server;
     append(file, std::string(bytes.begin(), bytes.begin() + 200));
-    CHECK(!uploader(dir, server)->pass());
+    CHECK(!uploader(dir, server)->uploadAll());
     append(file, std::string(bytes.begin() + 200, bytes.end()));
     server.uploads.begin()->second.cutOff = true;
 
@@ -748,10 +748,10 @@ TEST_CASE("an unload during a long cut-off recovery returns at once, and the nex
     CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(500));
     CHECK(!fs::exists(dir / "a-rest.tmp"));
     CHECK(!fs::exists(dir / "a-rest.xicap"));
-    CHECK(!readUploads(dir / "uploads.txt")["a.xicap"].rescued);
+    CHECK(readUploads(dir / "uploads.txt")["a.xicap"].stage != Stage::Rescued);
 
     auto again = uploader(dir, server);
-    CHECK(!again->pass()); // writes the tail
+    CHECK(!again->uploadAll()); // writes the tail
     CHECK(fs::exists(dir / "a-rest.xicap"));
     fs::remove_all(dir);
 }
@@ -763,8 +763,8 @@ TEST_CASE("a recording keeps its Vault id once its upload closes or the server e
     auto        up = uploader(dir, server);
     append(dir / "a.xicap", std::string(500, 'x') + TRAILER); // a character change closed it
     append(dir / "b.xicap", std::string(500, 'y'));           // the server will end it, and the recorder rotate
-    REQUIRE(!up->pass());
-    REQUIRE(!up->pass());
+    REQUIRE(!up->uploadAll());
+    REQUIRE(!up->uploadAll());
     const auto a = up->recordingId("a.xicap");
     const auto b = up->recordingId("b.xicap");
     REQUIRE(!a.empty());
@@ -774,7 +774,7 @@ TEST_CASE("a recording keeps its Vault id once its upload closes or the server e
         u.cutOff = !u.closed;
     }
     append(dir / "b.xicap", std::string(100, 'y'));
-    CHECK(!up->pass()); // 410: ended
+    CHECK(!up->uploadAll()); // 410: ended
     CHECK(up->ended("b.xicap"));
     CHECK(up->recordingId("a.xicap") == a);
     CHECK(up->recordingId("b.xicap") == b);
@@ -782,5 +782,27 @@ TEST_CASE("a recording keeps its Vault id once its upload closes or the server e
     const auto other = uploader(dir, server); // a restart, or another client, reads the state file
     CHECK(other->recordingId("a.xicap") == a);
     CHECK(other->recordingId("b.xicap") == b);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("each upload stage survives the state file")
+{
+    const auto  dir = tempDir();
+    UploadFiles files;
+    for (const auto stage : { Stage::Open, Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued })
+    {
+        files[std::format("{}.xicap", std::to_underlying(stage))] = { .url = "https://mogsafe.test/v1/uploads/1", .stage = stage, .refusedAt = 7, .sent = 5, .reason = "too old" };
+    }
+    REQUIRE(!writeUploads(dir / "uploads.txt", files));
+    const auto read = readUploads(dir / "uploads.txt");
+    REQUIRE(read.size() == files.size());
+    for (const auto& [name, f] : files)
+    {
+        INFO(name);
+        CHECK(read.at(name).stage == f.stage);
+        CHECK(read.at(name).refusedAt == 7);
+        CHECK(read.at(name).sent == 5);
+        CHECK(read.at(name).reason == "too old");
+    }
     fs::remove_all(dir);
 }
