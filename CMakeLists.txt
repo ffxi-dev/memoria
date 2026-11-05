@@ -1,0 +1,155 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(memoria VERSION 0.6.0 LANGUAGES C CXX)
+# A pre-release names its suffix here (tag v0.6.0-rc.4); a release leaves it empty.
+set(MEMORIA_PRERELEASE "rc.4")
+if(MEMORIA_PRERELEASE)
+    set(MEMORIA_VERSION_TEXT "${PROJECT_VERSION}-${MEMORIA_PRERELEASE}")
+else()
+    set(MEMORIA_VERSION_TEXT "${PROJECT_VERSION}")
+endif()
+
+# The core builds and is tested anywhere; the plugin needs 32-bit MSVC and the Ashita SDK.
+option(MEMORIA_BUILD_PLUGIN "Build the Ashita plugin (needs ASHITA4_SDK_PATH)" ${WIN32})
+option(MEMORIA_BUILD_TESTS "Build the core's tests" OFF)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+set(XICAP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# One static zstd, which captain imports use too.
+set(XICAP_FETCH_ZSTD ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    xicap
+    URL      https://github.com/ffxi-dev/xicap/archive/refs/tags/v7.2.0.tar.gz
+    URL_HASH SHA256=1afd1fcae4590dba047f28c121f65abccd392a7bce36e3be868797651b8c7a8d
+)
+FetchContent_MakeAvailable(xicap)
+
+# Header only: SOURCE_SUBDIR keeps its test CMakeLists out of the build.
+FetchContent_Declare(
+    picosha2
+    URL           https://github.com/okdshin/PicoSHA2/archive/refs/tags/v1.0.1.tar.gz
+    URL_HASH      SHA256=9983136544234e573fe07cc1a22fdf978ad7979043e7be2e9082f6d4991ff8a8
+    SOURCE_SUBDIR none
+)
+FetchContent_MakeAvailable(picosha2)
+
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+    URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+)
+FetchContent_MakeAvailable(json)
+
+add_library(memoria_core STATIC
+    src/core/account/chat.cpp
+    src/core/account/link.cpp
+    src/core/captain/captain.cpp
+    src/core/captain/compress.cpp
+    src/core/captain/importer.cpp
+    src/core/captain/capture_upload.cpp
+    src/core/capture/clock.cpp
+    src/core/capture/event_queue.cpp
+    src/core/capture/packets.cpp
+    src/core/capture/recorder.cpp
+    src/core/file.cpp
+    src/core/install.cpp
+    src/core/live/live.cpp
+    src/core/tus.cpp
+    src/core/units.cpp
+    src/core/upload/ended.cpp
+    src/core/upload/upload_state.cpp
+    src/core/upload/uploader.cpp
+    src/core/worker.cpp
+)
+target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
+target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json libzstd_static)
+if(WIN32)
+    target_link_libraries(memoria_core PRIVATE advapi32) # the token file's permissions
+endif()
+
+if(MEMORIA_BUILD_PLUGIN)
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    find_package(AshitaSDK REQUIRED)
+    ashita_sdk_initialize()
+
+    add_library(memoria MODULE
+        src/plugin/exports.def
+        src/plugin/ashita.cpp
+        src/plugin/ashita.h
+        src/plugin/client.cpp
+        src/plugin/client.h
+        src/plugin/commands.cpp
+        src/plugin/live.cpp
+        src/plugin/live.h
+        src/plugin/session.cpp
+        src/plugin/session.h
+        src/plugin/text.cpp
+        src/plugin/text.h
+        src/plugin/winhttp.cpp
+        src/plugin/winhttp.h
+    )
+    set_target_properties(memoria PROPERTIES OUTPUT_NAME "Memoria" CXX_EXTENSIONS ON)
+    if(MEMORIA_OUTPUT_DIR)
+        set_target_properties(memoria PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY ${MEMORIA_OUTPUT_DIR}
+            RUNTIME_OUTPUT_DIRECTORY ${MEMORIA_OUTPUT_DIR}
+        )
+    endif()
+    ashita_sdk_attach(memoria)
+    ashita_sdk_set_compiler_defaults(memoria)
+    ashita_sdk_set_compiler_warn_level(memoria 4)
+    ashita_sdk_set_compiler_warnings_as_errors(memoria)
+    ashita_sdk_set_linker_defaults(memoria)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        ashita_sdk_set_linker_enable_debug_linking(memoria)
+    else()
+        ashita_sdk_set_linker_disable_debug_linking(memoria)
+    endif()
+    target_link_libraries(memoria PRIVATE memoria_core winhttp shell32 ole32)
+    target_compile_definitions(memoria PRIVATE MEMORIA_VERSION=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} MEMORIA_VERSION_TEXT="${MEMORIA_VERSION_TEXT}")
+    # The SDK helper clears the global C++ flags, so the core and xicap need their exception model and Release optimisation back.
+    foreach(target memoria_core xicap)
+        target_compile_options(${target} PRIVATE /EHa "$<$<CONFIG:Release>:/O2;/Ob2;/DNDEBUG>")
+    endforeach()
+    # C5298: a stray control character in the SDK's d3d8 dxfile.h.
+    target_compile_options(memoria PRIVATE /wd5298)
+    # Designated initializers leave fields out on purpose; they start at zero.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(memoria PRIVATE -Wno-missing-designated-field-initializers)
+    endif()
+endif()
+
+if(MEMORIA_BUILD_TESTS)
+    enable_testing()
+    FetchContent_Declare(
+        Catch2
+        URL      https://github.com/catchorg/Catch2/archive/refs/tags/v3.5.4.tar.gz
+        URL_HASH SHA256=b7754b711242c167d8f60b890695347f90a1ebc95949a045385114165d606dbb
+    )
+    FetchContent_MakeAvailable(Catch2)
+    add_executable(memoria_core_tests
+        tests/captain_tests.cpp
+        tests/chat_tests.cpp
+        tests/fault_tests.cpp
+        tests/install_tests.cpp
+        tests/link_tests.cpp
+        tests/live_tests.cpp
+        tests/packets_tests.cpp
+        tests/recorder_tests.cpp
+        tests/upload_tests.cpp
+        tests/worker_tests.cpp
+    )
+    target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
+    if(WIN32)
+        # ownerOnly reads the token file's permissions; the WinHTTP and text tests build the plugin's network and text code on its own.
+        target_sources(memoria_core_tests PRIVATE tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
+        target_link_libraries(memoria_core_tests PRIVATE advapi32 bcrypt winhttp ws2_32 shell32 ole32)
+        target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")
+    endif()
+    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+    include(Catch)
+    catch_discover_tests(memoria_core_tests)
+endif()

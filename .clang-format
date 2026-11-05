@@ -1,0 +1,24 @@
+---
+# LLVM style with Allman braces.
+Language: Cpp
+AccessModifierOffset: -4
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignConsecutiveMacros: true
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortLambdasOnASingleLine: None
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Allman
+BreakConstructorInitializers: BeforeComma
+ConstructorInitializerIndentWidth: 0
+ColumnLimit: 0
+BinPackArguments: false
+BinPackParameters: false
+Cpp11BracedListStyle: false
+IndentWidth: 4
+IndentCaseLabels: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+PointerAlignment: Left
+TabWidth: 4
+...

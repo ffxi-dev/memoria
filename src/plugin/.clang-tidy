@@ -1,0 +1,5 @@
+InheritParentConfig: true
+Checks: >
+  -performance-no-int-to-ptr
+CheckOptions:
+  bugprone-suspicious-stringview-data-usage.AllowedCallees: '::MultiByteToWideChar'

@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: memoria
+          path: out
+      - run: |
+          version="${GITHUB_REF_NAME#v}"
+          base="${version%%-*}"
+          suffix="${version#"$base"}"
+          grep -q "project(memoria VERSION ${base} " CMakeLists.txt && grep -q "set(MEMORIA_PRERELEASE \"${suffix#-}\")" CMakeLists.txt || { echo "tag $GITHUB_REF_NAME does not match CMakeLists.txt" >&2; exit 1; }
+      - id: sum
+        run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            out/Memoria.dll
+            THIRD_PARTY_NOTICES.md
+          body: SHA-256 ${{ steps.sum.outputs.sha256 }}
+          prerelease: ${{ contains(github.ref_name, '-') }}

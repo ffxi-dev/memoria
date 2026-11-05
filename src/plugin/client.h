@@ -1,0 +1,40 @@
+#pragma once
+
+#include "core/capture/event_queue.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+
+namespace memoria::plugin::client
+{
+
+auto find(const char* pattern) -> uintptr_t; // first match in FFXiMain.dll, or 0
+
+// Retail or private, from the zone server's address; unknown before the client has one.
+auto serverKind() -> xicap::ServerKind;
+
+// Search server traffic in plaintext: FFXiMain encrypts requests and decrypts replies itself (credits: captain's SearchLog).
+namespace search
+{
+
+using Sink = void (*)(xicap::PacketDirection direction, const uint8_t* data, uint32_t size);
+
+[[nodiscard]] auto install(Sink sink) -> std::optional<std::string>; // why not, if it failed
+auto               tick() -> void;                                   // each frame: a reconnect resets the encrypt pointer
+auto               remove() -> void;
+
+} // namespace search
+
+// The version the client sends the lobby in packet 0x26, e.g. "30261006_0", read from FFXiMain's lobby context as the packet is built.
+namespace lobby
+{
+
+auto version() -> std::string; // from the same copy of the lobby context; empty before the first login
+
+// Fills who's content id, world id, and world name from FFXiMain's copy of the lobby context, which outlives the login, if the selected character is who's character id.
+[[nodiscard]] auto fillCharacter(capture::Login& who) -> std::optional<std::string>; // why not, if it could not
+
+} // namespace lobby
+
+} // namespace memoria::plugin::client

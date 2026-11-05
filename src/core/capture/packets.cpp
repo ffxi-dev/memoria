@@ -1,0 +1,54 @@
+#include "core/capture/packets.h"
+
+#include <cstring>
+
+namespace memoria::capture::packets
+{
+namespace
+{
+
+constexpr size_t LOGIN_UNIQUE_NO = 4;
+constexpr size_t LOGIN_NAME      = 132;
+constexpr size_t LOGIN_NAME_SIZE = 16;
+
+} // namespace
+
+auto character(const uint8_t* login, const uint32_t size) -> xicap::Character
+{
+    xicap::Character c;
+    if (size >= LOGIN_NAME + LOGIN_NAME_SIZE)
+    {
+        std::memcpy(&c.characterId, login + LOGIN_UNIQUE_NO, sizeof(c.characterId));
+        const auto* name = reinterpret_cast<const char*>(login + LOGIN_NAME);
+        c.name.assign(name, strnlen(name, LOGIN_NAME_SIZE));
+    }
+    return c;
+}
+
+auto provenance(const bool injected, const bool blocked, const uint8_t* data, const uint8_t* modified, const uint32_t size) -> uint16_t
+{
+    uint16_t flags{ 0 };
+    if (injected)
+    {
+        flags |= xicap::PacketFlag::Injected;
+    }
+    if (blocked)
+    {
+        flags |= xicap::PacketFlag::Blocked;
+    }
+    if (modified && std::memcmp(data, modified, size) != 0)
+    {
+        flags |= xicap::PacketFlag::Modified;
+    }
+    return flags;
+}
+
+auto leavesGame(const uint8_t logoutState) -> bool
+{
+    constexpr uint8_t ZONECHANGE = 2;
+    constexpr uint8_t MYROOM     = 3;
+    constexpr uint8_t CANCEL     = 4;
+    return logoutState != 0 && logoutState != ZONECHANGE && logoutState != MYROOM && logoutState != CANCEL;
+}
+
+} // namespace memoria::capture::packets
