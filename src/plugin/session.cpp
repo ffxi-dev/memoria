@@ -1,8 +1,8 @@
 #include "plugin/session.h"
 
-#include "core/file.h"
+#include "core/capture/packets.h"
+#include "core/install.h"
 #include "plugin/client.h"
-#include "plugin/packets.h"
 #include "plugin/text.h"
 #include "plugin/winhttp.h"
 
@@ -26,27 +26,22 @@ namespace memoria::plugin
 namespace
 {
 
-// upload.ini's "server = https://..." line, which points Memoria at another Mogsafe.
-auto serverIn(const std::filesystem::path& ini) -> std::optional<std::string>
-{
-    const auto trim = [](std::string_view s)
-    {
-        const auto first = s.find_first_not_of(" \t\r");
-        return first == std::string_view::npos ? std::string{} : std::string(s.substr(first, s.find_last_not_of(" \t\r/") - first + 1));
-    };
-    std::ifstream in(ini);
-    for (std::string line; std::getline(in, line);)
-    {
-        const auto eq = line.find('=');
-        if (eq != std::string::npos && trim(line.substr(0, eq)) == "server" && trim(line.substr(eq + 1)).starts_with("https://"))
-        {
-            return trim(line.substr(eq + 1));
-        }
-    }
-    return std::nullopt;
-}
-
 Session* instance_ = nullptr; // for the search hooks, which take a plain function
+
+// Clients sharing an install take turns through a named mutex. The thread that takes it keeps it until it exits; Windows
+// then hands it to the next client. Without a mutex, every client may run.
+auto turn(HANDLE& mutex, const std::string& name) -> std::function<bool()>
+{
+    if (!mutex)
+    {
+        mutex = ::CreateMutexA(nullptr, FALSE, name.c_str());
+    }
+    return [mutex]
+    {
+        const auto r = mutex ? ::WaitForSingleObject(mutex, 0) : WAIT_OBJECT_0;
+        return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
+    };
+}
 
 } // namespace
 
@@ -57,7 +52,7 @@ Session::Session(Host host)
 
 auto Session::start(const std::optional<LateLogin>& late) -> void
 {
-    server_ = serverIn(host_.config / "upload.ini").value_or(server_);
+    server_ = serverIn(host_.config).value_or(server_);
 
     try
     {
@@ -91,25 +86,21 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
     catch (const std::exception& error)
     {
         startError_ = error.what();
-        say("not recording: " + startError_);
+        say(paint(Color::Red, "Not recording: " + startError_));
         return;
     }
     refreshChat();
-    instance_    = this;
-    searchError_ = client::search::install([](bool clientToServer, const uint8_t* data, uint32_t size)
-                                           {
-                                               instance_->recordSearch(clientToServer, data, size);
-                                           });
+    instance_       = this;
+    const auto sink = [](xicap::PacketDirection direction, const uint8_t* data, uint32_t size)
+    {
+        instance_->recordSearch(direction, data, size);
+    };
+    searchError_ = client::search::install(sink).value_or("");
 
     // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
-        capture::Login login{ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() };
-        characterError_ = client::lobby::character(login);
-        character_      = login.character;
-        loggedIn_       = true;
-        loggedInAs_     = login.character.characterId;
-        recorder_->login(clock_.nowMs(), std::move(login));
+        enter({ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() });
     }
     host_.log(std::format("Memoria {} recording to {}", MEMORIA_VERSION_TEXT, host_.captures.string()));
 }
@@ -121,7 +112,6 @@ Session::~Session()
     importer_.reset();
     if (live_)
     {
-        live_->abort();
         closing_.push_back(std::move(live_));
     }
     for (const auto& live : closing_)
@@ -130,6 +120,7 @@ Session::~Session()
     }
     closing_.clear();
     client::search::remove();
+    instance_ = nullptr;
     std::vector<std::string> closed;
     if (recorder_)
     {
@@ -145,9 +136,12 @@ Session::~Session()
         uploader_->finish(closed, std::chrono::seconds(3));
     }
     uploader_.reset();
-    if (uploadMutex_)
+    for (auto* const mutex : { uploadMutex_, importMutex_ })
     {
-        ::CloseHandle(std::exchange(uploadMutex_, nullptr));
+        if (mutex)
+        {
+            ::CloseHandle(mutex);
+        }
     }
 }
 
@@ -158,18 +152,14 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         return;
     }
     // A zone-in after character select is a login, and so is one naming another character: a disconnect sends no logout.
-    if (id == packets::LOGIN)
+    if (id == capture::packets::LOGIN)
     {
-        capture::Login who{ .character = packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
+        capture::Login who{ .character = capture::packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
-            characterError_ = client::lobby::character(who);
-            character_      = who.character;
-            loggedIn_       = true;
-            loggedInAs_     = who.character.characterId;
+            enter(std::move(who));
             refreshChat(); // a change made on Mogsafe applies from the capture after this one
             greet();
-            recorder_->login(clock_.nowMs(), std::move(who));
             if (live_)
             {
                 live_->setHello(hello());
@@ -177,11 +167,21 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         }
     }
     record(xicap::PacketDirection::ServerToClient, size, data, modified, sizeChunk, dataChunk, injected, blocked);
-    if (id == packets::LOGOUT && size > packets::LOGOUT_STATE && packets::leavesGame(data[packets::LOGOUT_STATE]))
+    if (id == capture::packets::LOGOUT && size > capture::packets::LOGOUT_STATE && capture::packets::leavesGame(data[capture::packets::LOGOUT_STATE]))
     {
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
     }
+}
+
+// The character in game, here or already when Memoria loads: the lobby's details, then the recorder.
+auto Session::enter(capture::Login who) -> void
+{
+    characterError_ = client::lobby::fillCharacter(who).value_or("");
+    character_      = who.character;
+    loggedIn_       = true;
+    loggedInAs_     = who.character.characterId;
+    recorder_->login(clock_.nowMs(), std::move(who));
 }
 
 auto Session::outgoing(const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
@@ -194,19 +194,7 @@ auto Session::outgoing(const uint32_t size, const uint8_t* data, const uint8_t* 
 
 auto Session::record(const xicap::PacketDirection direction, const uint32_t size, const uint8_t* data, const uint8_t* modified, const uint32_t sizeChunk, const uint8_t* dataChunk, const bool injected, const bool blocked) -> void
 {
-    uint16_t provenance{ 0 };
-    if (injected)
-    {
-        provenance |= xicap::PacketFlag::Injected;
-    }
-    if (blocked)
-    {
-        provenance |= xicap::PacketFlag::Blocked;
-    }
-    if (modified && std::memcmp(data, modified, size) != 0)
-    {
-        provenance |= xicap::PacketFlag::Modified;
-    }
+    auto provenance = capture::packets::provenance(injected, blocked, data, modified, size);
     // Ashita hands each packet as a copy, so a new chunk shows as a new chunk pointer, size, or head (its sequence number).
     if (dataChunk && sizeChunk > 0)
     {
@@ -228,11 +216,11 @@ auto Session::record(const xicap::PacketDirection direction, const uint32_t size
 }
 
 // The opcode is byte 0x0B, the request type LSB's search server switches on.
-auto Session::recordSearch(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
+auto Session::recordSearch(const xicap::PacketDirection direction, const uint8_t* data, const uint32_t size) -> void
 {
     recorder_->packet({
         .timestamp = clock_.nowMs(),
-        .direction = clientToServer ? xicap::PacketDirection::ClientToServer : xicap::PacketDirection::ServerToClient,
+        .direction = direction,
         .channel   = xicap::Channel::Search,
         .opcode    = data[0x0B],
         .data      = { data, data + size },
@@ -243,8 +231,8 @@ auto Session::frame() -> void
 {
     client::search::tick();
 
-    std::vector<std::string>       inbox;
-    std::optional<account::Linked> arrived;
+    std::vector<std::string> inbox;
+    std::optional<Linked>    arrived;
     {
         const std::scoped_lock lock(inboxMutex_);
         inbox.swap(inbox_);
@@ -264,9 +252,12 @@ auto Session::frame() -> void
         }
         greet();
     }
-    if (importer_ && importer_->unauthorized())
+    // Both workers may report the same refusal: it is said once.
+    const bool importRefused{ importer_ && importer_->takeUnauthorized() };
+    const bool uploadRefused{ uploader_ && uploader_->takeUnauthorized() };
+    if (importRefused || uploadRefused)
     {
-        unlink("Vault no longer accepts this install");
+        sayUnlinked(REFUSED);
     }
     if (importer_ && importer_->finished())
     {
@@ -280,10 +271,6 @@ auto Session::frame() -> void
     {
         live_.reset();
     }
-    if (uploader_ && uploader_->unauthorized())
-    {
-        unlink("Vault no longer accepts this install");
-    }
 }
 
 // Runs until the plugin unloads; the token and paused files decide each pass whether it sends.
@@ -294,17 +281,8 @@ auto Session::startUploads() -> void
         .server = server_,
         .config = host_.config,
     };
-    // Clients sharing an install share its captures folder; the one whose upload thread holds this mutex uploads, and Windows hands it on when that client exits.
-    if (!uploadMutex_)
-    {
-        uploadMutex_ = ::CreateMutexA(nullptr, FALSE, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())).c_str());
-    }
-    options.mayRun = [mutex = uploadMutex_]
-    {
-        const auto r = ::WaitForSingleObject(mutex, 0);
-        return r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
-    };
-    uploader_ = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
+    options.mayRun = turn(uploadMutex_, std::format("Local\\Memoria-upload-{:x}", std::hash<std::wstring>{}(options.dir.wstring())));
+    uploader_      = std::make_unique<upload::Uploader>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
     uploader_->start();
 }
 
@@ -326,34 +304,28 @@ auto Session::greet() -> void
     {
         return;
     }
-    worker_.post([this](const std::stop_token&)
+    worker_.post([this](const std::stop_token& stop)
                  {
                      reminding_ = false;
                      remind();
-                     offerImport();
+                     offerImport(stop);
                  });
 }
 
-// Once a day while unlinked: the date of the last reminder is kept across restarts.
+// Once a day while unlinked, across restarts.
 auto Session::remind() -> void
 {
-    const auto  path  = host_.config / "reminded";
-    const auto  today = std::format("{:%F}", std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
-    std::string last;
-    std::getline(std::ifstream(path), last);
-    if (linked() || last == today)
+    if (!linked() && claimDailyReminder(host_.config))
     {
-        return;
+        post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
     }
-    std::ofstream(path, std::ios::trunc) << today;
-    post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them with Vault.");
 }
 
 // Once per install, ever: while linked and captain captures wait.
-auto Session::offerImport() -> void
+auto Session::offerImport(const std::stop_token& stop) -> void
 {
     // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && captain::remindImport(host_.config, host_.captain / "captures", worker_.stopping()))
+    if (linked() && captain::claimImportReminder(host_.config, host_.captain / "captures", stop))
     {
         post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
     }
@@ -368,9 +340,9 @@ auto Session::startImport(const bool asked) -> void
         .state    = host_.captures,
         .server   = server_,
         .config   = host_.config,
-        .mutex    = std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring())),
+        .mayRun   = turn(importMutex_, std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring()))),
     };
-    options.say = [this](std::string text)
+    options.post = [this](std::string text)
     {
         post(std::move(text));
     };
@@ -431,9 +403,9 @@ auto Session::waitForLink(const std::stop_token& stop) -> void
     {
         return;
     }
-    if (!account::saveLink(host_.config / "token", *linked))
+    if (const auto error = saveLink(host_.config, *linked))
     {
-        post(paint(Color::Red, "Not linked: cannot save the link in " + host_.config.string() + ".") + " Free some space, then run " + paint(Color::Cyan, "/memoria link") + " again.");
+        post(paint(Color::Red, "Not linked: " + *error + ".") + " Run " + paint(Color::Cyan, "/memoria link") + " again.");
         return;
     }
     const std::scoped_lock inbox(inboxMutex_);
@@ -454,12 +426,12 @@ auto Session::cancelLink() -> bool
     return was;
 }
 
-auto Session::linked() const -> std::optional<account::Linked>
+auto Session::linked() const -> std::optional<Linked>
 {
-    return account::loadLink(host_.config / "token");
+    return loadLink(host_.config);
 }
 
-auto Session::unlink(const std::string& why) -> void
+auto Session::sayUnlinked(const std::string& why) -> void
 {
     stopLive();
     say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
@@ -486,7 +458,7 @@ auto Session::refreshChat() -> void
                                                      {
                                                          http.cancel();
                                                      });
-                     chatChoice_.refresh(http, server_, host_.config / "token");
+                     chatChoice_.refresh(http, server_, host_.config);
                  });
 }
 

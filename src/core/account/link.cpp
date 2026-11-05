@@ -1,16 +1,11 @@
 #include "core/account/link.h"
 
-#include "core/file.h"
-
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <condition_variable>
 #include <format>
-#include <fstream>
 #include <mutex>
-#include <random>
-#include <thread>
 #include <tuple>
 
 namespace memoria::account
@@ -40,9 +35,13 @@ try
         return std::unexpected(res.error());
     }
     const auto& [status, body] = *res;
-    if (status != 201 || !body.is_object())
+    if (status != 201)
     {
         return std::unexpected(std::format("Mogsafe answered {}", status));
+    }
+    if (!body.is_object())
+    {
+        return std::unexpected(MALFORMED);
     }
     LinkCode code{
         .code     = body.value("code", ""),
@@ -53,13 +52,13 @@ try
     };
     if (code.interval <= std::chrono::seconds(0) || code.expires <= std::chrono::seconds(0))
     {
-        return std::unexpected("Mogsafe sent a malformed answer"); // a poll every 0 s would hammer it
+        return std::unexpected(MALFORMED); // a poll every 0 s would hammer it
     }
     return code;
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
-    return std::unexpected("Mogsafe sent a malformed answer");
+    return std::unexpected(MALFORMED);
 }
 
 auto pollLink(Http& http, const std::string& server, const std::string& poll) -> std::expected<std::optional<Linked>, std::string>
@@ -91,7 +90,7 @@ try
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
-    return std::unexpected("Mogsafe sent a malformed answer");
+    return std::unexpected(MALFORMED);
 }
 
 auto waitForApproval(Http& http, const std::string& server, const LinkCode& code, const std::stop_token& stop) -> std::expected<Linked, std::string>
@@ -102,11 +101,11 @@ auto waitForApproval(Http& http, const std::string& server, const LinkCode& code
     while (std::chrono::steady_clock::now() < until)
     {
         std::unique_lock lock(mutex);
-        if (wake.wait_for(lock, stop, code.interval, []
-                          {
-                              return false;
-                          }) ||
-            stop.stop_requested())
+        std::ignore = wake.wait_for(lock, stop, code.interval, []
+                                    {
+                                        return false;
+                                    });
+        if (stop.stop_requested())
         {
             return std::unexpected("stopped");
         }
@@ -125,95 +124,6 @@ auto waitForApproval(Http& http, const std::string& server, const LinkCode& code
         }
     }
     return std::unexpected("the code expired");
-}
-
-// Two lines: the token, then the account it belongs to.
-auto loadLink(const std::filesystem::path& path) -> std::optional<Linked>
-{
-    std::ifstream in(path);
-    Linked        link;
-    if (!std::getline(in, link.token) || link.token.empty())
-    {
-        return std::nullopt;
-    }
-    std::getline(in, link.account);
-    return link;
-}
-
-// Written whole to a file only this user can open, then renamed over the old one, which keeps the new file's permissions.
-auto saveLink(const std::filesystem::path& path, const Linked& link) -> bool
-{
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    std::random_device random;
-    const auto         temp = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.new", random(), random()));
-    if (!createNew(temp, true))
-    {
-        return false;
-    }
-    std::ofstream out(temp, std::ios::trunc);
-    out << link.token << '\n'
-        << link.account << '\n';
-    out.close();
-    if (out)
-    {
-        // Another client sharing the install may be reading the old token: Windows refuses the rename until it closes it.
-        for (int attempt = 0; attempt < 50; ++attempt)
-        {
-            std::filesystem::rename(temp, path, ec);
-            if (!ec)
-            {
-                return true;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    }
-    std::filesystem::remove(temp, ec);
-    return false;
-}
-
-auto removeLink(const std::filesystem::path& path, const std::string& token, const LinkBack& linkBack) -> bool
-{
-    std::random_device random;
-    const auto         taken = std::filesystem::path(path).concat(std::format(".{:08x}{:08x}.old", random(), random()));
-    std::error_code    ec;
-    std::filesystem::rename(path, taken, ec);
-    if (ec)
-    {
-        return false;
-    }
-    const auto link = loadLink(taken);
-    const bool refused{ link && link->token == token };
-    if (!refused)
-    {
-        // A hard link fails where a token was saved since the rename, so the newer one stays. Where links fail for another
-        // reason, a move that never replaces a file puts the taken token back; if that fails too, it stays in its file.
-        const bool linked{ linkBack ? linkBack(taken, path) : (std::filesystem::create_hard_link(taken, path, ec), !ec) };
-        if (!linked)
-        {
-            std::ignore = moveNoReplace(taken, path);
-            return false;
-        }
-    }
-    std::filesystem::remove(taken, ec);
-    return refused;
-}
-
-auto paused(const std::filesystem::path& config) -> bool
-{
-    std::error_code ec;
-    return std::filesystem::exists(config / "paused", ec) || ec;
-}
-
-auto sharing(const std::filesystem::path& config, const std::string& token) -> bool
-{
-    const auto link = loadLink(config / "token");
-    return !paused(config) && link && link->token == token;
-}
-
-auto captureLink(const std::string& server, const std::string& id, const uint64_t fromMs, const uint64_t toMs) -> std::string
-{
-    return std::format("{}/captures/{}?from={}&to={}", server, id, fromMs, toMs);
 }
 
 } // namespace memoria::account

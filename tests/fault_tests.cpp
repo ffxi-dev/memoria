@@ -60,10 +60,10 @@ TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uplo
     write(xicap::HEADER_SIZE + (bytes.size() - xicap::HEADER_SIZE) / 2);
     FakeMogsafe server;
     auto        up = uploader(cut.parent_path(), server);
-    CHECK(!up->pass());
-    CHECK(!up->pass()); // close refused: no trailer
+    CHECK(!up->uploadAll());
+    CHECK(!up->uploadAll()); // close refused: no trailer
     const auto requests = server.requests;
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests + 1); // a HEAD, no close
     CHECK(server.uploads.begin()->second.data == readAll(cut));
     CHECK(up->status()[0].sent == up->status()[0].size);
@@ -78,9 +78,9 @@ TEST_CASE("an append cut off mid-body resumes from the bytes the server kept")
     server.cutAtPatch = 1;
     append(file, noise(3 * Tus::CHUNK_SIZE + 77));
     auto up = uploader(dir, server);
-    CHECK(up->pass().has_value());
+    CHECK(up->uploadAll().has_value());
     CHECK(server.uploads.begin()->second.data.size() == Tus::CHUNK_SIZE * 3 / 2);
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.creates == 1);
     CHECK(server.uploads.begin()->second.data == readAll(file));
     fs::remove_all(dir);
@@ -106,11 +106,11 @@ TEST_CASE("any failed answer at any step is retried, and the upload ends whole")
             {
                 server.forced[method] = { status, status };
             }
-            CHECK(up->pass().has_value());
+            CHECK(up->uploadAll().has_value());
             server.down = false;
             for (int i = 0; i < 3; ++i)
             {
-                std::ignore = up->pass();
+                std::ignore = up->uploadAll();
             }
             append(file, TRAILER);
             if (status != 0)
@@ -119,13 +119,13 @@ TEST_CASE("any failed answer at any step is retried, and the upload ends whole")
             }
             for (int i = 0; i < 4; ++i)
             {
-                std::ignore = up->pass();
+                std::ignore = up->uploadAll();
             }
             CHECK(server.creates == 1);
             REQUIRE(server.uploads.size() == 1);
             CHECK(server.uploads.begin()->second.data == readAll(file));
             CHECK(server.uploads.begin()->second.closed);
-            CHECK(!up->pass());
+            CHECK(!up->uploadAll());
             fs::remove_all(dir);
         }
     }
@@ -146,7 +146,7 @@ TEST_CASE("an upload thread never spins: a dead server or an ended upload costs 
         const auto  dir = tempDir();
         FakeMogsafe server;
         append(dir / "a.xicap", std::string(500, 'x'));
-        CHECK(!uploader(dir, server)->pass());
+        CHECK(!uploader(dir, server)->uploadAll());
         append(dir / "a.xicap", std::string(100, 'x'));
         auto& u = server.uploads.begin()->second;
         switch (fault)
@@ -168,7 +168,7 @@ TEST_CASE("an upload thread never spins: a dead server or an ended upload costs 
         auto          up = std::make_unique<Uploader>(std::move(options), std::make_unique<Forward>(server));
         if (fault == Fault::Duplicate)
         {
-            CHECK(up->pass().has_value()); // the 409
+            CHECK(up->uploadAll().has_value()); // the 409
             u.cutOff = true;
         }
         const auto before = server.requests;
@@ -193,11 +193,11 @@ TEST_CASE("a server holding more than the file on disk gets nothing, and no requ
     FakeMogsafe server;
     auto        up = uploader(dir, server);
     append(file, std::string(600, 'x'));
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     fs::resize_file(file, 500); // a power cut lost the file's tail, already sent
-    CHECK(!up->pass());         // its close is refused
+    CHECK(!up->uploadAll());    // its close is refused
     const auto requests = server.requests;
-    CHECK(!up->pass());
+    CHECK(!up->uploadAll());
     CHECK(server.requests == requests + 1); // a HEAD
     CHECK(server.uploads.begin()->second.data.size() == 600);
     fs::remove_all(dir);
@@ -359,9 +359,7 @@ TEST_CASE("a full disk is said once, ends the session with a reason, and counts 
     }
     fs::remove_all(dir);
 }
-#endif
 
-#ifdef __linux__
 TEST_CASE("a capture whose close fails is still named by the next one, after a restart")
 {
     const auto       dir  = tempDir();
@@ -381,17 +379,7 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
                             return !path.empty() && fs::file_size(path, ec) > xicap::HEADER_SIZE;
                         }));
         cut = readCapture(path).id;
-        const int full{ ::open("/dev/full", O_WRONLY) };
-        REQUIRE(full >= 0);
-        for (const auto& fd : fs::directory_iterator("/proc/self/fd"))
-        {
-            std::error_code ec;
-            if (fs::read_symlink(fd.path(), ec) == fs::canonical(path))
-            {
-                ::dup2(full, std::stoi(fd.path().filename().string()));
-            }
-        }
-        ::close(full);
+        fill(path);
         rec.stop(); // the trailer never lands
         CHECK(!rec.status().error.empty());
     }
@@ -405,6 +393,34 @@ TEST_CASE("a capture whose close fails is still named by the next one, after a r
     REQUIRE(files.size() == 2);
     const auto first = readCapture(files[0]).id == cut ? readCapture(files[1]) : readCapture(files[0]);
     CHECK(first.previous == cut);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a close that fails at a character switch is shown until the next capture writes")
+{
+    const auto dir  = tempDir();
+    auto       opts = options(dir);
+    opts.flushEvery = std::chrono::hours(1); // only closes write
+    Recorder rec(opts);
+    rec.login(T0, who("Kalnor", 1));
+    rec.packet(gamePacket(T0 + 1));
+    rec.packet(gamePacket(T0 + 6'000)); // over the live preset's 5 s a frame: the first frame reaches disk
+    fs::path kalnor;
+    REQUIRE(waitFor([&]
+                    {
+                        kalnor = rec.status().capture;
+                        std::error_code ec;
+                        return !kalnor.empty() && fs::file_size(kalnor, ec) > xicap::HEADER_SIZE;
+                    }));
+    fill(kalnor);
+    rec.login(T0 + 7'000, who("Mule", 2)); // Kalnor's trailer fails
+    REQUIRE(waitFor([&]
+                    {
+                        return !rec.status().error.empty();
+                    }));
+    rec.packet(gamePacket(T0 + 7'001));
+    rec.stop(); // Mule's capture closes whole
+    CHECK(rec.status().error.empty());
     fs::remove_all(dir);
 }
 #endif
@@ -440,6 +456,18 @@ TEST_CASE("a flush that fails is a failed save, and nothing that depends on it i
 #ifndef _WIN32
     steps.push_back(SaveStep::FolderFlush); // Windows writes the folder through with the rename
 #endif
+    struct Reset
+    {
+        Reset()                                = default;
+        Reset(const Reset&)                    = delete;
+        Reset(Reset&&)                         = delete;
+        auto operator=(const Reset&) -> Reset& = delete;
+        auto operator=(Reset&&) -> Reset&      = delete;
+        ~Reset()
+        {
+            failSave = {}; // even when a REQUIRE ends the test early
+        }
+    } const reset;
     for (const auto step : steps)
     {
         INFO(std::to_underlying(step));
@@ -458,16 +486,15 @@ TEST_CASE("a flush that fails is a failed save, and nothing that depends on it i
         FakeMogsafe server;
         auto        up = uploader(dir, server);
         append(dir / "a.xicap", std::string(500, 'x'));
-        CHECK(up->pass().has_value());
+        CHECK(up->uploadAll().has_value());
         CHECK(!up->saveError().empty());
-        CHECK(up->pass().has_value());
+        CHECK(up->uploadAll().has_value());
         CHECK(server.creates == 1);
         CHECK(server.received == 0); // no PATCH until the save holds
         failSave = {};
-        CHECK(!up->pass());
+        CHECK(!up->uploadAll());
         CHECK(up->saveError().empty());
         CHECK(server.received == 500);
         fs::remove_all(dir);
     }
-    failSave = {};
 }

@@ -5,7 +5,7 @@
 namespace memoria::plugin
 {
 
-auto count(const uint64_t n) -> std::string
+auto countText(const uint64_t n) -> std::string
 {
     auto text = std::to_string(n);
     for (auto at = static_cast<std::ptrdiff_t>(text.size()) - 3; at > 0; at -= 3)
@@ -15,7 +15,7 @@ auto count(const uint64_t n) -> std::string
     return text;
 }
 
-auto duration(const uint64_t seconds) -> std::string
+auto durationText(const uint64_t seconds) -> std::string
 {
     if (seconds < 60)
     {
@@ -26,6 +26,22 @@ auto duration(const uint64_t seconds) -> std::string
         return std::format("{} min", seconds / 60);
     }
     return std::format("{} h {} min", seconds / 3600, seconds / 60 % 60);
+}
+
+auto restAfter(std::string_view line, const std::string_view word) -> std::string_view
+{
+    const auto at = line.find(word);
+    if (at == std::string_view::npos)
+    {
+        return {};
+    }
+    line.remove_prefix(at + word.size());
+    const auto first = line.find_first_not_of(" \"");
+    if (first == std::string_view::npos)
+    {
+        return {};
+    }
+    return line.substr(first, line.find_last_not_of(" \"") - first + 1);
 }
 
 auto utf8FromShiftJis(const std::string_view text) -> std::string

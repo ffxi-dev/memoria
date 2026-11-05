@@ -1,9 +1,8 @@
 #include "core/tus.h"
 
-#include "core/account/link.h"
+#include "core/install.h"
 
 #include <algorithm>
-#include <charconv>
 #include <format>
 #include <fstream>
 #include <utility>
@@ -11,13 +10,6 @@
 
 namespace memoria
 {
-
-auto parseU64(const std::string_view s) -> std::optional<uint64_t>
-{
-    uint64_t v{};
-    const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    return ec == std::errc{} && end == s.data() + s.size() ? std::optional(v) : std::nullopt;
-}
 
 Tus::Tus(std::string server, std::filesystem::path config, Http& http)
 : server_(std::move(server))
@@ -28,11 +20,11 @@ Tus::Tus(std::string server, std::filesystem::path config, Http& http)
 
 auto Tus::allowed() -> bool
 {
-    if (account::paused(config_))
+    if (paused(config_))
     {
         return false;
     }
-    const auto link = account::loadLink(config_ / "token");
+    const auto link = loadLink(config_);
     token_          = link ? link->token : std::string{};
     return !token_.empty();
 }
@@ -44,12 +36,12 @@ auto Tus::request(const std::string& method, const std::string& url, HttpHeaders
     auto res = http_.request(method, onServer(url), headers, body);
     if (res && res->status == 401)
     {
-        if (account::removeLink(config_ / "token", token_))
+        if (removeLink(config_, token_))
         {
             unauthorized_ = true;
         }
         token_.clear();
-        return std::unexpected("Mogsafe refused this install's token");
+        return std::unexpected(REFUSED);
     }
     return res;
 }
@@ -95,7 +87,7 @@ auto Tus::append(const std::filesystem::path& path, const std::string& url, uint
     return Appended{ .offset = offset };
 }
 
-auto Tus::unauthorized() -> bool
+auto Tus::takeUnauthorized() -> bool
 {
     return unauthorized_.exchange(false);
 }

@@ -1,12 +1,13 @@
 #include "core/live/live.h"
 
+#include "core/install.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <cstring>
 #include <format>
-#include <stdexcept>
 #include <utility>
 
 namespace memoria::live
@@ -26,24 +27,24 @@ auto append(std::vector<uint8_t>& out, const T value) -> void
 
 } // namespace
 
-auto start(Http& http, const std::string& server, const std::string& installToken) -> std::expected<Link, std::string>
+auto start(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<Link, std::string>
 try
 {
-    const auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
+    const auto res = expect(http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {}), 201, config, installToken);
     if (!res)
     {
         return std::unexpected(res.error());
     }
     const auto body = nlohmann::json::parse(res->body, nullptr, false);
-    if (res->status != 201 || !body.is_object() || body.value("token", "").empty() || !body.value("url", "").starts_with("https://"))
+    if (!body.is_object() || body.value("token", "").empty() || !body.value("url", "").starts_with("https://"))
     {
-        return std::unexpected(std::format("Mogsafe answered {}", res->status));
+        return std::unexpected(MALFORMED);
     }
     return Link{ .token = body.value("token", ""), .url = body.value("url", "") };
 }
 catch (const nlohmann::json::exception&) // a field of the wrong type
 {
-    return std::unexpected("Mogsafe sent a malformed answer");
+    return std::unexpected(MALFORMED);
 }
 
 auto hello(const std::string_view character, const std::string_view world, const std::string_view clientVersion, const std::string_view agent) -> std::string
@@ -61,7 +62,7 @@ auto viewers(const std::string_view message) -> std::optional<int>
     return json["viewers"].get<int>();
 }
 
-auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::vector<uint8_t>
+auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::optional<std::vector<uint8_t>>
 {
     auto data  = std::vector<uint8_t>(packet.data.begin(), packet.data.end());
     auto flags = static_cast<uint16_t>((packet.provenance & xicap::PacketFlag::Provenance) | std::to_underlying(packet.direction));
@@ -69,7 +70,7 @@ auto frame(const xicap::WritePacket& packet, const xicap::Chat chat) -> std::vec
     {
         if (data.size() < 4)
         {
-            throw std::invalid_argument("a game packet is at least 4 bytes");
+            return std::nullopt;
         }
         if (chat == xicap::Chat::Redact && xicap::redact(data, packet.direction))
         {
@@ -99,35 +100,30 @@ auto Feed::push(const xicap::WritePacket& packet, const xicap::Chat chat) -> voi
     {
         return;
     }
-    std::vector<uint8_t> bytes;
-    try
+    auto                   bytes = frame(packet, chat);
+    const std::scoped_lock lock(mutex_);
+    if (!bytes)
     {
-        bytes = frame(packet, chat);
-    }
-    catch (const std::exception&) // a packet too short to frame is a gap for viewers
-    {
-        const std::scoped_lock lock(mutex_);
-        dropped_++;
+        dropped_++; // a gap for viewers
         return;
     }
-    const std::scoped_lock lock(mutex_);
     if (!open_)
     {
         return;
     }
-    if (bytes_ + bytes.size() > maxBytes_)
+    if (bytes_ + bytes->size() > maxBytes_)
     {
         dropped_++;
         return;
     }
-    bytes_ += bytes.size();
-    if (messages_.empty() || messages_.back().size() + bytes.size() > MESSAGE_BYTES)
+    bytes_ += bytes->size();
+    if (messages_.empty() || messages_.back().size() + bytes->size() > MESSAGE_BYTES)
     {
-        messages_.push_back(std::move(bytes));
+        messages_.push_back(std::move(*bytes));
     }
     else
     {
-        messages_.back().insert(messages_.back().end(), bytes.begin(), bytes.end());
+        messages_.back().insert(messages_.back().end(), bytes->begin(), bytes->end());
     }
 }
 
@@ -141,7 +137,7 @@ auto Feed::claim() -> uint64_t
     return ++owner_;
 }
 
-auto Feed::open(const uint64_t owner, const bool on) -> void
+auto Feed::setOpen(const uint64_t owner, const bool on) -> void
 {
     const std::scoped_lock lock(mutex_);
     if (owner != owner_)

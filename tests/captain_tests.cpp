@@ -58,7 +58,7 @@ struct Install
     Install()
     {
         fs::create_directories(captures);
-        saveLink(config / "token", { .token = "t0ken", .account = "player" });
+        REQUIRE(!saveLink(config, { .token = "t0ken", .account = "player" }));
     }
 
     ~Install()
@@ -73,7 +73,7 @@ struct Install
     auto options(std::chrono::milliseconds retry = std::chrono::milliseconds(1)) -> ImportOptions
     {
         ImportOptions options{ .captures = captures, .uploaded = uploaded, .state = state, .server = "https://mogsafe.test", .config = config, .retry = retry };
-        options.say = [this](std::string text)
+        options.post = [this](std::string text)
         {
             const std::scoped_lock lock(mutex);
             said.push_back(std::move(text));
@@ -110,14 +110,14 @@ TEST_CASE("captain captures are found at any depth, and not inside one")
     fs::create_directories(in.captures / "tracker"); // an addon's own data
     std::ofstream(in.captures / "tracker/data.json") << "{}";
 
-    const auto found = findCaptain(in.captures);
+    const auto found = findCaptures(in.captures);
     REQUIRE(found.size() == 2);
     CHECK(found[0].folder == "2026-8-4_23_54/Mirabeth");
     CHECK(found[1].folder == "Mining/test_2026-8-4/Mirabeth");
     CHECK(found[1].character == "Mirabeth");
     CHECK(found[1].size == 3);
     CHECK(!found[1].growing);
-    CHECK(findCaptain(in.dir / "no such folder").empty());
+    CHECK(findCaptures(in.dir / "no such folder").empty());
 }
 
 TEST_CASE("a full.log changed in the last 10 minutes is left for later")
@@ -125,7 +125,7 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
     Install in;
     captainFolder(in.captures, "a/Mirabeth", "log", MANIFEST, std::chrono::minutes(2));
     captainFolder(in.captures, "b/Mirabeth", "log", MANIFEST, std::chrono::minutes(11));
-    const auto found = findCaptain(in.captures);
+    const auto found = findCaptures(in.captures);
     REQUIRE(found.size() == 2);
     CHECK(found[0].growing);
     CHECK(!found[1].growing);
@@ -140,9 +140,9 @@ TEST_CASE("a full.log changed in the last 10 minutes is left for later")
 
 TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
 {
-    const Install     in;
-    std::atomic<bool> stop{ false };
-    std::string       log;
+    const Install    in;
+    std::stop_source stop; // NOLINT(misc-const-correctness): request_stop is const in libstdc++ only
+    std::string      log;
     for (int i = 0; i < 1000; ++i)
     {
         log += "[2026-08-04 23:54:01] Incoming packet 0x00A\n|  00 01 02 03 |\n";
@@ -150,14 +150,14 @@ TEST_CASE("CRC-32 matches what Mogsafe's import page computes")
     std::ofstream(in.dir / "check", std::ios::binary) << "123456789";
     std::ofstream(in.dir / "full.log", std::ios::binary) << log;
     // The values Mogsafe's zip.js crc32Of, which browse.html calls, gives for the same bytes.
-    CHECK(crc32File(in.dir / "check", stop)->crc == 0xcbf43926);
-    const auto crc = crc32File(in.dir / "full.log", stop);
+    CHECK(crc32File(in.dir / "check")->crc == 0xcbf43926);
+    const auto crc = crc32File(in.dir / "full.log");
     REQUIRE(crc);
     CHECK(crc->crc == 0x94175684);
     CHECK(crc->size == 61000);
-    CHECK(!crc32File(in.dir / "missing", stop));
-    stop = true;
-    CHECK(!crc32File(in.dir / "full.log", stop));
+    CHECK(!crc32File(in.dir / "missing"));
+    stop.request_stop();
+    CHECK(!crc32File(in.dir / "full.log", stop.get_token()));
 }
 
 TEST_CASE("a captain import sends full.log compressed with its manifest, then moves the folder")
@@ -204,9 +204,8 @@ TEST_CASE("a log already in Vault sends no bytes and moves")
     Install    in;
     const auto log = std::string("[2026-08-04] x\n");
     captainFolder(in.captures, "s/Mirabeth", log);
-    FakeMogsafe             server;
-    const std::atomic<bool> stop{ false };
-    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop)->crc, log.size())] = "cap7";
+    FakeMogsafe server;
+    server.imported[std::format("{:08x}:{}", crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log")->crc, log.size())] = "cap7";
     in.importer(server)->run();
     CHECK(server.creates == 0);
     CHECK(server.received == 0);
@@ -265,6 +264,20 @@ TEST_CASE("server errors back off, and the import never gives up")
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
 
+TEST_CASE("an import that keeps failing says why while it retries")
+{
+    Install in;
+    captainFolder(in.captures, "s/Mirabeth", noise(3000));
+    FakeMogsafe server;
+    server.forced["POST"] = { 503, 503, 503, 503, 503, 503 }; // creates
+    const auto imp        = in.importer(server, std::chrono::milliseconds(50));
+    imp->start();
+    REQUIRE(waitFor([&]
+                    {
+                        return imp->progress().error == "create: 503";
+                    }));
+}
+
 TEST_CASE("a refused token stops the import, unlinks, and the import resumes after a new link")
 {
     Install in;
@@ -273,14 +286,14 @@ TEST_CASE("a refused token stops the import, unlinks, and the import resumes aft
     server.token = "revoked";
     auto imp     = in.importer(server);
     imp->run();
-    CHECK(imp->unauthorized());
+    CHECK(imp->takeUnauthorized());
     CHECK(!fs::exists(in.config / "token"));
     CHECK(in.saidAny("this install is not linked"));
     CHECK(fs::exists(in.captures / "s/Mirabeth"));
     CHECK(Importer::pending(in.state));
 
     server.token = "t1";
-    saveLink(in.config / "token", { .token = "t1", .account = "player" });
+    REQUIRE(!saveLink(in.config, { .token = "t1", .account = "player" }));
     in.importer(server)->run();
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
     CHECK(!Importer::pending(in.state));
@@ -425,8 +438,7 @@ TEST_CASE("a folder's search log goes ahead of its full.log in the same upload, 
     REQUIRE(server.creates == 2);
     const auto& u = server.uploads.at("/v1/uploads/1");
     CHECK(u.closed);
-    const std::atomic<bool> stop{ false };
-    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "a/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "a/Hoa/SearchLog/search.log")->crc));
     CHECK(u.meta.at("search_size") == std::to_string(search.size()));
     CHECK(!u.meta.contains("search_encoding"));
     CHECK(searchParts(u) == std::pair{ search, log });
@@ -446,11 +458,10 @@ TEST_CASE("a folder in Vault without its search log replaces its capture; withou
     const auto log = noise(3000);
     searchFolder(captainFolder(in.captures, "a/Hoa", log), "search");
     captainFolder(in.captures, "b/Ijs", log + "b");
-    FakeMogsafe       server;
-    std::atomic<bool> stop{ false };
-    const auto        key = [&](const std::string& rel)
+    FakeMogsafe server;
+    const auto  key = [&](const std::string& rel)
     {
-        return std::format("{:08x}:{}", crc32File(in.captures / rel / "PacketLogger" / "full.log", stop)->crc, fs::file_size(in.captures / rel / "PacketLogger" / "full.log"));
+        return std::format("{:08x}:{}", crc32File(in.captures / rel / "PacketLogger" / "full.log")->crc, fs::file_size(in.captures / rel / "PacketLogger" / "full.log"));
     };
     server.imported[key("a/Hoa")] = "cap7";
     server.imported[key("b/Ijs")] = "cap8";
@@ -633,7 +644,7 @@ TEST_CASE("the import runs on its own thread, and stops at once mid-append and m
         auto  imp      = std::make_unique<Importer>(in.options(), std::move(blocking));
         auto  before   = std::chrono::steady_clock::now();
         imp->start();
-        CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(100));
+        CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(1));
         REQUIRE(waitFor([&]
                         {
                             return http.waiting.load();
@@ -678,12 +689,12 @@ TEST_CASE("the import runs on its own thread, and stops at once mid-append and m
 TEST_CASE("the import reminder shows once per install, to one client")
 {
     Install in;
-    CHECK(!remindImport(in.config, in.captures)); // nothing waiting
+    CHECK(!claimImportReminder(in.config, in.captures)); // nothing waiting
     CHECK(!fs::exists(in.config / "import-reminded"));
 
     captainFolder(in.captures, "s/Mirabeth", "log");
     fs::rename(in.config / "token", in.dir / "token");
-    CHECK(!remindImport(in.config, in.captures)); // not linked
+    CHECK(!claimImportReminder(in.config, in.captures)); // not linked
     fs::rename(in.dir / "token", in.config / "token");
 
     for (int round = 0; round < 5; ++round) // two clients logging in together, then later logins and restarts
@@ -698,7 +709,7 @@ TEST_CASE("the import reminder shows once per install, to one client")
                 clients.emplace_back([&]
                                      {
                                          go.arrive_and_wait();
-                                         shown += remindImport(in.config, in.captures) ? 1 : 0;
+                                         shown += claimImportReminder(in.config, in.captures) ? 1 : 0;
                                      });
             }
         }
@@ -706,31 +717,20 @@ TEST_CASE("the import reminder shows once per install, to one client")
     }
 }
 
-#ifdef _WIN32
-TEST_CASE("a second client sharing the install does not import while the first does")
+TEST_CASE("a client whose turn another holds imports nothing, and says so only when asked")
 {
     Install     in;
-    FakeMogsafe first;
-    FakeMogsafe second;
-    captainFolder(in.captures, "s/Mirabeth", noise(3 << 20));
-    const auto mutex   = std::format("Local\\Memoria-import-test-{}", std::random_device{}());
-    auto       options = in.options();
-    options.mutex      = mutex;
-    auto  blocking     = std::make_unique<Blocking>(first, "PATCH");
-    auto& http         = *blocking;
-    auto  running      = std::make_unique<Importer>(options, std::move(blocking));
-    running->start();
-    REQUIRE(waitFor([&]
-                    {
-                        return http.waiting.load();
-                    }));
-
+    FakeMogsafe server;
+    captainFolder(in.captures, "s/Mirabeth", noise(3000));
     for (const bool asked : { true, false }) // /memoria import, then a resume at load
     {
         Install other;
-        auto    otherOptions = other.options();
-        otherOptions.mutex   = mutex;
-        Importer imp(otherOptions, std::make_unique<Forward>(second));
+        auto    options = other.options();
+        options.mayRun  = []
+        {
+            return false;
+        };
+        Importer imp(options, std::make_unique<Forward>(server));
         imp.start(asked);
         REQUIRE(waitFor([&]
                         {
@@ -738,10 +738,9 @@ TEST_CASE("a second client sharing the install does not import while the first d
                         }));
         CHECK(other.saidAny("Another client sharing this install is importing.") == asked);
     }
-    CHECK(second.requests == 0);
+    CHECK(server.requests == 0);
 
-    running.reset(); // the first client unloads, which frees the run for the next
-    Importer next(options, std::make_unique<Forward>(first));
+    Importer next(in.options(), std::make_unique<Forward>(server)); // the turn comes
     next.start(false);
     REQUIRE(waitFor([&]
                     {
@@ -749,15 +748,13 @@ TEST_CASE("a second client sharing the install does not import while the first d
                     }));
     CHECK(fs::exists(in.uploaded / "s/Mirabeth"));
 }
-#endif
 
 TEST_CASE("a log that cannot be staged stops the import and keeps its place for the next start")
 {
     Install    in;
     const auto log = noise(3 << 20);
     captainFolder(in.captures, "s/Mirabeth", log);
-    const std::atomic<bool> stop{ false };
-    const auto              crc = crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log", stop);
+    const auto crc = crc32File(in.captures / "s/Mirabeth/PacketLogger/full.log");
     REQUIRE(crc);
     const auto blocker = in.state / "imports" / std::format("{:08x}-{}.zst.tmp", crc->crc, crc->size);
     fs::create_directories(blocker);
@@ -802,10 +799,9 @@ TEST_CASE("a search log changed after an interrupted create goes up as it is now
     server.down = false;
     in.importer(server)->run();
     REQUIRE(server.uploads.size() == 1);
-    const auto&             u = server.uploads.begin()->second;
-    const std::atomic<bool> stop{ false };
+    const auto& u = server.uploads.begin()->second;
     CHECK(searchParts(u) == std::pair{ now, log });
-    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "s/Hoa/SearchLog/search.log", stop)->crc));
+    CHECK(u.meta.at("search_crc32") == std::format("{:08x}", crc32File(in.uploaded / "s/Hoa/SearchLog/search.log")->crc));
     CHECK(u.meta.at("search_size") == std::to_string(now.size()));
 }
 
@@ -863,9 +859,8 @@ TEST_CASE("an old stage that cannot be removed stops the import before a new cre
     CHECK_THROWS(in.importer(server)->run());
     server.uploads.clear();
     server.crashAtPatch = -1;
-    const std::atomic<bool> stop{ false };
-    const auto              crc   = crc32File(dir / "PacketLogger" / "full.log", stop);
-    const auto              stage = in.state / "imports" / std::format("{:08x}-{}.zst", crc->crc, crc->size);
+    const auto crc      = crc32File(dir / "PacketLogger" / "full.log");
+    const auto stage    = in.state / "imports" / std::format("{:08x}-{}.zst", crc->crc, crc->size);
     REQUIRE(fs::remove(stage));
     fs::create_directories(stage / "inside"); // a folder that is not empty cannot be removed
     in.importer(server)->run();

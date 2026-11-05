@@ -164,7 +164,7 @@ auto Recorder::onSession(const Op op) -> void
     }
     catch (const std::exception& error)
     {
-        sessionFailed(error);
+        sessionFailed(error.what());
     }
 }
 
@@ -202,22 +202,18 @@ auto Recorder::run() -> void
             try
             {
                 writer_->flush();
-                if (std::exchange(failing_, false))
-                {
-                    const std::scoped_lock lock(statusMutex_);
-                    status_.error.clear();
-                }
+                clearError();
             }
             catch (const std::exception& error)
             {
-                broken(error);
+                writeFailed(error);
             }
             onSession([](xicap::Writer& session)
                       {
                           session.flush();
                       });
             lastFlush_ = now;
-            if (writer_ && options_.ended && options_.ended(status().capture))
+            if (writer_ && options_.ended && options_.ended(capture_))
             {
                 rollover();
             }
@@ -291,7 +287,7 @@ auto Recorder::handle(const Event& event) -> void
     }
     catch (const std::exception& error)
     {
-        broken(error);
+        writeFailed(error);
     }
 }
 
@@ -326,6 +322,7 @@ auto Recorder::open(const uint64_t timestamp, const Login& who) -> void
     login_          = who;
     reopenAt_       = std::chrono::steady_clock::now() + REOPEN_EVERY;
     writer_         = std::make_unique<xicap::Writer>(path, std::move(meta), xicap::FramePolicy::live(), chat_);
+    capture_        = path;
     previous_       = writer_->captureId();
     saveState(true);
     if (!who.midSession)
@@ -383,31 +380,27 @@ auto Recorder::mark(const xicap::MarkerKind kind, const std::string_view text) -
 auto Recorder::openSession(const std::filesystem::path& path) -> void
 {
     closeSession();
-    bool created{ false };
+    if (!writer_ || !login_)
+    {
+        sessionFailed("no capture is open, so no session either");
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    // Created here, never replaced: an existing file, the main capture among them, refuses the session.
+    if (!createNew(path))
+    {
+        sessionFailed(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));
+        return;
+    }
     try
     {
-        if (!writer_)
-        {
-            throw std::runtime_error("no capture is open, so no session either");
-        }
-        std::error_code ec;
-        std::filesystem::create_directories(path.parent_path(), ec);
-        // Created here, never replaced: an existing file, the main capture among them, refuses the session.
-        created = createNew(path);
-        if (!created)
-        {
-            throw std::runtime_error(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));
-        }
         session_ = std::make_unique<xicap::Writer>(path, metadata(*login_, writer_->captureId()), xicap::FramePolicy::live(), chat_);
     }
     catch (const std::exception& error)
     {
-        if (created)
-        {
-            std::error_code ec;
-            std::filesystem::remove(path, ec);
-        }
-        sessionFailed(error);
+        std::filesystem::remove(path, ec);
+        sessionFailed(error.what());
         return;
     }
     const std::scoped_lock lock(statusMutex_);
@@ -426,11 +419,11 @@ auto Recorder::closeSession() -> void
     status_.session.clear();
 }
 
-auto Recorder::sessionFailed(const std::exception& error) -> void
+auto Recorder::sessionFailed(const std::string& why) -> void
 {
     session_.reset();
     const std::scoped_lock lock(statusMutex_);
-    status_.sessionError = error.what();
+    status_.sessionError = why;
     status_.session.clear();
 }
 
@@ -447,16 +440,16 @@ auto Recorder::close() -> void
     status_.capture.clear();
 }
 
-auto Recorder::fail(const std::exception& error) -> void
+auto Recorder::setError(const std::exception& error) -> void
 {
     const std::scoped_lock lock(statusMutex_);
     status_.error = error.what();
 }
 
 // A writer that failed once stays failed. Dropping it leaves the capture marked open, as a crash would, and the next packet starts a new one.
-auto Recorder::broken(const std::exception& error) -> void
+auto Recorder::writeFailed(const std::exception& error) -> void
 {
-    fail(error);
+    setError(error);
     session_.reset();
     writer_.reset();
     {
@@ -491,7 +484,7 @@ auto Recorder::finish() -> void
         const std::scoped_lock lock(wakeMutex_);
         if (stopping_)
         {
-            closedAtStop_.push_back(status().capture);
+            closedAtStop_.push_back(capture_);
         }
     }
     bool closed{ true };
@@ -501,11 +494,23 @@ auto Recorder::finish() -> void
     }
     catch (const std::exception& error)
     {
-        fail(error);
+        setError(error);
         closed = false;
     }
     saveState(!closed);
     writer_.reset();
+    if (closed)
+    {
+        clearError();
+    }
+}
+
+// A capture reached disk: the last error no longer applies, and the next failure is said again.
+auto Recorder::clearError() -> void
+{
+    failing_ = false;
+    const std::scoped_lock lock(statusMutex_);
+    status_.error.clear();
 }
 
 // Replaced whole, so a crash mid-write leaves the old state.

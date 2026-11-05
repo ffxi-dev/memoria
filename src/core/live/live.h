@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -25,8 +26,8 @@ struct Link
     std::string url;
 };
 
-// Asks Mogsafe for a live link with the install's token.
-auto start(Http& http, const std::string& server, const std::string& installToken) -> std::expected<Link, std::string>;
+// Asks Mogsafe for a live link with the install's token. A token Mogsafe refuses is deleted from config, as uploads do.
+auto start(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<Link, std::string>;
 
 auto hello(std::string_view character, std::string_view world, std::string_view clientVersion, std::string_view agent) -> std::string;
 
@@ -34,8 +35,9 @@ auto hello(std::string_view character, std::string_view world, std::string_view 
 auto viewers(std::string_view message) -> std::optional<int>;
 
 // One packet as live viewers get it, redacted as a capture written with chat stores it. Little-endian: version 1 (u8),
-// channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet.
-auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::vector<uint8_t>;
+// channel (u8), flags (u16), timestamp in Unix ms (u64), length (u32), then the packet. Nothing for a game packet under
+// 4 bytes, which has no header to redact by.
+auto frame(const xicap::WritePacket& packet, xicap::Chat chat) -> std::optional<std::vector<uint8_t>>;
 
 // Sends messages in order through send until one fails or stop is requested: a stop sends nothing more. True when every
 // message went.
@@ -53,7 +55,7 @@ public:
 
     // The rest belong to the live link that claimed the feed last: one stopped but still closing changes nothing.
     auto claim() -> uint64_t;                                       // closes the feed and returns the new owner's id
-    auto open(uint64_t owner, bool on) -> void;                     // on while someone watches; off empties the feed
+    auto setOpen(uint64_t owner, bool on) -> void;                  // on while someone watches; off empties the feed
     auto take(uint64_t owner) -> std::vector<std::vector<uint8_t>>; // frames back to back, at most MESSAGE_BYTES a message unless one frame is larger
     auto takeDropped(uint64_t owner) -> uint64_t;
 

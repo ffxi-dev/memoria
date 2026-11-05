@@ -118,17 +118,17 @@ NextPage           nextPage_{};
 uintptr_t          connection_{};
 std::vector<Patch> patches_;
 
-auto record(const bool clientToServer, const uint8_t* data, const uint32_t size) -> void
+auto record(const xicap::PacketDirection direction, const uint8_t* data, const uint32_t size) -> void
 {
     if (sink_ && size >= 12 && size <= MAX_SIZE)
     {
-        sink_(clientToServer, data, size);
+        sink_(direction, data, size);
     }
 }
 
 auto __cdecl encryptHook(void* context, uint8_t* packet, int size) -> int
 {
-    record(true, packet, static_cast<uint32_t>(size));
+    record(xicap::PacketDirection::ClientToServer, packet, static_cast<uint32_t>(size));
     return encrypt_(context, packet, size);
 }
 
@@ -139,7 +139,7 @@ auto __cdecl decryptHook(void* context, uint8_t* packet) -> bool
     const bool ok{ decrypt_(context, packet) };
     if (ok && encrypted)
     {
-        record(false, packet, read32(reinterpret_cast<uintptr_t>(packet)));
+        record(xicap::PacketDirection::ServerToClient, packet, read32(reinterpret_cast<uintptr_t>(packet)));
     }
     return ok;
 }
@@ -149,7 +149,7 @@ auto __cdecl nextPageHook(void* connection) -> int
     const int result{ nextPage_(connection) };
     if (result == 0) // the request was queued
     {
-        record(true, NEXT_PAGE.data(), NEXT_PAGE.size());
+        record(xicap::PacketDirection::ClientToServer, NEXT_PAGE.data(), NEXT_PAGE.size());
     }
     return result;
 }
@@ -172,7 +172,7 @@ auto encryptPointer() -> uintptr_t
 
 } // namespace
 
-auto install(const Sink sink) -> std::string
+auto install(const Sink sink) -> std::optional<std::string>
 {
     const auto encrypt      = find("B8B0100000E8????????538B9C24B8100000555633F685DB");
     const auto decrypt      = find("B8B0100000E8????????538B9C24BC100000568B430485C0");
@@ -199,7 +199,7 @@ auto install(const Sink sink) -> std::string
         }
         patches_.push_back(*patch);
     }
-    return {};
+    return std::nullopt;
 }
 
 auto tick() -> void
@@ -235,30 +235,30 @@ constexpr uintptr_t LIST_OFFSET    = 0x148; // in the lobby context
 constexpr uintptr_t VERSION_OFFSET = 0x1A08;
 
 // The content id getter: mov ecx,[esp+4]; index * 0x8C; mov ecx,[client]; mov eax,[ecx+eax*4+list]; ret
-auto getter() -> uintptr_t
+auto characterGetter() -> uintptr_t
 {
     static const auto address = find("8B4C24048D04CD000000002BC18B0D????????8D04808B8481????????C3");
     return address;
 }
 
 // The character list in FFXiMain's copy of the lobby context, which the client keeps after the login; 0 before it has one.
-auto list() -> uintptr_t
+auto characterList() -> uintptr_t
 {
-    const auto client = read32(read32(getter() + 15));
-    return client ? client + read32(getter() + 25) : 0;
+    const auto client = read32(read32(characterGetter() + 15));
+    return client ? client + read32(characterGetter() + 25) : 0;
 }
 
 } // namespace
 
 auto version() -> std::string
 {
-    if (getter() == 0)
+    if (characterGetter() == 0)
     {
         return {};
     }
     try
     {
-        const auto l = list();
+        const auto l = characterList();
         if (l == 0)
         {
             return {};
@@ -279,9 +279,9 @@ auto version() -> std::string
     }
 }
 
-auto character(capture::Login& who) -> std::string
+auto fillCharacter(capture::Login& who) -> std::optional<std::string>
 {
-    if (getter() == 0)
+    if (characterGetter() == 0)
     {
         return "the character signature is missing";
     }
@@ -290,7 +290,7 @@ auto character(capture::Login& who) -> std::string
     constexpr size_t   WORLD_NAME_SIZE = 16;
     try
     {
-        const auto list = lobby::list();
+        const auto list = lobby::characterList();
         if (list == 0)
         {
             return "no character list";
@@ -311,7 +311,7 @@ auto character(capture::Login& who) -> std::string
         std::memcpy(&who.worldId, entry + 6, sizeof(who.worldId));
         const auto* world   = reinterpret_cast<const char*>(entry + 28);
         who.character.world = std::string(world, strnlen(world, WORLD_NAME_SIZE));
-        return {};
+        return std::nullopt;
     }
     catch (...)
     {

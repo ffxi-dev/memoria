@@ -5,10 +5,11 @@
 #include "core/captain/importer.h"
 #include "core/capture/clock.h"
 #include "core/capture/recorder.h"
+#include "core/install.h"
 #include "core/upload/uploader.h"
+#include "core/worker.h"
 #include "plugin/live.h"
 #include "plugin/text.h"
-#include "plugin/worker.h"
 
 #include <Windows.h>
 
@@ -67,7 +68,7 @@ public:
     // args[0] is the command's name; line is the command as typed, for a path that holds spaces.
     auto command(const std::vector<std::string>& args, std::string_view line) -> void;
 
-    auto recordSearch(bool clientToServer, const uint8_t* data, uint32_t size) -> void;
+    auto recordSearch(xicap::PacketDirection direction, const uint8_t* data, uint32_t size) -> void;
 
 private:
     // A /memoria session started while linked: Vault keeps it as a range of the recording, with no file here.
@@ -86,19 +87,27 @@ private:
         auto operator==(const ChunkKey&) const -> bool = default;
     };
 
+    auto enter(capture::Login who) -> void;
     auto record(xicap::PacketDirection direction, uint32_t size, const uint8_t* data, const uint8_t* modified, uint32_t sizeChunk, const uint8_t* dataChunk, bool injected, bool blocked) -> void;
     auto say(const std::string& text) -> void;
     auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
-    auto status() -> void;
+    auto sayStatus() -> void;
+    auto sayUploads() -> void;
+    auto startSession(std::string_view path) -> void;
+    auto stopSession() -> void;
+    auto importCaptain() -> void;
+    auto goLive() -> void;
+    auto unlinkInstall() -> void;
+    auto setUploads(bool on) -> void;
     auto startUploads() -> void;
     auto link() -> void;
     auto waitForLink(const std::stop_token& stop) -> void;
-    auto cancelLink() -> bool; // true when a link was being made
-    auto unlink(const std::string& why) -> void;
-    auto linked() const -> std::optional<account::Linked>; // read each time: clients sharing the install share its token
+    auto cancelLink() -> bool;                        // true when a link was being made
+    auto sayUnlinked(const std::string& why) -> void; // the token is gone: stops live and says so
+    auto linked() const -> std::optional<Linked>;     // read each time: clients sharing the install share its token
     auto greet() -> void;
     auto remind() -> void;
-    auto offerImport() -> void;
+    auto offerImport(const std::stop_token& stop) -> void;
     auto startImport(bool asked) -> void;
     auto importLine() const -> std::string;
     auto hello() -> std::string;
@@ -109,7 +118,7 @@ private:
     std::string                            server_{ "https://mogsafe.sruon.dev" };
     std::mutex                             inboxMutex_;
     std::vector<std::string>               inbox_;
-    std::optional<account::Linked>         arrived_;   // from the link thread
+    std::optional<Linked>                  arrived_;   // from the link thread
     std::mutex                             linkMutex_; // the link thread saves a token only while no unlink cancels it
     std::atomic<bool>                      linking_{ false };
     capture::Clock                         clock_;
@@ -118,6 +127,7 @@ private:
     std::unique_ptr<Live>                  live_; // after recorder_, whose feed it reads
     std::vector<std::unique_ptr<Live>>     closing_;
     HANDLE                                 uploadMutex_{ nullptr };
+    HANDLE                                 importMutex_{ nullptr };
     std::unique_ptr<captain::Importer>     importer_;
     std::atomic<bool>                      reminding_{ false };
     std::string                            startError_;

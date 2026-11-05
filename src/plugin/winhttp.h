@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace memoria::plugin
@@ -17,6 +18,9 @@ struct CloseInternetHandle
 using InternetHandle = std::unique_ptr<void, CloseInternetHandle>; // HINTERNET
 
 auto wide(std::string_view ascii) -> std::wstring;
+
+// Opens an https URL in the default browser. Blocks while Windows starts it, so call it off the game thread.
+auto browse(const std::string& url) -> void;
 
 // A WinHTTP session that names Memoria and its version as the user agent.
 auto openSession() -> InternetHandle;

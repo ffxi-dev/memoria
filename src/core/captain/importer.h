@@ -9,12 +9,14 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -28,10 +30,10 @@ struct ImportOptions
     std::filesystem::path            state;    // <Ashita>/captures/memoria: imports.txt and the staged logs
     std::string                      server;
     std::filesystem::path            config;
-    std::function<void(std::string)> say;
+    std::function<void(std::string)> post;
     std::chrono::milliseconds        retry{ 5000 };
     std::chrono::seconds             quiet{ std::chrono::minutes(10) };
-    std::string                      mutex; // Windows: a named mutex held for the run, so clients sharing the install import one at a time
+    std::function<bool()>            mayRun; // asked on the import thread: clients sharing an install import one at a time
 };
 
 struct ImportProgress
@@ -41,6 +43,7 @@ struct ImportProgress
     std::string character;
     uint64_t    sent{};
     uint64_t    size{}; // of the staged log; 0 until staged
+    std::string error;  // why the last request failed, while the import retries it
 };
 
 // /memoria import: uploads captain's captures to Mogsafe as captain imports, one at a time, and moves each one Mogsafe holds to captures-uploaded.
@@ -63,7 +66,7 @@ public:
 
     [[nodiscard]] auto finished() const -> bool;
     [[nodiscard]] auto progress() const -> ImportProgress;
-    [[nodiscard]] auto unauthorized() -> bool; // true once when Mogsafe refused the token, which is then deleted
+    [[nodiscard]] auto takeUnauthorized() -> bool; // true once when Mogsafe refused the token, which is then deleted
 
 private:
     struct Entry
@@ -73,13 +76,26 @@ private:
         std::string url;
     };
 
-    auto upload(const CaptainCapture& c, const std::string& prefix) -> Outcome;
-    auto moved(const CaptainCapture& c, const std::string& prefix, const std::string& done, Outcome outcome) -> Outcome;
-    auto ready() -> bool;
-    auto wait(std::chrono::milliseconds time) -> void;
-    auto say(const std::string& text) -> void;
-    auto load() -> void;
-    auto save() -> std::optional<std::string>; // why imports.txt was not replaced, if it was not
+    // Where a capture's logs are compressed before they go: full.log's stage, and the search log's.
+    struct Stages
+    {
+        std::filesystem::path log;
+        std::filesystem::path search;
+    };
+
+    auto               upload(const CaptainCapture& c, const std::string& prefix) -> Outcome;
+    auto               create(const CaptainCapture& c, Entry& e, const std::string& prefix, const std::string& metadata, std::string& replaces) -> std::optional<Outcome>;
+    auto               stageSearch(const CaptainCapture& c, const Entry& e, const std::string& prefix) -> std::expected<std::string, Outcome>;
+    [[nodiscard]] auto stages(const Entry& e) const -> Stages;
+    auto               forget(const CaptainCapture& c, const Entry& e) -> void;
+    auto               refuse(const CaptainCapture& c, const Entry& e, const std::string& prefix, const HttpResponse& res) -> Outcome;
+    auto               moveToUploaded(const CaptainCapture& c, const std::string& prefix, const std::string& done, Outcome outcome) -> Outcome;
+    auto               ready() -> bool;
+    auto               wait(std::chrono::milliseconds time) -> void;
+    auto               post(const std::string& text) -> void;
+    auto               retrying(std::string why) -> void; // shown in progress until bytes move or the next capture starts
+    auto               load() -> void;
+    [[nodiscard]] auto save() -> std::optional<std::string>; // why imports.txt was not replaced, if it was not
 
     ImportOptions                options_;
     std::unique_ptr<Http>        http_;
@@ -89,12 +105,13 @@ private:
     mutable std::mutex      mutex_;
     std::condition_variable wake_;
     std::string             character_;
+    std::string             error_;
 
     std::atomic<size_t>   index_{ 0 };
     std::atomic<size_t>   count_{ 0 };
     std::atomic<uint64_t> sent_{ 0 };
     std::atomic<uint64_t> size_{ 0 };
-    std::atomic<bool>     stopping_{ false };
+    std::stop_source      stop_;
     std::atomic<bool>     finished_{ false };
     std::thread           thread_;
 };

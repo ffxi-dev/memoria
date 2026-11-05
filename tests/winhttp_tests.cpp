@@ -7,9 +7,9 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
+#include "core/worker.h"
 #include "plugin/live.h"
 #include "plugin/winhttp.h"
-#include "plugin/worker.h"
 #include "support.h"
 
 #include <future>
@@ -253,6 +253,19 @@ TEST_CASE("a cancelled request stops reading a slow body at its next read")
     CHECK(res.error() == "stopped");
 }
 
+TEST_CASE("a body cut short is an error, not a response")
+{
+    const Server    server([](const SOCKET peer, const std::string&, const std::atomic<bool>&)
+                           {
+                            const std::string answer = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"token\":";
+                            ::send(peer, answer.data(), static_cast<int>(answer.size()), 0); // then the connection closes
+                           });
+    plugin::WinHttp http(SECOND);
+    const auto      res = http.request("GET", server.url() + "/", {}, {});
+    REQUIRE(!res);
+    CHECK(res.error().starts_with("receive"));
+}
+
 TEST_CASE("a cancelled request waiting for its answer ends at its timeout, and none goes after it")
 {
     Server          server([](SOCKET, const std::string&, const std::atomic<bool>&)
@@ -278,12 +291,10 @@ TEST_CASE("a live link stopped during a slow start answer ends within its timeou
     Server     server(trickle("HTTP/1.1 201 Created\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{", std::string(10, ' ') + "}", 450ms));
     const auto dir = tempDir();
     live::Feed feed;
-    auto       link = std::make_unique<plugin::Live>(server.url(), dir, "t0ken", feed, "{}", [](std::string)
-                                                     {
-                                                     },
-                                                     [](const std::string&)
-                                                     {
-                                                     });
+    const auto quiet = [](const std::string&)
+    {
+    };
+    auto link = std::make_unique<plugin::Live>(plugin::LiveOptions{ .server = server.url(), .config = dir, .installToken = "t0ken", .hello = "{}", .post = quiet, .open = quiet }, feed);
     REQUIRE(server.waitForRequest());
     const auto start = std::chrono::steady_clock::now();
     link.reset();
@@ -295,7 +306,7 @@ TEST_CASE("an uploader, an importer and the worker each join within their reques
 {
     Server     server(stall);
     const auto dir = tempDir();
-    saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
+    REQUIRE(!saveLink(dir / "config", { .token = "t0ken", .account = "player" }));
 
     SECTION("the uploader")
     {
@@ -324,7 +335,7 @@ TEST_CASE("an uploader, an importer and the worker each join within their reques
     }
     SECTION("the worker")
     {
-        auto worker = std::make_unique<plugin::Worker>();
+        auto worker = std::make_unique<Worker>();
         worker->post([&](const std::stop_token& stop)
                      {
                          plugin::WinHttp          http(SECOND);
@@ -375,18 +386,25 @@ TEST_CASE("a live link upgrades, streams, stays connected while nobody watches, 
                       }
                              });
     const auto        dir = tempDir();
-    saveLink(dir / "token", { .token = "t0ken", .account = "player" }); // the link lives while the install shares this token
+    REQUIRE(!saveLink(dir, { .token = "t0ken", .account = "player" })); // the link lives while the install shares this token
     live::Feed               feed;
     std::mutex               mutex;
     std::vector<std::string> said;
-    auto                     link    = std::make_unique<plugin::Live>(server.url(), dir, "t0ken", feed, "{}", [&](std::string text)
-                                                                      {
-                                                   const std::scoped_lock lock(mutex);
-                                                   said.push_back(std::move(text));
+    auto                     link    = std::make_unique<plugin::Live>(plugin::LiveOptions{
+                                                                          .server       = server.url(),
+                                                                          .config       = dir,
+                                                                          .installToken = "t0ken",
+                                                                          .hello        = "{}",
+                                                                          .post         = [&](std::string text)
+                                                                          {
+                                                       const std::scoped_lock lock(mutex);
+                                                       said.push_back(std::move(text));
+                                                                          },
+                                                                          .open = [](const std::string&)
+                                                                          {
+                                                                          }, // opens no browser
                                                                       },
-                                                                      [](const std::string&)
-                                                                      {
-                                                                      }); // opens no browser
+                                                                      feed);
     const bool               greeted = waitFor([&]
                                                {
                                      return hello.load();

@@ -76,7 +76,7 @@ TEST_CASE("live frames hold what the capture holds, so chat goes out zeroed")
     {
         Recorder   rec(options(dir));
         const auto owner = rec.live().claim();
-        rec.live().open(owner, true);
+        rec.live().setOpen(owner, true);
         rec.login(T0, who("Kalnor", 1));
         rec.packet(gamePacket(T0 + 1, 0x017)); // chat to the client
         auto said      = gamePacket(T0 + 2, 0x0B5);
@@ -116,7 +116,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(owner).empty());
 
-    feed.open(owner, true);
+    feed.setOpen(owner, true);
     for (int i = 0; i < 3; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
@@ -137,7 +137,7 @@ TEST_CASE("the live feed batches frames into messages and takes nothing while cl
     CHECK(frames(messages).size() == 5000);
 
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
-    feed.open(owner, false);
+    feed.setOpen(owner, false);
     CHECK(feed.take(owner).empty());
 }
 
@@ -145,7 +145,7 @@ TEST_CASE("a full live feed drops packets and counts them")
 {
     live::Feed feed(size_t{ 3 } * 32);
     const auto owner = feed.claim();
-    feed.open(owner, true);
+    feed.setOpen(owner, true);
     for (int i = 0; i < 5; ++i)
     {
         feed.push(outPacket(gamePacket(T0 + i)), xicap::Chat::Redact);
@@ -165,10 +165,10 @@ TEST_CASE("a live link stopped late cannot close the feed of the one that replac
 {
     live::Feed feed;
     const auto old = feed.claim();
-    feed.open(old, true);
+    feed.setOpen(old, true);
     const auto now = feed.claim(); // /memoria live off, then /memoria live, while the old send still hangs
-    feed.open(now, true);
-    feed.open(old, false); // the old link's send returns, and it closes what it thinks is its feed
+    feed.setOpen(now, true);
+    feed.setOpen(old, false); // the old link's send returns, and it closes what it thinks is its feed
     feed.push(outPacket(gamePacket(T0)), xicap::Chat::Redact);
     CHECK(feed.take(old).empty());
     CHECK(frames(feed.take(now)).size() == 1);
@@ -196,7 +196,7 @@ TEST_CASE("a malformed answer from Mogsafe is an error, never an exception that 
             http.answer = { .status = status, .body = body };
             CHECK_NOTHROW(std::ignore = startLink(http, "https://mogsafe.test"));
             CHECK_NOTHROW(std::ignore = pollLink(http, "https://mogsafe.test", "p"));
-            CHECK_NOTHROW(std::ignore = live::start(http, "https://mogsafe.test", "t0ken"));
+            CHECK_NOTHROW(std::ignore = live::start(http, "https://mogsafe.test", {}, "t0ken"));
         }
     }
     http.answer = { .status = 201, .body = R"({"code":null})" };
@@ -218,14 +218,21 @@ TEST_CASE("a live link comes from Mogsafe with the install's token")
             return HttpResponse{ .status = status, .body = R"({"token":"l1ve","url":"https://lens.example/live#l1ve","expires":1790000000000})" };
         }
     } mogsafe;
-    const auto link = live::start(mogsafe, "https://mogsafe.test", "t0ken");
+    const auto dir = tempDir();
+    REQUIRE(!saveLink(dir, { .token = "t0ken", .account = "player" }));
+    const auto link = live::start(mogsafe, "https://mogsafe.test", dir, "t0ken");
     REQUIRE(link.has_value());
     CHECK(mogsafe.auth == "Bearer t0ken");
     CHECK(link->token == "l1ve");
     CHECK(link->url == "https://lens.example/live#l1ve");
 
-    mogsafe.status = 401;
-    CHECK(live::start(mogsafe, "https://mogsafe.test", "t0ken").error() == "Mogsafe answered 401");
+    mogsafe.status = 500;
+    CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Mogsafe answered 500");
+    CHECK(loadLink(dir));
+    mogsafe.status = 401; // a refused token is deleted, as uploads do
+    CHECK(live::start(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == "Vault no longer accepts this install");
+    CHECK(!loadLink(dir));
+    fs::remove_all(dir);
 
     CHECK(live::viewers(R"({"viewers":2})") == 2);
     CHECK(!live::viewers(R"({"sender":true})"));

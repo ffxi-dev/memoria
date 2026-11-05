@@ -31,7 +31,8 @@ auto EventQueue::drain(std::vector<Event>& out) -> void
     out.clear();
     const std::scoped_lock lock(mutex_);
     out.swap(events_);
-    bytes_ -= std::exchange(taken_, bytes_ - taken_);
+    bytes_ -= taken_;
+    taken_ = bytes_;
 }
 
 auto EventQueue::takeDropped() -> uint64_t

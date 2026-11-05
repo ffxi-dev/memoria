@@ -38,8 +38,8 @@ FetchContent_MakeAvailable(picosha2)
 
 FetchContent_Declare(
     json
-    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+    URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
 )
 FetchContent_MakeAvailable(json)
 
@@ -49,15 +49,20 @@ add_library(memoria_core STATIC
     src/core/captain/captain.cpp
     src/core/captain/compress.cpp
     src/core/captain/importer.cpp
+    src/core/captain/capture_upload.cpp
     src/core/capture/clock.cpp
     src/core/capture/event_queue.cpp
+    src/core/capture/packets.cpp
     src/core/capture/recorder.cpp
     src/core/file.cpp
+    src/core/install.cpp
     src/core/live/live.cpp
     src/core/tus.cpp
     src/core/units.cpp
+    src/core/upload/ended.cpp
     src/core/upload/upload_state.cpp
     src/core/upload/uploader.cpp
+    src/core/worker.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
 target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json libzstd_static)
@@ -79,16 +84,12 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/commands.cpp
         src/plugin/live.cpp
         src/plugin/live.h
-        src/plugin/packets.cpp
-        src/plugin/packets.h
         src/plugin/session.cpp
         src/plugin/session.h
         src/plugin/text.cpp
         src/plugin/text.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
-        src/plugin/worker.cpp
-        src/plugin/worker.h
     )
     set_target_properties(memoria PROPERTIES OUTPUT_NAME "Memoria" CXX_EXTENSIONS ON)
     if(MEMORIA_OUTPUT_DIR)
@@ -133,17 +134,18 @@ if(MEMORIA_BUILD_TESTS)
         tests/captain_tests.cpp
         tests/chat_tests.cpp
         tests/fault_tests.cpp
+        tests/install_tests.cpp
         tests/link_tests.cpp
         tests/live_tests.cpp
+        tests/packets_tests.cpp
         tests/recorder_tests.cpp
         tests/upload_tests.cpp
         tests/worker_tests.cpp
-        src/plugin/worker.cpp # the one piece of the plugin that needs only the standard library
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
     if(WIN32)
-        # ownerOnly reads the token file's permissions; the WinHTTP tests build the plugin's network code on its own.
-        target_sources(memoria_core_tests PRIVATE tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
+        # ownerOnly reads the token file's permissions; the WinHTTP and text tests build the plugin's network and text code on its own.
+        target_sources(memoria_core_tests PRIVATE tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
         target_link_libraries(memoria_core_tests PRIVATE advapi32 bcrypt winhttp ws2_32 shell32 ole32)
         target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")
     endif()

@@ -31,7 +31,8 @@ public:
     // Read before each step and chunk: another client sharing the install may have paused, unlinked, or linked again.
     auto allowed() -> bool;
 
-    // Adds the tus version and the token, and sends to the server's origin whatever origin url names; a 401 deletes the token and is an error.
+    // Adds the tus version and the token, and sends to the server's origin whatever origin url names, or a bare path; a 401
+    // deletes the token and is an error.
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
 
     // The upload's URL from a create's Location, on the server's origin.
@@ -40,7 +41,7 @@ public:
     // Sends path's bytes from offset to size in 1 MiB appends, while go(offset) holds.
     auto append(const std::filesystem::path& path, const std::string& url, uint64_t offset, uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>;
 
-    [[nodiscard]] auto unauthorized() -> bool; // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto takeUnauthorized() -> bool; // true once each time Mogsafe refuses the token on disk, which it then deletes
 
     [[nodiscard]] auto token() const -> const std::string&; // as the last allowed() read it
 
@@ -53,7 +54,5 @@ private:
     std::string           token_;
     std::atomic<bool>     unauthorized_{ false };
 };
-
-auto parseU64(std::string_view s) -> std::optional<uint64_t>;
 
 } // namespace memoria

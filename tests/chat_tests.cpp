@@ -5,6 +5,7 @@ using namespace memoria::test;
 
 TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
 {
+    const auto dir = tempDir();
     struct Chat final : Http
     {
         std::string auth;
@@ -19,18 +20,21 @@ TEST_CASE("a linked install asks Mogsafe whether its account saves chat")
             return HttpResponse{ .status = status, .body = body };
         }
     } mogsafe;
-    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == true);
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken") == true);
     CHECK(mogsafe.auth == "Bearer t0ken");
     mogsafe.body = R"({"save_chat":false})";
-    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken") == false);
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken") == false);
     for (const auto* bad : { R"({"save_chat":"yes"})", R"({})", "not json" })
     {
         mogsafe.body = bad;
-        CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+        CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken"));
     }
     mogsafe.body   = R"({"save_chat":true})";
-    mogsafe.status = 401;
-    CHECK_FALSE(fetchSaveChat(mogsafe, "https://mogsafe.test", "t0ken"));
+    mogsafe.status = 401; // a revoked install: its token goes, as uploads do, so captures redact again
+    REQUIRE(!saveLink(dir, { .token = "t0ken", .account = "player" }));
+    CHECK(fetchSaveChat(mogsafe, "https://mogsafe.test", dir, "t0ken").error() == REFUSED);
+    CHECK(!loadLink(dir));
+    fs::remove_all(dir);
 }
 
 TEST_CASE("each capture takes the chat choice it opens with")
@@ -103,15 +107,16 @@ TEST_CASE("a capture that saves chat keeps it whole, in the file and the live fr
         }
         const auto e     = gamePacket(T0 + 1, 0x0B5);
         const auto frame = live::frame({ .timestamp = e.timestamp, .direction = xicap::PacketDirection::ClientToServer, .data = e.data }, saveChat ? xicap::Chat::Keep : xicap::Chat::Redact);
-        CHECK(std::ranges::count(frame | std::views::drop(16), 0) == zeroed);
+        REQUIRE(frame);
+        CHECK(std::ranges::count(*frame | std::views::drop(16), 0) == zeroed);
         fs::remove_all(dir);
     }
 }
 
 TEST_CASE("a capture keeps chat only while the token that chose it is the install's")
 {
-    const auto dir   = tempDir();
-    const auto token = dir / "token";
+    const auto dir    = tempDir();
+    const auto config = dir / "config";
     struct Account final : Http
     {
         std::map<std::string, bool> saveChat; // by token
@@ -133,16 +138,16 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
     ChatChoice choice;
     CHECK(choice.chat(std::nullopt) == xicap::Chat::Redact);
 
-    saveLink(token, { .token = "a", .account = "one" });
-    choice.refresh(mogsafe, "https://mogsafe.test", token);
-    CHECK(choice.chat(loadLink(token)) == xicap::Chat::Keep);
+    REQUIRE(!saveLink(config, { .token = "a", .account = "one" }));
+    choice.refresh(mogsafe, "https://mogsafe.test", config);
+    CHECK(choice.chat(loadLink(config)) == xicap::Chat::Keep);
 
     SECTION("an unlink, or a link to another account, redacts before any answer")
     {
-        fs::remove(token);
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
-        saveLink(token, { .token = "b", .account = "two" });
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
+        fs::remove(config / "token");
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
+        REQUIRE(!saveLink(config, { .token = "b", .account = "two" }));
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     SECTION("an answer for a token replaced while it was asked is dropped, and the new token is asked")
     {
@@ -150,22 +155,22 @@ TEST_CASE("a capture keeps chat only while the token that chose it is the instal
         mogsafe.saveChat["c"] = true;
         mogsafe.whileAsked    = [&]
         {
-            saveLink(token, { .token = "b", .account = "two" }); // relinked to an account that cuts chat
+            REQUIRE(!saveLink(config, { .token = "b", .account = "two" })); // relinked to an account that cuts chat
         };
         mogsafe.asked = 0;
-        choice.refresh(mogsafe, "https://mogsafe.test", token);
+        choice.refresh(mogsafe, "https://mogsafe.test", config);
         CHECK(mogsafe.asked == 2);
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     SECTION("an answer that comes after an unlink is dropped")
     {
         mogsafe.whileAsked = [&]
         {
-            fs::remove(token);
+            fs::remove(config / "token");
         };
-        choice.refresh(mogsafe, "https://mogsafe.test", token);
-        saveLink(token, { .token = "a2", .account = "one" });
-        CHECK(choice.chat(loadLink(token)) == xicap::Chat::Redact);
+        choice.refresh(mogsafe, "https://mogsafe.test", config);
+        REQUIRE(!saveLink(config, { .token = "a2", .account = "one" }));
+        CHECK(choice.chat(loadLink(config)) == xicap::Chat::Redact);
     }
     fs::remove_all(dir);
 }
@@ -230,7 +235,7 @@ TEST_CASE("every chat range is zeroed in the capture, the session file and the l
         {
             Recorder   rec(opts);
             const auto owner = rec.live().claim();
-            rec.live().open(owner, true);
+            rec.live().setOpen(owner, true);
             rec.login(T0, who("Kalnor", 1));
             rec.sessionStart(T0, dir / "sessions" / "s.xicap");
             for (size_t i = 0; i < ranges.size(); ++i)

@@ -67,19 +67,20 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 
 ## Layout
 
-- `src/core/`: everything without Ashita code, built and tested on Windows and Linux. Each folder is a namespace: `capture/` (the event queue, clock and recorder), `upload/` (the uploader and its state file), `account/` (linking, and the chat choice tied to the token that made it), `live/` (the live feed) and `captain/` (captain imports). `http.h`, `tus.*`, `file.*` and `units.*`, which several of them use, sit at the top.
-- `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe; `worker.*` runs the short jobs a packet hook must not wait on.
-- `tests/`: the core's tests, one file per module, with shared fakes in `support.h`.
-- `openspec/`: what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
+- `src/core/`: everything that needs only the standard library and its dependencies, built and tested on Windows and Linux. Each folder is a namespace: `capture/` (the event queue, clock, recorder, and the login and logout packets), `upload/` (the uploader, its state file, and what it does when Mogsafe ends an upload), `account/` (linking, and the chat choice tied to the token that made it), `live/` (the live feed) and `captain/` (captain imports: finding the folders, the importer, and one capture's upload). At the top sit what several of them use: `install.*` (the config folder that clients sharing an install read: the token, the pause, upload.ini), `worker.*` (the short jobs a packet hook must not wait on), `http.h`, `tus.*`, `file.*` and `units.*`.
+- `src/plugin/`: the Ashita plugin. `ashita.*` hands Ashita's callbacks to `session.*`; `commands.cpp` handles `/memoria`; `client.*` reads and hooks FFXiMain.dll; `live.*` and `winhttp.*` talk to Mogsafe; `text.*` formats chat lines.
+- `tests/`: one file per module, with shared fakes in `support.h`. They cover the core, and on Windows also the plugin's network and text code.
+- `openspec/`: the specs written so far for what Memoria does, in `specs/`, and the reasoning behind each change, in `changes/`.
 - `cmake/FindAshitaSDK.cmake`: the Ashita team's CMake helper, unchanged.
 
 ## Contributing
 
 - Packet hooks never wait: they only copy into the queue. Compression, writing, flushing and uploading run on Memoria's own threads.
 - Captures are written only through xicap's library, with its live preset.
+- A function that can fail and has nothing else to return gives `std::optional<std::string>`: why not, or nothing on success.
 - Upload credentials and the link handle are never printed or logged.
 - A change that alters a capability in `openspec/specs/` updates that spec in the same commit, and a larger change records its reasoning under `openspec/changes/`.
-- CI builds the plugin with MSVC, runs the core's tests on Linux and as 32-bit Windows programs, and checks formatting with clang-format 23.
+- CI builds the plugin with MSVC, runs the tests on Linux and as 32-bit Windows programs, runs clang-tidy, and checks formatting with clang-format 23.
 
 ## Licence
 

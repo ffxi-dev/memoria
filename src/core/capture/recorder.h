@@ -92,11 +92,12 @@ private:
     auto closeSession() -> void;
     template <typename Op>
     auto onSession(Op op) -> void;
-    auto sessionFailed(const std::exception& error) -> void;
+    auto sessionFailed(const std::string& why) -> void;
     auto close() -> void;
     auto finish() -> void;
-    auto fail(const std::exception& error) -> void;
-    auto broken(const std::exception& error) -> void;
+    auto setError(const std::exception& error) -> void;    // shown in status until a capture writes again
+    auto writeFailed(const std::exception& error) -> void; // drops the writer, as a crash would
+    auto clearError() -> void;
     auto rollover() -> void;
     auto saveState(bool open) -> void;
 
@@ -112,6 +113,7 @@ private:
 
     // Writer thread only.
     std::unique_ptr<xicap::Writer>        writer_;
+    std::filesystem::path                 capture_; // the open capture's path; status_ keeps a copy for readers
     std::unique_ptr<xicap::Writer>        session_;
     std::optional<Login>                  login_; // kept after a write error, to reopen
     std::chrono::steady_clock::time_point reopenAt_{};

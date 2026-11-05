@@ -1,6 +1,9 @@
 #include "plugin/winhttp.h"
 
+#include "core/units.h"
+
 #include <Windows.h>
+#include <shellapi.h>
 #include <winhttp.h>
 
 #include <algorithm>
@@ -41,7 +44,7 @@ auto stopped() -> std::unexpected<std::string>
     return std::unexpected<std::string>("stopped");
 }
 
-auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<const uint8_t> body, const std::atomic<bool>& cancelled) -> std::expected<HttpResponse, std::string>
+auto perform(const HINTERNET req, const bool head, const HttpHeaders& headers, const std::span<const uint8_t> body, const std::atomic<bool>& cancelled) -> std::expected<HttpResponse, std::string>
 {
     std::wstring lines;
     for (const auto& [name, value] : headers)
@@ -78,7 +81,10 @@ auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<co
     HttpResponse res;
     DWORD        status{ 0 };
     DWORD        len{ sizeof(status) };
-    WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &len, WINHTTP_NO_HEADER_INDEX);
+    if (!WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &len, WINHTTP_NO_HEADER_INDEX))
+    {
+        return failed("receive");
+    }
     res.status = static_cast<int>(status);
 
     len = 0;
@@ -108,17 +114,31 @@ auto perform(const HINTERNET req, const HttpHeaders& headers, const std::span<co
         {
             return stopped();
         }
-        if (!WinHttpQueryDataAvailable(req, &available) || available == 0)
+        // A body cut short is a transport failure: only a whole answer is a response.
+        if (!WinHttpQueryDataAvailable(req, &available))
+        {
+            return failed("receive");
+        }
+        if (available == 0)
         {
             break;
         }
         std::string chunk(available, '\0');
         DWORD       read{ 0 };
-        if (!WinHttpReadData(req, chunk.data(), available, &read) || read == 0)
+        if (!WinHttpReadData(req, chunk.data(), available, &read))
+        {
+            return failed("receive");
+        }
+        if (read == 0)
         {
             break;
         }
         res.body.append(chunk, 0, read);
+    }
+    // WinHTTP ends a body cut off by a closed connection as if it were whole. A HEAD answer's length is the body it omits.
+    if (const auto length = parseU64(header(res, "content-length")); !head && length && *length != res.body.size())
+    {
+        return std::unexpected(std::format("receive: {} of {} bytes", res.body.size(), *length));
     }
     return res;
 }
@@ -134,6 +154,20 @@ auto CloseInternetHandle::operator()(void* handle) const -> void
 auto wide(const std::string_view ascii) -> std::wstring
 {
     return { ascii.begin(), ascii.end() };
+}
+
+auto browse(const std::string& url) -> void
+{
+    if (!url.starts_with("https://"))
+    {
+        return;
+    }
+    const auto com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    ::ShellExecuteW(nullptr, L"open", wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (SUCCEEDED(com))
+    {
+        ::CoUninitialize();
+    }
 }
 
 auto openSession() -> InternetHandle
@@ -200,7 +234,7 @@ auto WinHttp::request(const std::string& method, const std::string& url, const H
     {
         return std::unexpected(open.error());
     }
-    return perform(open->request.get(), headers, body, cancelled_);
+    return perform(open->request.get(), method == "HEAD", headers, body, cancelled_);
 }
 
 auto WinHttp::cancel() -> void

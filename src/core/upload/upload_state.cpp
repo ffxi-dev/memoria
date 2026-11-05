@@ -1,7 +1,7 @@
 #include "core/upload/upload_state.h"
 
 #include "core/file.h"
-#include "core/tus.h"
+#include "core/units.h"
 
 #include <format>
 #include <fstream>
@@ -12,26 +12,34 @@ namespace memoria::upload
 namespace
 {
 
-// The state column: 1 closed, 0 open, cut_off, rest once a cut-off tail went up on its own, or ended when refused.
-auto stateOf(const UploadFile& f) -> std::string_view
+auto stageText(const Stage stage) -> std::string_view
 {
-    if (f.closed)
+    switch (stage)
     {
-        return "1";
+        case Stage::Open:
+            break;
+        case Stage::Closed:
+            return "closed";
+        case Stage::Ended:
+            return "ended";
+        case Stage::CutOff:
+            return "cut_off";
+        case Stage::Rescued:
+            return "rescued";
     }
-    if (f.rescued)
+    return "open";
+}
+
+auto parseStage(const std::string_view state) -> Stage
+{
+    for (const auto stage : { Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued })
     {
-        return "rest";
+        if (state == stageText(stage))
+        {
+            return stage;
+        }
     }
-    if (f.cutOff)
-    {
-        return "cut_off";
-    }
-    if (f.ended)
-    {
-        return "ended";
-    }
-    return "0";
+    return Stage::Open;
 }
 
 } // namespace
@@ -50,24 +58,36 @@ auto readUploads(const std::filesystem::path& path) -> UploadFiles
         std::string        refused;
         std::string        sent;
         std::string        reason;
-        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, state, '\t') && std::getline(fields, refused, '\t'))
+        if (std::getline(fields, name, '\t') && std::getline(fields, url, '\t') && std::getline(fields, state, '\t') && std::getline(fields, refused, '\t') &&
+            std::getline(fields, sent, '\t'))
         {
-            // 0.5 wrote neither of the last two.
-            std::getline(fields, sent, '\t');
-            std::getline(fields, reason);
+            std::getline(fields, reason); // empty unless refused
             files[name] = {
-                .url     = url,
-                .closed  = state == "1",
-                .ended   = state == "ended" || state == "cut_off" || state == "rest",
-                .cutOff  = state == "cut_off" || state == "rest",
-                .rescued = state == "rest",
-                .refused = parseU64(refused).value_or(0),
-                .sent    = parseU64(sent).value_or(0),
-                .reason  = reason,
+                .url       = url,
+                .stage     = parseStage(state),
+                .refusedAt = parseU64(refused).value_or(0),
+                .sent      = parseU64(sent).value_or(0),
+                .reason    = reason,
             };
         }
     }
     return files;
+}
+
+auto watch(const std::filesystem::path& path, UploadFile& f) -> std::expected<uint64_t, std::string>
+{
+    std::error_code ec;
+    const auto      size = std::filesystem::file_size(path, ec);
+    if (ec)
+    {
+        return std::unexpected(ec.message());
+    }
+    if (size != f.size || f.seen == std::chrono::steady_clock::time_point{})
+    {
+        f.size = size;
+        f.seen = std::chrono::steady_clock::now();
+    }
+    return size;
 }
 
 auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>
@@ -75,7 +95,7 @@ auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -
     std::string text;
     for (const auto& [name, f] : files)
     {
-        text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, stateOf(f), f.refused, f.sent, f.reason);
+        text += std::format("{}\t{}\t{}\t{}\t{}\t{}\n", name, f.url, stageText(f.stage), f.refusedAt, f.sent, f.reason);
     }
     return replaceFile(path, text);
 }

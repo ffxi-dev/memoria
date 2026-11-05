@@ -1,16 +1,16 @@
 #include "plugin/live.h"
 
-#include "core/account/link.h"
+#include "core/install.h"
 #include "plugin/text.h"
 #include "plugin/winhttp.h"
 
 #include <Windows.h>
-#include <shellapi.h>
 #include <winhttp.h>
 
 #include <array>
 #include <format>
 #include <memory>
+#include <tuple>
 #include <utility>
 
 namespace memoria::plugin
@@ -36,29 +36,15 @@ auto sendBytes(const HINTERNET ws, const WINHTTP_WEB_SOCKET_BUFFER_TYPE type, co
 
 } // namespace
 
-auto browse(const std::string& url) -> void
-{
-    if (!url.starts_with("https://"))
-    {
-        return;
-    }
-    const auto com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    ::ShellExecuteW(nullptr, L"open", wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    if (SUCCEEDED(com))
-    {
-        ::CoUninitialize();
-    }
-}
-
-Live::Live(std::string server, std::filesystem::path config, std::string installToken, live::Feed& feed, std::string hello, std::function<void(std::string)> post, std::function<void(std::string)> open)
-: server_(std::move(server))
-, config_(std::move(config))
-, installToken_(std::move(installToken))
+Live::Live(LiveOptions options, live::Feed& feed)
+: server_(std::move(options.server))
+, config_(std::move(options.config))
+, installToken_(std::move(options.installToken))
 , feed_(feed)
 , owner_(feed.claim())
-, post_(std::move(post))
-, open_(std::move(open))
-, hello_(std::move(hello))
+, post_(std::move(options.post))
+, open_(std::move(options.open))
+, hello_(std::move(options.hello))
 , thread_([this](const std::stop_token& stop)
           {
               run(stop);
@@ -118,7 +104,7 @@ auto Live::upgrade(void* session, const std::string& url, const std::string& hea
     // idle link. Set on the request before the upgrade, which the WebSocket keeps; the WebSocket itself takes only its
     // own options. The live thread ends the wait with WinHttpWebSocketClose, which WinHTTP lets cancel a pending receive.
     DWORD forever{ 0 };
-    DWORD closeMs{ static_cast<DWORD>(TIMEOUT.count()) };
+    DWORD closeMs{ static_cast<DWORD>(QUICK_TIMEOUTS.receive.count()) };
     if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &forever, sizeof(forever)))
     {
         return failed();
@@ -175,7 +161,7 @@ auto Live::status() const -> std::string
 
 auto Live::run(const std::stop_token& stop) -> void
 {
-    const auto link = live::start(http_, server_, installToken_);
+    const auto link = live::start(http_, server_, config_, installToken_);
     if (!link || stop.stop_requested())
     {
         if (!link)
@@ -194,13 +180,14 @@ auto Live::run(const std::stop_token& stop) -> void
     post_(link->url);
 
     const auto session = openSession();
-    if (!session || !setTimeouts(session.get(), { .resolve = TIMEOUT, .connect = TIMEOUT, .send = TIMEOUT, .receive = TIMEOUT }))
+    if (!session || !setTimeouts(session.get(), QUICK_TIMEOUTS))
     {
         post_(paint(Color::Red, std::format("Cannot go live: WinHTTP error {}", GetLastError())));
         finished_ = true;
         return;
     }
-    const auto url = server_ + "/v1/live/send";
+    const auto url   = server_ + "/v1/live/send";
+    const auto ended = paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.";
     // The link in a header, not the URL, which proxies and Cloudflare may log.
     const auto headers = "Authorization: Bearer " + installToken_ + "\r\nMogsafe-Live-Link: " + link->token;
     auto       backoff = std::chrono::milliseconds(1s);
@@ -220,30 +207,27 @@ auto Live::run(const std::stop_token& stop) -> void
             {
                 break;
             }
-            if (code == REPLACED || code == ENDED)
+            if (code == REPLACED)
             {
-                if (code == REPLACED)
-                {
-                    post_(paint(Color::Yellow, "Live moved to another client."));
-                }
-                else
-                {
-                    post_(paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.");
-                }
+                post_(paint(Color::Yellow, "Live moved to another client."));
+                break;
+            }
+            if (code == ENDED)
+            {
+                post_(ended);
                 break;
             }
             s.error = "Mogsafe closed the connection";
         }
-        else if (s.status == 401 || s.status == 404)
+        else if (s.status == 401)
         {
-            if (s.status == 401)
-            {
-                post_(paint(Color::Yellow, "Live off: Vault no longer accepts this install.") + " Run " + paint(Color::Cyan, "/memoria link") + ".");
-            }
-            else
-            {
-                post_(paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.");
-            }
+            // A newer token saved meanwhile stays, and so does the install's link.
+            post_(removeLink(config_, installToken_) ? paint(Color::Yellow, std::format("Live off: {}.", REFUSED)) + " Run " + paint(Color::Cyan, "/memoria link") + "." : ended);
+            break;
+        }
+        else if (s.status == 404)
+        {
+            post_(ended);
             break;
         }
         {
@@ -280,43 +264,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     {
         receiver = std::jthread([this, h = ws.get()]
                                 {
-                                    std::array<char, 4096> buffer{};
-                                    std::string            text;
-                                    while (true)
-                                    {
-                                        DWORD                          read{ 0 };
-                                        WINHTTP_WEB_SOCKET_BUFFER_TYPE type{};
-                                        if (WinHttpWebSocketReceive(h, buffer.data(), static_cast<DWORD>(buffer.size()), &read, &type) != NO_ERROR)
-                                        {
-                                            break;
-                                        }
-                                        if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
-                                        {
-                                            USHORT code{ 0 };
-                                            DWORD  len{ 0 };
-                                            WinHttpWebSocketQueryCloseStatus(h, &code, buffer.data(), static_cast<DWORD>(buffer.size()), &len);
-                                            const std::scoped_lock lock(mutex_);
-                                            closeCode_ = code;
-                                            break;
-                                        }
-                                        if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE || type == WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE)
-                                        {
-                                            text.append(buffer.data(), read);
-                                        }
-                                        if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE)
-                                        {
-                                            if (const auto n = live::viewers(text))
-                                            {
-                                                viewers_ = *n;
-                                            }
-                                            text.clear();
-                                        }
-                                    }
-                                    {
-                                        const std::scoped_lock lock(mutex_);
-                                        closed_ = true;
-                                    }
-                                    wake_.notify_all();
+                                    receive(h);
                                 });
 
         bool open{ false };
@@ -331,7 +279,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             if (const auto now = std::chrono::steady_clock::now(); now - checked >= 1s)
             {
                 checked = now;
-                if (!account::sharing(config_, installToken_))
+                if (!sharing(config_, installToken_))
                 {
                     post_(paint(Color::Yellow, "Live off: uploads were paused or unlinked on this install."));
                     thread_.request_stop(); // ends the link as /memoria live off does
@@ -347,7 +295,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             }
             if (const bool watched = viewers_ > 0; watched != open)
             {
-                feed_.open(owner_, watched);
+                feed_.setOpen(owner_, watched);
                 open = watched;
             }
             bool ok{ true };
@@ -371,7 +319,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
             }
         }
     }
-    feed_.open(owner_, false);
+    feed_.setOpen(owner_, false);
     viewers_ = 0;
     if (receiver.joinable())
     {
@@ -386,6 +334,49 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     const std::scoped_lock lock(mutex_);
     closed_ = false;
     return closeCode_;
+}
+
+// On a thread of its own while the socket is open: the viewer count, and the close code. The close from the live thread
+// ends its wait.
+auto Live::receive(void* ws) -> void
+{
+    std::array<char, 4096> buffer{};
+    std::string            text;
+    while (true)
+    {
+        DWORD                          read{ 0 };
+        WINHTTP_WEB_SOCKET_BUFFER_TYPE type{};
+        if (WinHttpWebSocketReceive(ws, buffer.data(), static_cast<DWORD>(buffer.size()), &read, &type) != NO_ERROR)
+        {
+            break;
+        }
+        if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
+        {
+            USHORT code{ 0 };
+            DWORD  len{ 0 };
+            WinHttpWebSocketQueryCloseStatus(ws, &code, buffer.data(), static_cast<DWORD>(buffer.size()), &len);
+            const std::scoped_lock lock(mutex_);
+            closeCode_ = code;
+            break;
+        }
+        if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE || type == WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE)
+        {
+            text.append(buffer.data(), read);
+        }
+        if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE)
+        {
+            if (const auto n = live::viewers(text))
+            {
+                viewers_ = *n;
+            }
+            text.clear();
+        }
+    }
+    {
+        const std::scoped_lock lock(mutex_);
+        closed_ = true;
+    }
+    wake_.notify_all();
 }
 
 auto Live::helloNow() const -> std::string

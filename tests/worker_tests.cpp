@@ -1,4 +1,4 @@
-#include "plugin/worker.h"
+#include "core/worker.h"
 #include "support.h"
 
 #include <future>
@@ -11,7 +11,7 @@ TEST_CASE("a stopping worker drops the jobs still queued")
     std::promise<void> started;
     std::atomic<int>   ran{ 0 };
     {
-        plugin::Worker worker;
+        Worker worker;
         worker.post([&](const std::stop_token& stop)
                     {
                         std::mutex                  mutex;
@@ -37,7 +37,7 @@ TEST_CASE("a worker runs its jobs in order, and one that throws does not stop th
     std::vector<int>   order;
     std::promise<void> done;
     {
-        plugin::Worker worker;
+        Worker worker;
         worker.post([&](const std::stop_token&)
                     {
                         order.push_back(1);

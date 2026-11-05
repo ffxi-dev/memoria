@@ -2,14 +2,9 @@
 
 #ifdef _WIN32
 #include <Windows.h>
-#include <fcntl.h>
-#include <io.h>
 #include <sddl.h>
-#include <share.h>
-#include <sys/stat.h>
 
 #include <memory>
-#include <vector>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -20,7 +15,12 @@
 #include <cstring>
 #endif
 
+#include <picosha2.h>
+
+#include <algorithm>
 #include <format>
+#include <fstream>
+#include <vector>
 
 namespace memoria
 {
@@ -58,47 +58,68 @@ auto userSid() -> std::wstring
     return text ? std::wstring(text) : std::wstring{};
 }
 
+// Writes text whole and flushes it to disk.
+auto writeAndFlush(const HANDLE file, const std::string_view text) -> bool
+{
+    DWORD written{ 0 };
+    return ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file);
+}
+
+} // namespace
+#else
+namespace
+{
+
+// Writes text whole and flushes it to disk.
+auto writeAndFlush(const int fd, const std::string_view text) -> bool
+{
+    for (size_t at = 0; at < text.size();)
+    {
+        const auto n = ::write(fd, text.data() + at, text.size() - at);
+        if (n <= 0)
+        {
+            return false;
+        }
+        at += static_cast<size_t>(n);
+    }
+    return ::fsync(fd) == 0;
+}
+
 } // namespace
 #endif
 
 // Not std::ios::noreplace: Wine, which runs the tests, has no fopen "x" mode.
-auto createNew(const std::filesystem::path& path, const bool secret) -> bool
+auto createNew(const std::filesystem::path& path, const bool secret, const std::string_view text) -> bool
 {
 #ifdef _WIN32
+    PSECURITY_DESCRIPTOR sd{ nullptr };
     if (secret)
     {
         // Full access for this user alone, nothing inherited from the folder, which other users of the PC may read.
-        const auto           sid = userSid();
-        PSECURITY_DESCRIPTOR sd{ nullptr };
+        const auto sid = userSid();
         if (sid.empty() || !::ConvertStringSecurityDescriptorToSecurityDescriptorW((L"D:P(A;;FA;;;" + sid + L")").c_str(), SDDL_REVISION_1, &sd, nullptr))
         {
             return false;
         }
-        const std::unique_ptr<void, LocalFreer> owned(sd);
-        SECURITY_ATTRIBUTES                     sa{ .nLength = sizeof(sa), .lpSecurityDescriptor = sd, .bInheritHandle = FALSE };
-        const HANDLE                            file{ ::CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr) };
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            return false;
-        }
-        ::CloseHandle(file);
-        return true;
     }
-    int fd{ -1 };
-    if (_wsopen_s(&fd, path.c_str(), _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0)
+    const std::unique_ptr<void, LocalFreer> owned(sd);
+    SECURITY_ATTRIBUTES                     sa{ .nLength = sizeof(sa), .lpSecurityDescriptor = sd, .bInheritHandle = FALSE };
+    const HANDLE                            file{ ::CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr) };
+    if (file == INVALID_HANDLE_VALUE)
     {
         return false;
     }
-    _close(fd);
+    const bool ok{ text.empty() || writeAndFlush(file, text) };
+    return ::CloseHandle(file) && ok;
 #else
     const int fd{ ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, secret ? 0600 : 0644) };
     if (fd < 0)
     {
         return false;
     }
-    ::close(fd);
+    const bool ok{ text.empty() || writeAndFlush(fd, text) };
+    return ::close(fd) == 0 && ok;
 #endif
-    return true;
 }
 
 auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::path& to) -> bool
@@ -130,8 +151,7 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
     {
         return unwritten(false);
     }
-    DWORD      written{ 0 };
-    const bool flushed{ ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) && written == text.size() && ::FlushFileBuffers(file) && !(failSave && failSave(SaveStep::Flush)) };
+    const bool flushed{ writeAndFlush(file, text) && !(failSave && failSave(SaveStep::Flush)) };
     if (!::CloseHandle(file) || !flushed)
     {
         return unwritten(true);
@@ -148,14 +168,7 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
     {
         return unwritten(false);
     }
-    bool ok{ true };
-    for (size_t at = 0; ok && at < text.size();)
-    {
-        const auto n = ::write(fd, text.data() + at, text.size() - at);
-        ok           = n > 0;
-        at += ok ? static_cast<size_t>(n) : 0;
-    }
-    ok = ok && ::fsync(fd) == 0 && !(failSave && failSave(SaveStep::Flush));
+    const bool ok{ writeAndFlush(fd, text) && !(failSave && failSave(SaveStep::Flush)) };
     if (::close(fd) != 0 || !ok)
     {
         return unwritten(true);
@@ -179,6 +192,25 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
     }
 #endif
     return std::nullopt;
+}
+
+auto sha256File(const std::filesystem::path& path, const uint64_t size, const std::stop_token& stop) -> std::optional<std::string>
+{
+    std::ifstream                in(path, std::ios::binary);
+    std::vector<char>            chunk(size_t{ 1 } << 20);
+    picosha2::hash256_one_by_one hasher;
+    for (uint64_t left = size; left > 0;)
+    {
+        const auto n = std::min<uint64_t>(left, chunk.size());
+        if (stop.stop_requested() || !in.read(chunk.data(), static_cast<std::streamsize>(n)))
+        {
+            return std::nullopt;
+        }
+        hasher.process(chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(n));
+        left -= n;
+    }
+    hasher.finish();
+    return picosha2::get_hash_hex_string(hasher);
 }
 
 } // namespace memoria

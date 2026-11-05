@@ -451,7 +451,7 @@ inline auto uploader(const fs::path& dir, FakeMogsafe& server) -> std::unique_pt
 {
     if (!fs::exists(dir / "config" / "token"))
     {
-        saveLink(dir / "config" / "token", { .token = "t0ken", .account = "player" });
+        REQUIRE(!saveLink(dir / "config", { .token = "t0ken", .account = "player" }));
     }
     UploadOptions options;
     options.dir    = dir;
