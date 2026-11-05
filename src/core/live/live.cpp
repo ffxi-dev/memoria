@@ -8,7 +8,6 @@
 #include <bit>
 #include <cstring>
 #include <format>
-#include <tuple>
 #include <utility>
 
 namespace memoria::live
@@ -31,13 +30,7 @@ auto append(std::vector<uint8_t>& out, const T value) -> void
 auto start(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<Link, std::string>
 try
 {
-    auto res = http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {});
-    if (res && res->status == 401)
-    {
-        std::ignore = removeLink(config, installToken);
-        return std::unexpected(REFUSED);
-    }
-    res = expect(std::move(res), 201);
+    const auto res = expect(http.request("POST", server + "/v1/live", { { "Authorization", "Bearer " + installToken } }, {}), 201, config, installToken);
     if (!res)
     {
         return std::unexpected(res.error());

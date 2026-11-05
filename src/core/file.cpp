@@ -5,7 +5,6 @@
 #include <sddl.h>
 
 #include <memory>
-#include <vector>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -16,7 +15,12 @@
 #include <cstring>
 #endif
 
+#include <picosha2.h>
+
+#include <algorithm>
 #include <format>
+#include <fstream>
+#include <vector>
 
 namespace memoria
 {
@@ -188,6 +192,25 @@ auto replaceFile(const std::filesystem::path& path, const std::string_view text)
     }
 #endif
     return std::nullopt;
+}
+
+auto sha256File(const std::filesystem::path& path, const uint64_t size, const std::stop_token& stop) -> std::optional<std::string>
+{
+    std::ifstream                in(path, std::ios::binary);
+    std::vector<char>            chunk(size_t{ 1 } << 20);
+    picosha2::hash256_one_by_one hasher;
+    for (uint64_t left = size; left > 0;)
+    {
+        const auto n = std::min<uint64_t>(left, chunk.size());
+        if (stop.stop_requested() || !in.read(chunk.data(), static_cast<std::streamsize>(n)))
+        {
+            return std::nullopt;
+        }
+        hasher.process(chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(n));
+        left -= n;
+    }
+    hasher.finish();
+    return picosha2::get_hash_hex_string(hasher);
 }
 
 } // namespace memoria

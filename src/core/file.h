@@ -2,9 +2,11 @@
 
 #include "core/enums/save_step.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 
@@ -22,6 +24,10 @@ auto moveNoReplace(const std::filesystem::path& from, const std::filesystem::pat
 // half-written path. Why not, if a step failed: a failure before the rename leaves path as it was; one after it (the
 // folder's own flush, on POSIX) leaves path new but maybe not yet on disk.
 [[nodiscard]] auto replaceFile(const std::filesystem::path& path, std::string_view text) -> std::optional<std::string>;
+
+// The SHA-256 of a file's first size bytes, in hex: the file may still be growing. Nothing if it cannot be read or stop
+// is requested.
+auto sha256File(const std::filesystem::path& path, uint64_t size, const std::stop_token& stop) -> std::optional<std::string>;
 
 // Tests set it to make a step of replaceFile fail; empty in the game.
 inline std::function<bool(SaveStep)> failSave;

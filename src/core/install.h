@@ -1,5 +1,8 @@
 #pragma once
 
+#include "core/http.h"
+
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -27,6 +30,9 @@ using LinkBack = std::function<bool(const std::filesystem::path& from, const std
 
 // What every Mogsafe call says when Mogsafe refuses the install's token (a 401), after removeLink.
 inline constexpr auto REFUSED = "Vault no longer accepts this install";
+
+// expect() for a call made with the install's token: a 401 also deletes that token, as removeLink does, and is REFUSED.
+auto expect(std::expected<HttpResponse, std::string> res, int status, const std::filesystem::path& config, const std::string& token) -> std::expected<HttpResponse, std::string>;
 
 // Deletes the link only while it holds this token: one saved since, even mid-call, stays. True when it deleted it.
 // linkBack puts back a token taken by mistake, as a hard link; tests make it fail.

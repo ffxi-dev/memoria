@@ -9,6 +9,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 namespace memoria
 {
@@ -97,6 +98,16 @@ auto removeLink(const std::filesystem::path& config, const std::string& token, c
     }
     std::filesystem::remove(taken, ec);
     return matched;
+}
+
+auto expect(std::expected<HttpResponse, std::string> res, const int status, const std::filesystem::path& config, const std::string& token) -> std::expected<HttpResponse, std::string>
+{
+    if (res && res->status == 401)
+    {
+        std::ignore = removeLink(config, token);
+        return std::unexpected(REFUSED);
+    }
+    return memoria::expect(std::move(res), status);
 }
 
 auto unlink(const std::filesystem::path& config) -> std::optional<std::string>
