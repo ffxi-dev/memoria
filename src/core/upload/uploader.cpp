@@ -18,11 +18,11 @@ namespace
 {
 
 constexpr auto STATE_FILE = "uploads.txt";
-// Failures slow the uploader to at most 12 passes' wait, a minute at the default 5 s. Mogsafe ends a recording that
-// sends nothing for 5 minutes, and one file it keeps refusing fails every pass.
+// Backoff stops at 12 passes, a minute at the default 5 s: Mogsafe ends a recording silent for 5 minutes, and one file
+// it keeps refusing fails every pass.
 constexpr int MAX_WAIT_PASSES = 12;
 
-// A refusal's body, kept as one line of the state file.
+// For the state file's reason column.
 auto oneLine(std::string text) -> std::string
 {
     std::ranges::replace_if(text, [](char c)
@@ -125,7 +125,7 @@ auto Uploader::finish(std::vector<std::string> names, const std::chrono::millise
                    });
 }
 
-// Up to three steps: the last bytes, then the close the trailer allows. The game waits on it, so finish() bounds it.
+// Up to three steps: the last bytes, then the close. The game waits, so finish() bounds the time.
 auto Uploader::sendLast(const std::string& name) -> void
 {
     if (!uploading_ || !tus_.allowed())
@@ -155,7 +155,7 @@ auto Uploader::sendLast(const std::string& name) -> void
 
 auto Uploader::uploadAll() -> std::optional<std::string>
 {
-    uploading_ = true; // the tests' way in as well as run()'s
+    uploading_ = true; // tests call this directly
     load();
     std::optional<std::string> first;
     std::error_code            ec;
@@ -304,7 +304,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
 {
     const auto sent = tus_.append(path, f.url, offset, size, [this](uint64_t)
                                   {
-                                      return !stop_.stop_requested() && (!finishing_ || last_) && tus_.allowed(); // finish() ends a pass, not its own sending
+                                      return !stop_.stop_requested() && (!finishing_ || last_) && tus_.allowed(); // finishing_ stops a normal pass; last_ lets finish() send
                                   });
     if (!sent)
     {
@@ -379,8 +379,8 @@ auto Uploader::load() -> void
     loaded_ = true;
 }
 
-// Until this client has scanned the folder itself, or while another client sends, the state file and the files on disk
-// are the truth. True with the files when they came from disk.
+// Reads disk until this client has scanned the folder, and while another client sends. The bool says the files came from
+// disk.
 auto Uploader::snapshot() const -> std::pair<UploadFiles, bool>
 {
     {

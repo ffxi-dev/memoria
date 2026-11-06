@@ -37,7 +37,6 @@ struct LocalFreer
     }
 };
 
-// The user running the game, as a string SID; empty if Windows will not say.
 auto userSid() -> std::wstring
 {
     HANDLE token{ nullptr };
@@ -58,7 +57,6 @@ auto userSid() -> std::wstring
     return text ? std::wstring(text) : std::wstring{};
 }
 
-// Writes text whole and flushes it to disk.
 auto writeAndFlush(const HANDLE file, const std::string_view text) -> bool
 {
     DWORD written{ 0 };
@@ -70,7 +68,6 @@ auto writeAndFlush(const HANDLE file, const std::string_view text) -> bool
 namespace
 {
 
-// Writes text whole and flushes it to disk.
 auto writeAndFlush(const int fd, const std::string_view text) -> bool
 {
     for (size_t at = 0; at < text.size();)
@@ -88,14 +85,14 @@ auto writeAndFlush(const int fd, const std::string_view text) -> bool
 } // namespace
 #endif
 
-// Not std::ios::noreplace: Wine, which runs the tests, has no fopen "x" mode.
+// Not std::ios::noreplace: Wine, which runs the tests, lacks fopen's "x" mode.
 auto createNew(const std::filesystem::path& path, const bool secret, const std::string_view text) -> bool
 {
 #ifdef _WIN32
     PSECURITY_DESCRIPTOR sd{ nullptr };
     if (secret)
     {
-        // Full access for this user alone, nothing inherited from the folder, which other users of the PC may read.
+        // This user alone, inheriting nothing from a folder other users may read.
         const auto sid = userSid();
         if (sid.empty() || !::ConvertStringSecurityDescriptorToSecurityDescriptorW((L"D:P(A;;FA;;;" + sid + L")").c_str(), SDDL_REVISION_1, &sd, nullptr))
         {

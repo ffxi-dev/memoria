@@ -22,7 +22,7 @@ TEST_CASE("a login packet names its character; one too short names nobody")
     CHECK(none.name.empty());
 }
 
-TEST_CASE("only a logout that takes the character out of the game leaves it")
+TEST_CASE("zone changes, the Mog House and a cancelled logout keep the character in the game")
 {
     CHECK(capture::packets::leavesGame(1));
     CHECK_FALSE(capture::packets::leavesGame(0));

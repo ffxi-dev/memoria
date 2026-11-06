@@ -13,7 +13,7 @@
 namespace memoria::upload
 {
 
-// One capture's upload, as uploads.txt keeps it. The fields after reason live only in memory.
+// A line of uploads.txt. The fields after reason are not saved.
 struct UploadFile
 {
     std::string                           url;
@@ -30,12 +30,11 @@ struct UploadFile
 
 using UploadFiles = std::map<std::string, UploadFile>; // by file name
 
-// The file's size now, noted in f with when it last changed, which tells when it went quiet. Why not, if it cannot be read.
+// Returns the file's size and notes in f when it last changed.
 auto watch(const std::filesystem::path& path, UploadFile& f) -> std::expected<uint64_t, std::string>;
 
 auto readUploads(const std::filesystem::path& path) -> UploadFiles;
 
-// Why the file was not replaced, if it was not.
 [[nodiscard]] auto writeUploads(const std::filesystem::path& path, const UploadFiles& files) -> std::optional<std::string>;
 
 } // namespace memoria::upload

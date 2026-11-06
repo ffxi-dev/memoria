@@ -422,7 +422,7 @@ TEST_CASE("at unload the last bytes and the trailer reach Mogsafe, and the game 
     fs::remove_all(dir);
 }
 
-TEST_CASE("at unload a hung connection holds the game for the time allowed, no longer")
+TEST_CASE("at unload a hung connection holds the game for the time allowed")
 {
     class Hung final : public Http
     {
@@ -466,7 +466,7 @@ TEST_CASE("at unload a hung connection holds the game for the time allowed, no l
     fs::remove_all(dir);
 }
 
-TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from Vault")
+TEST_CASE("an upload Mogsafe refused at its end is not counted as missing from Mogsafe")
 {
     const auto  dir = tempDir();
     FakeMogsafe server;
@@ -547,7 +547,7 @@ TEST_CASE("the tail of a recording Mogsafe cut off goes up as a new capture, onc
     fs::remove_all(dir);
 }
 
-TEST_CASE("a tail that cannot be written stays on this PC and counts as not in Vault, and a refused upload has none")
+TEST_CASE("a tail that cannot be written stays on this PC and counts as not on Mogsafe, and a refused upload has none")
 {
     const auto  dir = tempDir();
     FakeMogsafe server;
@@ -756,7 +756,7 @@ TEST_CASE("an unload during a long cut-off recovery returns at once, and the nex
     fs::remove_all(dir);
 }
 
-TEST_CASE("a recording keeps its Vault id once its upload closes or the server ends it, here and after a restart")
+TEST_CASE("a recording keeps its Mogsafe id once its upload closes or the server ends it, here and after a restart")
 {
     const auto  dir = tempDir();
     FakeMogsafe server;

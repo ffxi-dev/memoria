@@ -10,8 +10,8 @@ When Mogsafe has cut off a file's upload and the file has stopped changing, Memo
 
 #### Scenario: An hour without network
 - **WHEN** a client records through an hour-long outage and Mogsafe cut the upload off after 5 minutes
-- **THEN** once the network returns, Vault receives the outage's packets in a new capture that continues the cut-off one
+- **THEN** once the network returns, Mogsafe receives the outage's packets in a new capture that continues the cut-off one
 
 #### Scenario: Tail cannot be written
 - **WHEN** xicap cannot write the tail, because the file is damaged
-- **THEN** the tail stays on the PC and `/memoria status` counts it as not in Vault
+- **THEN** the tail stays on the PC and `/memoria status` counts it as not on Mogsafe

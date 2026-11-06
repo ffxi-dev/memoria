@@ -29,7 +29,6 @@ namespace memoria::plugin
 
 inline constexpr auto CAPTURE_AGENT = "Memoria " MEMORIA_VERSION_TEXT;
 
-// What a framework gives the session: where its files go, and how it talks to the player.
 struct Host
 {
     std::filesystem::path                   config;   // the token and settings
@@ -45,7 +44,7 @@ struct LateLogin
     std::string name;
 };
 
-// Everything Memoria does, whichever framework loaded it. Every call comes from the game thread.
+// Every call comes from the game thread.
 class Session final
 {
 public:
@@ -69,7 +68,7 @@ public:
     auto recordSearch(xicap::PacketDirection direction, const uint8_t* data, uint32_t size) -> void;
 
 private:
-    // A /memoria session started while linked: Vault keeps it as a range of the recording, with no file here.
+    // A /memoria session while linked: a range of the recording on Mogsafe, with no file here.
     struct VaultSession
     {
         uint64_t              fromMs{};

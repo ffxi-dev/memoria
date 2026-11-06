@@ -51,7 +51,7 @@ auto Tus::location(const HttpResponse& res) const -> std::string
     return onServer(header(res, "location"));
 }
 
-// Only the path: behind its tunnel Mogsafe names an http:// Location, and the token goes nowhere but HTTPS to Mogsafe.
+// Keeps the path alone: behind its tunnel Mogsafe sends an http:// Location, and the token must go to Mogsafe over HTTPS.
 auto Tus::onServer(std::string_view url) const -> std::string
 {
     if (const auto scheme = url.find("://"); scheme != std::string_view::npos)

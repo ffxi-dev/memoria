@@ -19,7 +19,8 @@ namespace memoria::capture
 namespace
 {
 
-// Per character, since clients can share an install. It says whether the character's last capture was left open by a crash, so the next one can name it.
+// Per character, since clients can share an install. Says whether a crash left the last capture open, so the next can
+// name it.
 auto stateFile(const std::filesystem::path& dir, const xicap::Character& character) -> std::filesystem::path
 {
     return dir / std::format("state-{}.txt", character.characterId);
@@ -150,7 +151,7 @@ auto Recorder::stop() -> std::vector<std::filesystem::path>
     return std::exchange(closedAtStop_, {});
 }
 
-// A session is optional: its failure ends it and leaves the main capture recording.
+// A failed session ends; the main capture records on.
 template <typename Op>
 auto Recorder::onSession(const Op op) -> void
 {
@@ -277,7 +278,7 @@ auto Recorder::handle(const Event& event) -> void
                 {
                     write(event);
                 }
-                else if (login_) // the capture broke: until it reopens, the packet is lost
+                else if (login_)
                 {
                     const std::scoped_lock lock(statusMutex_);
                     status_.dropped++;
@@ -382,15 +383,15 @@ auto Recorder::openSession(const std::filesystem::path& path) -> void
     closeSession();
     if (!writer_ || !login_)
     {
-        sessionFailed("no capture is open, so no session either");
+        sessionFailed("no capture is open");
         return;
     }
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
-    // Created here, never replaced: an existing file, the main capture among them, refuses the session.
+    // createNew fails on any existing file, the main capture included.
     if (!createNew(path))
     {
-        sessionFailed(std::filesystem::exists(path, ec) ? std::format("{} exists, and a session never replaces a file", path.string()) : std::format("cannot create {}", path.string()));
+        sessionFailed(std::filesystem::exists(path, ec) ? std::format("{} already exists", path.string()) : std::format("cannot create {}", path.string()));
         return;
     }
     try
@@ -467,8 +468,8 @@ auto Recorder::writeFailed(const std::exception& error) -> void
     }
 }
 
-// The server ended the open capture: close it here, keep the login and session, and let the next packet start a capture
-// that names this one. The uploader sends this capture's last bytes as a -rest capture of their own.
+// Keeps the login and session; the next packet starts a capture that names this one. The uploader sends this capture's
+// unsent bytes as a -rest capture.
 auto Recorder::rollover() -> void
 {
     finish();
@@ -477,7 +478,7 @@ auto Recorder::rollover() -> void
     status_.capture.clear();
 }
 
-// Writes the trailer and drops the writer. A trailer that failed leaves the capture cut off, so the state stays open and the next capture names it.
+// A failed trailer leaves the capture cut off, so the state stays open and the next capture names it.
 auto Recorder::finish() -> void
 {
     {
@@ -505,7 +506,7 @@ auto Recorder::finish() -> void
     }
 }
 
-// A capture reached disk: the last error no longer applies, and the next failure is said again.
+// The next failure is reported again.
 auto Recorder::clearError() -> void
 {
     failing_ = false;
@@ -513,7 +514,6 @@ auto Recorder::clearError() -> void
     status_.error.clear();
 }
 
-// Replaced whole, so a crash mid-write leaves the old state.
 auto Recorder::saveState(const bool open) -> void
 {
     if (login_)

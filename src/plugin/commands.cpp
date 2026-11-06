@@ -17,7 +17,6 @@ namespace memoria::plugin
 namespace
 {
 
-// A recording's page on Mogsafe, opened on the range fromMs to toMs (Unix ms), as Mogsafe's capture page reads ?from=&to=.
 auto recordingPage(const std::string& server, const std::string& id, const uint64_t fromMs, const uint64_t toMs) -> std::string
 {
     return std::format("{}/captures/{}?from={}&to={}", server, id, fromMs, toMs);
@@ -88,7 +87,7 @@ auto Session::sayStatus() -> void
     sayUploads();
 }
 
-// "All sent" means Mogsafe holds every byte recorded so far, whichever client sharing this folder sends it.
+// "All sent" means Mogsafe holds every byte recorded, whichever client sharing this folder sends it.
 auto Session::sayUploads() -> void
 {
     const auto link = linked();
@@ -114,7 +113,7 @@ auto Session::sayUploads() -> void
     }
     if (kept > 0)
     {
-        say(paint(Color::Yellow, std::format("Not on Mogsafe: {} of {} {} the server ended early.", sizeText(kept), cut, cut == 1 ? "recording" : "recordings")) + " It stays on this PC.");
+        say(paint(Color::Yellow, std::format("Not on Mogsafe: {} of {} {} it ended early.", sizeText(kept), cut, cut == 1 ? "recording" : "recordings")) + " It stays on this PC.");
     }
     if (foreign > 0)
     {
@@ -188,8 +187,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     }
 }
 
-// Linked, Vault keeps the session as a range of the recording, from captain's notes: no second file. Unlinked, the file is
-// the only copy.
+// Linked, the session is a range of the recording on Mogsafe; unlinked, it goes to its own file.
 auto Session::startSession(const std::string_view path) -> void
 {
     if (path.empty())
@@ -312,7 +310,7 @@ auto Session::setUploads(const bool on) -> void
     }
     if (on)
     {
-        say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Uploads off: not linked: /memoria link"));
+        say(linked() ? paint(Color::Green, "Uploads on.") : paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " to upload.");
         return;
     }
     stopLive();

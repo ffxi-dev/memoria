@@ -41,7 +41,7 @@ auto Worker::run(const std::stop_token& stop) -> void
                                      });
             if (stop.stop_requested())
             {
-                jobs_.clear(); // dropped: a stopping worker starts nothing
+                jobs_.clear();
                 return;
             }
             job = std::move(jobs_.front());
@@ -51,7 +51,7 @@ auto Worker::run(const std::stop_token& stop) -> void
         {
             job(stop);
         }
-        catch (const std::exception&) // NOLINT(bugprone-empty-catch): a job that fails ends alone; the next one still runs
+        catch (const std::exception&) // NOLINT(bugprone-empty-catch): a failed job must not stop the next
         {
         }
     }

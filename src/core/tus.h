@@ -13,7 +13,6 @@
 namespace memoria
 {
 
-// Capture uploads' tus requests to Mogsafe, under the install's token and pause files.
 class Tus
 {
 public:
@@ -22,26 +21,23 @@ public:
     struct Appended
     {
         uint64_t                    offset{}; // where sending stopped
-        std::optional<HttpResponse> answer;   // the response other than 204 that stopped it
+        std::optional<HttpResponse> answer;   // the non-204 response that stopped it
     };
 
-    // config holds the token file that authorizes uploads and the paused file that stops them, for every client sharing the install.
     Tus(std::string server, std::filesystem::path config, Http& http);
 
-    // Read before each step and chunk: another client sharing the install may have paused, unlinked, or linked again.
+    // Rereads the pause and token: another client sharing the install may have changed them.
     auto allowed() -> bool;
 
-    // Adds the tus version and the token, and sends to the server's origin whatever origin url names, or a bare path; a 401
-    // deletes the token and is an error.
+    // Sends url's path to the server's origin, whatever origin url names. A 401 deletes the token and returns REFUSED.
     auto request(const std::string& method, const std::string& url, HttpHeaders headers, std::span<const uint8_t> body = {}) -> std::expected<HttpResponse, std::string>;
 
-    // The upload's URL from a create's Location, on the server's origin.
     [[nodiscard]] auto location(const HttpResponse& res) const -> std::string;
 
-    // Sends path's bytes from offset to size in 1 MiB appends, while go(offset) holds.
+    // Sends bytes offset to size in CHUNK_SIZE appends while go(offset) holds.
     auto append(const std::filesystem::path& path, const std::string& url, uint64_t offset, uint64_t size, const std::function<bool(uint64_t)>& go) -> std::expected<Appended, std::string>;
 
-    [[nodiscard]] auto takeUnauthorized() -> bool; // true once each time Mogsafe refuses the token on disk, which it then deletes
+    [[nodiscard]] auto takeUnauthorized() -> bool; // true once per 401 that deleted the token
 
     [[nodiscard]] auto token() const -> const std::string&; // as the last allowed() read it
 

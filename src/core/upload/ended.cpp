@@ -5,15 +5,14 @@
 #include <format>
 #include <optional>
 
-// When Mogsafe ends an upload before it closes: what the 410 says, and the tail of a cut-off capture.
+// A 410: Mogsafe ended an upload before it closed.
 namespace memoria::upload
 {
 namespace
 {
 
-// Writes the packets of source from the first frame that does not end within its first fromByte bytes, as a new
-// capture at out that continues source. Returns the packets written, and nothing once stop holds; with none, it writes
-// no file.
+// Copies source's packets from the first frame ending past fromByte into a new capture at out that continues source.
+// Returns the packet count, or nothing if stopped. Writes no file for zero packets.
 auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, const std::filesystem::path& out, const std::function<bool()>& stop) -> std::optional<uint64_t>
 {
     xicap::Reader in(source);
@@ -53,9 +52,8 @@ auto continueFrom(const std::filesystem::path& source, const uint64_t fromByte, 
 
 } // namespace
 
-// Mogsafe answered 410. A complete capture whose close answer was lost is closed; any other ended upload is dropped,
-// and its file never sent again: a recording still running goes on in a new file and upload. Its URL stays: it names
-// the recording in Vault, which a session's link still points at.
+// A complete capture whose close answer was lost counts as closed; any other ended file is not sent again. The URL
+// stays: it names the recording a session's link points at.
 auto Uploader::applyEnded(UploadFile& f, const HttpResponse& res) -> void
 {
     const auto ended = header(res, "mogsafe-ended");
@@ -73,9 +71,9 @@ auto Uploader::applyEnded(UploadFile& f, const HttpResponse& res) -> void
     }
 }
 
-// Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past what Mogsafe
-// kept go to <name>-rest.xicap, which uploads as a capture of its own. sent may be below what Mogsafe holds, if an
-// append's answer was lost: then a few packets reach Vault twice.
+// Once the cut-off file stops changing (the recorder closes it within seconds of the 410), its frames past sent go to
+// <name>-rest.xicap, a capture of its own. If an append's answer was lost, sent trails Mogsafe and a few packets reach
+// Mogsafe twice.
 auto Uploader::writeRest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>
 {
     if (f.restFailed)
@@ -96,7 +94,7 @@ auto Uploader::writeRest(const std::filesystem::path& path, UploadFile& f) -> st
     const auto out = path.parent_path() / (path.stem().string() + "-rest.xicap");
     if (size > f.sent && !std::filesystem::exists(out, ec))
     {
-        const auto tmp = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap: no pass sends it half written
+        const auto tmp = std::filesystem::path(out).replace_extension(".tmp"); // not .xicap, so no pass sends it half written
         try
         {
             const auto packets = continueFrom(path, f.sent, tmp, [this]

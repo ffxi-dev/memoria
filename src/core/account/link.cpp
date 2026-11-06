@@ -52,7 +52,7 @@ try
     };
     if (code.interval <= std::chrono::seconds(0) || code.expires <= std::chrono::seconds(0))
     {
-        return std::unexpected(MALFORMED); // a poll every 0 s would hammer it
+        return std::unexpected(MALFORMED); // a 0 s interval would poll nonstop
     }
     return code;
 }
