@@ -70,7 +70,7 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
                 {
                     return false;
                 }
-                post("Mogsafe ended the last recording; continuing in a new one.");
+                post("Mogsafe ended the last recording. Memoria started a new one.");
                 return true;
             },
             .failed = [this](const std::string& why)
@@ -186,10 +186,19 @@ auto Session::record(const xicap::PacketDirection direction, const uint32_t size
 {
     auto provenance = capture::packets::provenance(injected, blocked, data, modified, size);
     // Ashita hands each packet as a copy, so a new chunk shows as a new chunk pointer, size, or head (its sequence number).
+    // Windower hands no chunk: there a new chunk shows as a new sync counter, bytes 2-3, which every packet of a chunk shares.
+    std::optional<ChunkKey> key;
     if (dataChunk && sizeChunk > 0)
     {
-        ChunkKey key{ .pointer = reinterpret_cast<uintptr_t>(dataChunk), .size = sizeChunk, .head = {} };
-        std::memcpy(key.head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key.head.size()));
+        key = ChunkKey{ .pointer = reinterpret_cast<uintptr_t>(dataChunk), .size = sizeChunk, .head = {} };
+        std::memcpy(key->head.data(), dataChunk, (std::min<size_t>)(sizeChunk, key->head.size()));
+    }
+    else if (size >= 4)
+    {
+        key = ChunkKey{ .pointer = 0, .size = 0, .head = { data[2], data[3] } };
+    }
+    if (key)
+    {
         auto& last = lastChunk_[std::to_underlying(direction)];
         if (last != key)
         {

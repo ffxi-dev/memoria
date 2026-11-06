@@ -86,6 +86,8 @@ if(MEMORIA_BUILD_PLUGIN)
         src/plugin/text.h
         src/plugin/winhttp.cpp
         src/plugin/winhttp.h
+        src/windower/host.cpp
+        src/windower/interface.h
     )
     set_target_properties(memoria PROPERTIES OUTPUT_NAME "Memoria" CXX_EXTENSIONS ON)
     if(MEMORIA_OUTPUT_DIR)

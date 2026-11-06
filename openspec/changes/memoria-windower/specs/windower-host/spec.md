@@ -14,10 +14,10 @@ Everything Memoria does SHALL live in a `Session` that includes no Ashita or Win
 - **THEN** chat, `/memoria` commands, and the capture read as before the split
 
 ### Requirement: The Windower host checks the host before it starts
-Under Windower, Memoria SHALL start its session only when the host reports interface version `0x40004` and the host's methods Memoria calls lie inside Hook.dll. Otherwise it SHALL stay loaded and idle, and say why on Windower's console when it can.
+Under Windower, Memoria SHALL report interface version `0x4070300`, and start its session only when the host's methods Memoria calls lie inside Hook.dll. Otherwise it SHALL stay loaded and idle, and say why on Windower's console when it can.
 
 #### Scenario: A host Memoria was not built for
-- **WHEN** Hook.dll hands Memoria a host whose version is not `0x40004`
+- **WHEN** Hook.dll hands Memoria a host whose methods Memoria calls lie outside Hook.dll
 - **THEN** Memoria records nothing, patches nothing, and Windower and the game keep running
 
 ### Requirement: Commands under Windower
@@ -25,4 +25,4 @@ Under Windower, Memoria SHALL register the command `memoria`, so `memoria <comma
 
 #### Scenario: Status from the chat line
 - **WHEN** a Windower player types `//memoria status`
-- **THEN** Memoria prints the same three status lines as under Ashita, with `//memoria` in any command it names
+- **THEN** Memoria prints the same status lines as under Ashita, with `//memoria` in any command it names

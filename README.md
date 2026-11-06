@@ -18,7 +18,7 @@ Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/r
 | `/memoria note <text>` | Adds a note to the capture. |
 | `/memoria session start <file>` and `stop` | Marks a stretch of play, as captain's `/cap` does. Linked, `stop` prints its link on Mogsafe. Unlinked, Memoria writes it to `<file>`, which must not exist. |
 
-A capture runs from the first login until another character logs in or Memoria unloads. Chat text is zeroed in place, in captures and on the live page, unless the linked account turns on **Save chat** on Mogsafe's Memoria page; `/memoria status` says which applies. Clients that share an Ashita folder share its link and pause, and one of them uploads for all.
+A capture runs from the first login until another character logs in or Memoria unloads. Chat text is zeroed in place, in captures and on the live page, unless the linked account turns on **Save chat** on Mogsafe's Memoria page. `/memoria status` shows which applies. Clients that share an Ashita folder share its link and pause, and one of them uploads for all.
 
 ## Files
 
@@ -62,4 +62,4 @@ cmake --build build --target memoria_core_tests && ctest --test-dir build
 
 ## Licence
 
-Copyright (C) 2026 sruon. Memoria is free software under the GNU General Public License, version 3 only; see `LICENSE`. `cmake/FindAshitaSDK.cmake` is the Ashita team's, under GPL version 3 or later. `THIRD_PARTY_NOTICES.md` lists the code from other projects in `Memoria.dll`, with their licences.
+Copyright (C) 2026 sruon. Memoria is free software under the GNU General Public License, version 3 only (see `LICENSE`). `cmake/FindAshitaSDK.cmake` is the Ashita team's, under GPL version 3 or later. `THIRD_PARTY_NOTICES.md` lists the code from other projects in `Memoria.dll`, with their licences.
