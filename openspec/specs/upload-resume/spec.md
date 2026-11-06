@@ -6,7 +6,7 @@ Keeps a crash or restart from sending a capture twice.
 ## Requirements
 
 ### Requirement: No byte goes before a capture's upload URL is saved
-Before Memoria sends the first byte of a capture's upload, it SHALL have saved the upload's URL to `uploads.txt`: written, flushed to disk, closed, and renamed into place with the rename itself on disk, each without error, so that neither a crash nor a power cut can leave the file empty or half written. While a save has failed, Memoria SHALL retry it before sending any byte, even for an upload whose URL it already holds, and SHALL report why it failed.
+Before Memoria sends the first byte of a capture's upload, it SHALL have saved the upload's URL to `uploads.txt`: written, flushed, closed, and renamed into place with the rename flushed too, each without error, so a crash or power cut cannot leave the file empty or half written. While a save has failed, Memoria SHALL retry it before sending any byte, even for an upload whose URL it already holds, and SHALL report why it failed.
 
 #### Scenario: The capture state cannot be saved
 - **WHEN** Mogsafe creates an upload for a capture and `uploads.txt` cannot be replaced

@@ -100,9 +100,9 @@ auto Live::upgrade(void* session, const std::string& url, const std::string& hea
         s.error = std::format("Mogsafe answered {}", status);
         return s;
     }
-    // A receive waits as long as nobody joins or leaves: Mogsafe sends nothing else, so a short timeout would drop an
-    // idle link. Set on the request before the upgrade, which the WebSocket keeps; the WebSocket itself takes only its
-    // own options. The live thread ends the wait with WinHttpWebSocketClose, which WinHTTP lets cancel a pending receive.
+    // Mogsafe sends only when a viewer joins or leaves, so a receive timeout would drop an idle link. It goes on the
+    // request before the upgrade: the WebSocket keeps it, and accepts only WebSocket options. WinHttpWebSocketClose from
+    // the live thread cancels a pending receive.
     DWORD forever{ 0 };
     DWORD closeMs{ static_cast<DWORD>(QUICK_TIMEOUTS.receive.count()) };
     if (!WinHttpSetOption(req.get(), WINHTTP_OPTION_RECEIVE_TIMEOUT, &forever, sizeof(forever)))
@@ -188,7 +188,7 @@ auto Live::run(const std::stop_token& stop) -> void
     }
     const auto url   = server_ + "/v1/live/send";
     const auto ended = paint(Color::Yellow, "The live link ended.") + " Run " + paint(Color::Cyan, "/memoria live") + " for a new one.";
-    // The link in a header, not the URL, which proxies and Cloudflare may log.
+    // In a header: proxies and Cloudflare may log URLs.
     const auto headers = "Authorization: Bearer " + installToken_ + "\r\nMogsafe-Live-Link: " + link->token;
     auto       backoff = std::chrono::milliseconds(1s);
     while (!stop.stop_requested())
@@ -221,7 +221,7 @@ auto Live::run(const std::stop_token& stop) -> void
         }
         else if (s.status == 401)
         {
-            // A newer token saved meanwhile stays, and so does the install's link.
+            // removeLink keeps a newer token saved meanwhile.
             post_(removeLink(config_, installToken_) ? paint(Color::Yellow, std::format("Live off: {}.", REFUSED)) + " Run " + paint(Color::Cyan, "/memoria link") + "." : ended);
             break;
         }
@@ -241,7 +241,7 @@ auto Live::run(const std::stop_token& stop) -> void
     finished_ = true;
 }
 
-// Closes the WebSocket. Returns the code Mogsafe closed with, if it did.
+// Closes the WebSocket and returns Mogsafe's close code, or 0.
 auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
 {
     std::string hello;
@@ -336,8 +336,7 @@ auto Live::stream(const std::stop_token& stop, InternetHandle ws) -> uint16_t
     return closeCode_;
 }
 
-// On a thread of its own while the socket is open: the viewer count, and the close code. The close from the live thread
-// ends its wait.
+// Reads viewer counts and the close code; the live thread's close ends its wait.
 auto Live::receive(void* ws) -> void
 {
     std::array<char, 4096> buffer{};
@@ -385,7 +384,7 @@ auto Live::helloNow() const -> std::string
     return hello_;
 }
 
-// Waits on the live thread, opening the link again when asked; a closed connection ends the wait early.
+// Reopens the link page when asked; a closed connection ends the wait early.
 auto Live::wait(const std::stop_token& stop, const std::chrono::milliseconds time) -> void
 {
     const auto       until = std::chrono::steady_clock::now() + time;

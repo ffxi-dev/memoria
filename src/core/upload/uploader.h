@@ -25,10 +25,10 @@ struct UploadOptions
 {
     std::filesystem::path     dir;
     std::string               server;
-    std::filesystem::path     config; // its token file authorizes uploads and a paused file there stops them, for every client sharing the install
+    std::filesystem::path     config;
     std::chrono::milliseconds every{ 5000 };
     std::chrono::milliseconds idle{ 30000 }; // a file unchanged this long gets a close
-    std::function<bool()>     mayRun;        // clients sharing an install upload through one of them
+    std::function<bool()>     mayRun;        // true in the one client that uploads for the install
 };
 
 struct UploadStatus
@@ -42,7 +42,7 @@ struct UploadStatus
     std::string error;
 };
 
-// What /memoria status says about uploads, added up over every capture.
+// Summed over every capture, for /memoria status.
 struct UploadTotals
 {
     uint64_t    behind{};  // bytes Mogsafe lacks, in captures still sending
@@ -52,10 +52,10 @@ struct UploadTotals
     std::string error;     // the first sending capture's error, if one failed
 };
 
-// Refused captures count nowhere: status lists them on their own.
+// Leaves out refused captures, which status lists apart.
 auto totals(const std::vector<UploadStatus>& files) -> UploadTotals;
 
-// Sends what each .xicap in the folder gained since Mogsafe's offset, and closes its upload with the file's hash once the capture is complete.
+// Sends each .xicap in the folder from Mogsafe's offset, and closes its upload with the file's hash once complete.
 class Uploader
 {
 public:
@@ -68,15 +68,15 @@ public:
     auto operator=(Uploader&&) -> Uploader&      = delete;
 
     auto start() -> void;
-    // At unload, once the recorder closed names: sends their last bytes and closes their uploads, waiting at most limit in
-    // all. Sends nothing after.
+    // At unload, after the recorder closed names: sends their last bytes and closes their uploads, within limit in all.
+    // Sends nothing after.
     auto               finish(std::vector<std::string> names, std::chrono::milliseconds limit) -> void;
     [[nodiscard]] auto uploadAll() -> std::optional<std::string>; // one pass over the folder; the first error, if any
 
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
-    [[nodiscard]] auto saveError() const -> std::string;                          // why the last save of upload progress failed, if it did
-    [[nodiscard]] auto takeUnauthorized() -> bool;                                // true once each time Mogsafe refuses the token on disk, which it then deletes
-    [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed: its bytes never go again
+    [[nodiscard]] auto saveError() const -> std::string;                          // empty after a good save
+    [[nodiscard]] auto takeUnauthorized() -> bool;                                // true once per 401 that deleted the token
+    [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed
     [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
 private:
@@ -88,7 +88,7 @@ private:
     auto               applyEnded(UploadFile& f, const HttpResponse& res) -> void;
     auto               writeRest(const std::filesystem::path& path, UploadFile& f) -> std::optional<std::string>;
     auto               load() -> void;
-    [[nodiscard]] auto save() -> std::optional<std::string>; // why uploads.txt was not replaced, if it was not
+    [[nodiscard]] auto save() -> std::optional<std::string>;
     auto               saved() const -> UploadFiles;
     auto               snapshot() const -> std::pair<UploadFiles, bool>;
     auto               file(const std::string& name) const -> UploadFile; // from memory while this client sends, else from the state file

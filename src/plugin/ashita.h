@@ -9,7 +9,6 @@
 namespace memoria::plugin
 {
 
-// The Ashita v4 host: hands Ashita's callbacks to the session.
 class Plugin final : public IPlugin
 {
 public:

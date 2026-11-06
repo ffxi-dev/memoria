@@ -10,7 +10,7 @@ When Mogsafe answers `410` for an upload, Memoria SHALL never send that file's b
 
 #### Scenario: A killed client's file
 - **WHEN** the game starts again after a kill and Mogsafe has ended the last recording's upload
-- **THEN** Memoria marks the file ended in `uploads.txt`, sends none of it, keeps it on disk, and `/memoria status` counts nothing left to send and says how many bytes of it Vault never got
+- **THEN** Memoria marks the file ended in `uploads.txt`, sends none of it, keeps it on disk, and `/memoria status` counts nothing left to send and says how many bytes of it Mogsafe never got
 
 #### Scenario: A lost close answer
 - **WHEN** Mogsafe closed a complete capture but its answer never arrived
@@ -21,4 +21,4 @@ When Mogsafe ends the upload of the capture still recording, Memoria SHALL close
 
 #### Scenario: A network gap longer than Mogsafe waits
 - **WHEN** a client keeps playing through a 10-minute network gap, and Mogsafe ended its upload after 5
-- **THEN** Memoria says "The server ended the last recording; continuing in a new one.", the next packets go to a new capture that names the old one, and Mogsafe receives no byte of the old capture again
+- **THEN** Memoria says "Mogsafe ended the last recording; continuing in a new one.", the next packets go to a new capture that names the old one, and Mogsafe receives no byte of the old capture again

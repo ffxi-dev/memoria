@@ -18,11 +18,11 @@ namespace memoria::plugin
 struct LiveOptions
 {
     std::string                      server;
-    std::filesystem::path            config; // the token and paused files: a pause or unlink in any client sharing the install ends the link
+    std::filesystem::path            config; // a pause or unlink by any client sharing the install ends the link
     std::string                      installToken;
     std::string                      hello;
     std::function<void(std::string)> post; // a chat line, from the live thread
-    std::function<void(std::string)> open; // shows the link's page; the session hands it to a thread of its own, since a browser can take seconds to start
+    std::function<void(std::string)> open; // shows the link's page; the session runs it on its worker, since a browser can take seconds to start
 };
 
 struct Socket
@@ -33,7 +33,8 @@ struct Socket
     std::string    error;
 };
 
-// /memoria live: asks Mogsafe for a link, opens it, and streams the feed over a WinHTTP WebSocket while anyone watches, reconnecting until stopped.
+// Asks Mogsafe for a link, opens it, and streams the feed over a WebSocket while anyone watches, reconnecting until
+// stopped.
 class Live
 {
 public:
@@ -45,7 +46,7 @@ public:
     auto operator=(const Live&) -> Live& = delete;
     auto operator=(Live&&) -> Live&      = delete;
 
-    auto stop() -> void;  // closes with 1000 "off", which ends the link; with the socket down, the link expires instead
+    auto stop() -> void;  // closes with 1000 "off", which ends the link; with the socket down, the link expires
     auto abort() -> void; // at unload: as stop, without "off"
     auto reopen() -> void;
     auto setHello(std::string hello) -> void; // sent on each connect, and at once while connected
@@ -83,8 +84,8 @@ private:
     std::atomic<uint64_t>  dropped_{ 0 };
     std::atomic<bool>      finished_{ false };
     std::atomic<bool>      aborted_{ false };
-    WinHttp                http_{ QUICK_TIMEOUTS }; // also each step of the socket and its close: no call is cut short from another thread, so unload waits for the step in flight
-    std::jthread           thread_;                 // last: started once the rest is ready
+    WinHttp                http_{ QUICK_TIMEOUTS }; // also bounds each socket step: nothing cancels a call from another thread, so unload waits for the step in flight
+    std::jthread           thread_;                 // last: it starts using the members above
 };
 
 } // namespace memoria::plugin

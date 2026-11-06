@@ -6,7 +6,7 @@
 namespace memoria::capture
 {
 
-// The wall clock read once, then a monotonic clock: a change to the PC's clock never moves packet timestamps.
+// Reads the wall clock once and adds monotonic time to it, so changing the PC's clock does not move timestamps.
 class Clock
 {
 public:

@@ -26,7 +26,7 @@ Out of scope: PacketViewer logs, captain folders outside `<Ashita>/addons/captai
 
 ## Impact
 
-- **Memoria:** a captain importer in `src/core` (scan, CRC-32 and zstd staging, tus upload, move), driven from the plugin by `/memoria import`, the one-time reminder, and an import line in `/memoria status`. README, CHANGELOG, and AGENTS.md (which now points here for changes inside Memoria).
+- **Memoria:** a captain importer in `src/core` (scan, CRC-32 and zstd staging, tus upload, move), driven from the plugin by `/memoria import`, the one-time reminder, and an import line in `/memoria status`. README and AGENTS.md (which now points here for changes inside Memoria).
 - **Mogsafe:** none here. Its upload route already takes `format=captain` uploads with an install token and records them under the linked account (`ingest.go` `created`, `import.go` `importMeta`); duplicates already answer `409` with `Mogsafe-Capture`. Vault's `import-search-traffic` adds the search log to a captain upload, and the replacement of a capture archived without one.
 - **infra/:** none. Memoria uses the token `/memoria link` already gives it.
 - **Captain:** none. It never reads `captures/` and does not load PacketLogger any more, so no new `full.log` appears there.

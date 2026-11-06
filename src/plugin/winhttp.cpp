@@ -114,7 +114,7 @@ auto perform(const HINTERNET req, const bool head, const HttpHeaders& headers, c
         {
             return stopped();
         }
-        // A body cut short is a transport failure: only a whole answer is a response.
+        // A body cut short is a transport failure.
         if (!WinHttpQueryDataAvailable(req, &available))
         {
             return failed("receive");

@@ -253,7 +253,7 @@ TEST_CASE("a cancelled request stops reading a slow body at its next read")
     CHECK(res.error() == "stopped");
 }
 
-TEST_CASE("a body cut short is an error, not a response")
+TEST_CASE("a body cut short is an error")
 {
     const Server    server([](const SOCKET peer, const std::string&, const std::atomic<bool>&)
                            {

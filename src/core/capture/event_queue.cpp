@@ -24,8 +24,7 @@ auto EventQueue::push(Event event) -> bool
     return true;
 }
 
-// out is the batch the writer took last time: its bytes count until this call frees them, so the queue and the batch
-// in hand together stay under maxBytes.
+// out holds the last batch: its bytes count until this call frees them.
 auto EventQueue::drain(std::vector<Event>& out) -> void
 {
     out.clear();

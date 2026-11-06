@@ -26,12 +26,11 @@ struct RecorderOptions
     std::chrono::milliseconds flushEvery{ 5000 };
     std::chrono::milliseconds drainEvery{ 50 };
     size_t                    queueBytes{ size_t{ 64 } * 1024 * 1024 };
-    // Asked on the writer thread as each capture opens: whether it, its session file, and its live frames keep chat. Empty: redact.
+    // Asked on the writer thread as each capture opens, for its session and live frames too. Empty redacts.
     std::function<xicap::Chat()> chat;
-    // Asked at each flush, on the writer thread: true when the server ended the open capture's upload. The capture then
-    // closes, and the next packet starts a new one that names it, as after a write error.
+    // Asked on the writer thread at each flush. True closes the capture, and the next packet starts one that names it.
     std::function<bool(const std::filesystem::path& capture)> ended;
-    // Called on the writer thread when the capture stops being written, once until a capture writes again.
+    // Called on the writer thread when writing fails, once until a capture writes again.
     std::function<void(const std::string& why)> failed;
 };
 
@@ -44,13 +43,14 @@ struct RecorderStatus
     uint64_t              search{};
     uint64_t              firstMs{};
     uint64_t              lastMs{};
-    uint64_t              dropped{};                   // the queue's, game packets too short for a header, and those that came while no capture could be written
+    uint64_t              dropped{};                   // queue overflow, short game packets, and packets with no writable capture
     xicap::Chat           chat{ xicap::Chat::Redact }; // the open capture's
     std::string           error;                       // why the capture stopped, until one writes again
     std::string           sessionError;                // why the last session ended early or never started
 };
 
-// Writes queued events to xicap captures on a thread of its own. A login of another character starts a new capture; the same character logging back in continues it. A session is a second capture of the same packets, written to a path of the caller's choosing until sessionStop.
+// Writes queued events on its own thread. A login by another character starts a new capture; the same character
+// continues it. A session writes the same packets to a second file until sessionStop.
 class Recorder
 {
 public:
@@ -62,7 +62,7 @@ public:
     auto operator=(const Recorder&) -> Recorder& = delete;
     auto operator=(Recorder&&) -> Recorder&      = delete;
 
-    // These only queue: safe on the game thread.
+    // For the game thread: these queue and return.
     auto packet(Event event) -> void;
     auto login(uint64_t timestamp, Login who) -> void;
     auto logout(uint64_t timestamp) -> void;
@@ -77,8 +77,8 @@ public:
         return live_;
     }
 
-    // Writes what is queued and closes the capture. Returns every capture it closed once asked to stop, the one a queued
-    // login rotated out included, so unload sends the last bytes of what was really closed.
+    // Writes what is queued and closes the capture. Returns every capture closed after the stop request, including one a
+    // queued login rotated out, so unload can send their last bytes.
     auto stop() -> std::vector<std::filesystem::path>;
 
 private:

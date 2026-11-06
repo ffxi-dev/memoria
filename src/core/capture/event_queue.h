@@ -14,11 +14,11 @@
 namespace memoria::capture
 {
 
-// Who logged in, as the plugin read it at the zone-in after character select.
+// Read by the plugin at the zone-in after character select.
 struct Login
 {
     xicap::Character  character;
-    uint16_t          worldId{}; // 0 when unknown; the capture keeps only the world's name
+    uint16_t          worldId{}; // 0 when unknown; for matching logins
     xicap::ServerKind serverKind{ xicap::ServerKind::Unknown };
     bool              midSession{ false }; // the plugin loaded after the login
     std::string       clientVersion;       // as the client told the lobby
@@ -37,7 +37,8 @@ struct Event
     std::optional<Login>   login;
 };
 
-// Hands events from the game thread to the writer thread without waiting on it. Past maxBytes, counting the batch the writer still holds, packets are dropped and counted; other events are always kept, so logins still rotate.
+// From the game thread to the writer thread. Past maxBytes, counting the batch the writer holds, packets are dropped;
+// other events are kept, so logins still rotate captures.
 class EventQueue
 {
 public:
@@ -50,7 +51,7 @@ public:
 private:
     std::mutex         mutex_;
     std::vector<Event> events_;
-    size_t             bytes_{ 0 }; // queued, and taken_
+    size_t             bytes_{ 0 }; // queued plus taken_
     size_t             taken_{ 0 }; // in the batch the last drain handed out
     size_t             maxBytes_;
     uint64_t           dropped_{ 0 };

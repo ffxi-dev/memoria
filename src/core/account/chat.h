@@ -14,19 +14,17 @@
 namespace memoria::account
 {
 
-// A linked account chooses on Mogsafe's Memoria page whether its captures save chat. Unlinked installs never do. A token
-// Mogsafe refuses is deleted from config, as uploads do.
+// A 401 deletes installToken from config.
 auto fetchSaveChat(Http& http, const std::string& server, const std::filesystem::path& config, const std::string& installToken) -> std::expected<bool, std::string>;
 
-// The account's choice, kept with the token Mogsafe gave it for. A capture keeps chat only while that token is the
-// install's: after an unlink, a revoked token, or a link to another account, captures redact until Mogsafe says otherwise.
+// Mogsafe's answer, tied to the token it was asked with: once the install's token changes, captures redact until Mogsafe
+// answers for the new one.
 class ChatChoice
 {
 public:
     [[nodiscard]] auto chat(const std::optional<Linked>& link) const -> xicap::Chat;
 
-    // Asks Mogsafe about the install's token in config. An answer for a token replaced while it was asked is dropped, and
-    // the new token is asked in turn.
+    // Drops an answer for a token replaced mid-call, and asks again for the new one.
     auto refresh(Http& http, const std::string& server, const std::filesystem::path& config) -> void;
 
 private:

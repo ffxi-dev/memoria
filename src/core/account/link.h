@@ -27,8 +27,7 @@ auto startLink(Http& http, const std::string& server) -> std::expected<LinkCode,
 // Empty while the player has not approved yet; an error once the code expired or was refused.
 auto pollLink(Http& http, const std::string& server, const std::string& poll) -> std::expected<std::optional<Linked>, std::string>;
 
-// Polls every code.interval until the player approves, the code expires, or stop is requested. A stop that comes
-// while a poll is in flight wins over the approval that poll brings: the caller publishes no token after a stop.
+// A stop during a poll wins over the approval it brings, so the caller publishes no token after a stop.
 auto waitForApproval(Http& http, const std::string& server, const LinkCode& code, const std::stop_token& stop) -> std::expected<Linked, std::string>;
 
 } // namespace memoria::account

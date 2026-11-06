@@ -9,7 +9,7 @@ else()
     set(MEMORIA_VERSION_TEXT "${PROJECT_VERSION}")
 endif()
 
-# The core builds and is tested anywhere; the plugin needs 32-bit MSVC and the Ashita SDK.
+# The plugin needs 32-bit MSVC and the Ashita SDK; the core builds anywhere.
 option(MEMORIA_BUILD_PLUGIN "Build the Ashita plugin (needs ASHITA4_SDK_PATH)" ${WIN32})
 option(MEMORIA_BUILD_TESTS "Build the core's tests" OFF)
 
@@ -112,7 +112,7 @@ if(MEMORIA_BUILD_PLUGIN)
     endforeach()
     # C5298: a stray control character in the SDK's d3d8 dxfile.h.
     target_compile_options(memoria PRIVATE /wd5298)
-    # Designated initializers leave fields out on purpose; they start at zero.
+    # Designated initializers leave fields out; they start at zero.
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         target_compile_options(memoria PRIVATE -Wno-missing-designated-field-initializers)
     endif()
@@ -139,7 +139,7 @@ if(MEMORIA_BUILD_TESTS)
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
     if(WIN32)
-        # ownerOnly reads the token file's permissions; the WinHTTP and text tests build the plugin's network and text code on its own.
+        # advapi32 for ownerOnly; the WinHTTP and text tests compile the plugin's network and text code.
         target_sources(memoria_core_tests PRIVATE tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
         target_link_libraries(memoria_core_tests PRIVATE advapi32 bcrypt winhttp ws2_32 shell32 ole32)
         target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")

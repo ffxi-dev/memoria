@@ -5,7 +5,7 @@
 namespace memoria
 {
 
-// The steps of replaceFile after the write that make a save survive a power cut.
+// The steps of replaceFile that tests can fail.
 enum class SaveStep : uint8_t
 {
     Flush,       // the file's bytes to disk

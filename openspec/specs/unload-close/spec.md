@@ -1,7 +1,7 @@
 # unload-close Specification
 
 ## Purpose
-Keeps a normal game exit from leaving its capture cut off in Vault.
+Keeps a normal game exit from leaving its capture cut off on Mogsafe.
 
 ## Requirements
 

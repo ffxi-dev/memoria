@@ -29,7 +29,7 @@ namespace
 Session* instance_ = nullptr; // for the search hooks, which take a plain function
 
 // Clients sharing an install take turns through a named mutex. The thread that takes it keeps it until it exits; Windows
-// then hands it to the next client. Without a mutex, every client may run.
+// then hands it to the next client. If CreateMutex fails, every client uploads.
 auto turn(HANDLE& mutex, const std::string& name) -> std::function<bool()>
 {
     if (!mutex)
@@ -70,12 +70,12 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
                 {
                     return false;
                 }
-                post("The server ended the last recording; continuing in a new one.");
+                post("Mogsafe ended the last recording; continuing in a new one.");
                 return true;
             },
             .failed = [this](const std::string& why)
             {
-                post(paint(Color::Red, "Cannot write the capture: " + why + ".") + " Nothing records until it can; Memoria tries again each minute.");
+                post(paint(Color::Red, "Cannot write the capture: " + why + ".") + " Memoria tries again each minute.");
             },
         });
     }
@@ -93,7 +93,6 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
     };
     searchError_ = client::search::install(sink).value_or("");
 
-    // Loaded while already in a zone: record from here, marked mid-session.
     if (late)
     {
         enter({ .character = { .characterId = late->characterId, .name = late->name }, .serverKind = client::serverKind(), .midSession = true, .clientVersion = client::lobby::version() });
@@ -125,7 +124,7 @@ Session::~Session()
         }
         recorder_.reset();
     }
-    // Mogsafe ends a silent recording after 5 minutes: without its last bytes and trailer now, Vault keeps it cut off.
+    // Mogsafe ends a silent recording after 5 minutes: without its last bytes and trailer now, it stays cut off.
     if (uploader_ && !closed.empty())
     {
         uploader_->finish(closed, std::chrono::seconds(3));
@@ -166,7 +165,6 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
     }
 }
 
-// The character in game, here or already when Memoria loads: the lobby's details, then the recorder.
 auto Session::enter(capture::Login who) -> void
 {
     characterError_ = client::lobby::fillCharacter(who).value_or("");
@@ -254,7 +252,6 @@ auto Session::frame() -> void
     }
 }
 
-// Runs until the plugin unloads; the token and paused files decide each pass whether it sends.
 auto Session::startUploads() -> void
 {
     upload::UploadOptions options{
@@ -278,7 +275,7 @@ auto Session::post(std::string text) -> void
     inbox_.push_back(std::move(text));
 }
 
-// At a login or link. The reminder reads and writes files, so it runs on the worker: a packet hook never waits on the disk.
+// The reminder touches files, so it runs on the worker: a packet hook must not wait on the disk.
 auto Session::greet() -> void
 {
     if (reminding_.exchange(true))
@@ -292,7 +289,6 @@ auto Session::greet() -> void
                  });
 }
 
-// Once a day while unlinked, across restarts.
 auto Session::remind() -> void
 {
     if (!linked() && claimDailyReminder(host_.config))
@@ -301,7 +297,6 @@ auto Session::remind() -> void
     }
 }
 
-// Asks for a code, then polls on a thread of its own until the player approves it on the link page.
 auto Session::link() -> void
 {
     cancelLink();
@@ -363,7 +358,7 @@ auto Session::waitForLink(const std::stop_token& stop) -> void
     arrived_ = *linked;
 }
 
-// Ends a link being made: its request is cancelled, and a token it saves later than this never is.
+// A link thread stopped here saves no token: it checks the stop under linkMutex_.
 auto Session::cancelLink() -> bool
 {
     {
@@ -393,8 +388,7 @@ auto Session::hello() -> std::string
     return live::hello(character_.name, character_.world, client::lobby::version(), CAPTURE_AGENT);
 }
 
-// A linked install saves chat when its account chose to. The request runs on the worker; one queued covers every call
-// made before it starts.
+// One queued request covers every call made before it starts.
 auto Session::refreshChat() -> void
 {
     if (chatQueued_.exchange(true))

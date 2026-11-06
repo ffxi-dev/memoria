@@ -25,7 +25,7 @@
 
 ## 4. Docs and check against Mogsafe
 
-- [x] 4.1 README: `/memoria import`, the reminder, and where uploaded folders go; CHANGELOG entry; AGENTS.md says changes inside Memoria start in its own `openspec/`; verify the README's commands match the plugin's help line
+- [x] 4.1 README: `/memoria import`, the reminder, and where uploaded folders go; AGENTS.md says changes inside Memoria start in its own `openspec/`; verify the README's commands match the plugin's help line
 - [ ] 4.2 Recorded run against Mogsafe with a linked install: one new captain folder converts to a capture owned by the linked account, and a folder imported earlier through `/import` comes back as already in Vault and moves; record the capture ids in design.md's Implementation Notes
 - [ ] 4.3 In the same run, a folder whose `full.log` is archived without its search log replaces its capture and moves, and the capture holds search packets on channel 1; the first release waits for this
 

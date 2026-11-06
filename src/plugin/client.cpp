@@ -241,7 +241,7 @@ auto characterGetter() -> uintptr_t
     return address;
 }
 
-// The character list in FFXiMain's copy of the lobby context, which the client keeps after the login; 0 before it has one.
+// The character list in FFXiMain's lobby context, which outlives the login; 0 before it has one.
 auto characterList() -> uintptr_t
 {
     const auto client = read32(read32(characterGetter() + 15));
@@ -265,7 +265,7 @@ auto version() -> std::string
         }
         const auto*       text = reinterpret_cast<const char*>(l - LIST_OFFSET + VERSION_OFFSET);
         const std::string version(text, strnlen(text, 15));
-        // Anything but digits and underscores means the layout moved: say nothing rather than record noise.
+        // Anything but digits and underscores means the layout moved.
         return std::ranges::all_of(version, [](char ch)
                                    {
                                        return (ch >= '0' && ch <= '9') || ch == '_';

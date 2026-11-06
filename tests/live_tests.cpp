@@ -174,7 +174,7 @@ TEST_CASE("a live link stopped late cannot close the feed of the one that replac
     CHECK(frames(feed.take(now)).size() == 1);
 }
 
-TEST_CASE("a malformed answer from Mogsafe is an error, never an exception that ends the game")
+TEST_CASE("a malformed answer from Mogsafe is an error, not an exception that ends the game")
 {
     // Link and live run on threads of their own: an exception that escapes one ends the client.
     class Canned final : public Http

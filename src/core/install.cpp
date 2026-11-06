@@ -33,7 +33,7 @@ auto readLink(const std::filesystem::path& path) -> std::optional<Linked>
     return link;
 }
 
-// A name beside path that no other client picks at the same time.
+// Random, so two clients never pick the same name.
 auto beside(const std::filesystem::path& path, const std::string_view suffix) -> std::filesystem::path
 {
     std::random_device random;
@@ -86,8 +86,8 @@ auto removeLink(const std::filesystem::path& config, const std::string& token, c
     const bool matched{ link && link->token == token };
     if (!matched)
     {
-        // A hard link fails where a token was saved since the rename, so the newer one stays. Where links fail for another
-        // reason, a move that never replaces a file puts the taken token back; if that fails too, it stays in its file.
+        // A hard link fails if a token was saved since the rename, so the newer one stays. Where hard links fail for
+        // another reason, fall back to a move that never replaces.
         const bool linked{ linkBack ? linkBack(taken, path) : (std::filesystem::create_hard_link(taken, path, ec), !ec) };
         if (!linked)
         {

@@ -51,7 +51,6 @@ using namespace memoria::account;
 using namespace memoria::capture;
 using namespace memoria::upload;
 
-// Creates path as an empty file, or empties it.
 inline auto touch(const fs::path& path) -> void
 {
     const std::ofstream file(path);

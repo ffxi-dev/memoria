@@ -8,8 +8,6 @@
 using namespace memoria;
 using namespace memoria::test;
 
-// Faults a player's PC can throw at a recording: each test says what Memoria must keep.
-
 TEST_CASE("a capture cut off at any byte reads to its last whole frame, and uploads whole")
 {
     const auto dir = tempDir();

@@ -28,7 +28,7 @@ TEST_CASE("timestamps follow the monotonic clock, not the wall clock")
     CHECK(clock.nowMs() == 1'790'000'000'350);
 }
 
-TEST_CASE("the queue drops packets past its limit, never markers")
+TEST_CASE("the queue drops packets past its limit and keeps markers")
 {
     EventQueue queue(3 * (sizeof(Event) + 100));
     CHECK(queue.push(packet(100)));
@@ -250,7 +250,7 @@ TEST_CASE("a session is a second, complete capture of the same packets")
     CHECK(notes == "cap start;");
 }
 
-TEST_CASE("a session never replaces a file, the main capture least of all")
+TEST_CASE("a session refuses an existing file, the main capture included")
 {
     const auto dir      = tempDir();
     const auto existing = dir / "yesterday" / "memoria.xicap";

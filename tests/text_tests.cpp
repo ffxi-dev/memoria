@@ -1,4 +1,4 @@
-// The plugin's chat text. Windows only: Shift-JIS goes through the Windows code page.
+// Windows only: Shift-JIS goes through the Windows code page.
 #ifdef _WIN32
 #include "plugin/text.h"
 #include "support.h"
