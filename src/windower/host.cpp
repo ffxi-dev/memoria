@@ -6,7 +6,6 @@
 
 #include <Windows.h>
 
-#include <cstring>
 #include <filesystem>
 #include <format>
 #include <initializer_list>
@@ -24,8 +23,11 @@ namespace memoria::windower
 namespace
 {
 
-// The chat mode Hook.dll itself prints with (bind listing, 0x10037157 in its decompile).
+// The chat mode Hook.dll 4.4.2.0 printed its bind list with; Hook.dll hands the mode to the game as is.
 constexpr int CHAT_MODE{ 0x8d };
+
+// Hook.dll hands a console line starting with it to HandleCommand, without the keyword.
+constexpr const char* COMMAND{ "memoria" };
 
 // <Windower>, two levels above this DLL in <Windower>/plugins.
 auto windowerFolder() -> std::filesystem::path
@@ -89,23 +91,24 @@ class Plugin final : public IPlugin
 public:
     auto __stdcall Attach(IWindower* host) -> void override
     {
-        // Memoria calls the host's slots 0, 5, and 10, the console's Write, and the game's AddToChat. Until the version
-        // matches, no other slot is safe to call, so a mismatch can only go to the debugger.
-        if (!inHook(host, { 0, 5, 10 }) || host->GetVersion() != HOST_VERSION)
+        // Hook.dll loaded Memoria only on an exact interface version. Memoria calls the host's slots 3 and 7, the
+        // console's Write, and the game's AddToChat; until the console checks out, a mismatch can only go to the
+        // debugger.
+        if (!inHook(host, { 3, 7 }))
         {
-            ::OutputDebugStringA("Memoria: not the Windower host Memoria was built for (interface 0x40004); it records nothing.\n");
+            ::OutputDebugStringA("Memoria: not the Windower host Memoria was built for (interface 0x4070300); it records nothing.\n");
             return;
         }
         console_ = host->GetConsole();
         ffxi_    = host->GetFFXI();
-        if (!inHook(console_, { 4 }))
+        if (!inHook(console_, { 3 }))
         {
             ::OutputDebugStringA("Memoria: Windower's console is not where Memoria expects; it records nothing.\n");
             return;
         }
-        if (!inHook(ffxi_, { 1 }))
+        if (!inHook(ffxi_, { 0 }))
         {
-            console_->Write("Memoria: this Windower is not the one Memoria was built for (Hook.dll 4.4.2.0). Memoria needs an update; it records nothing.");
+            console_->Write("Memoria: this Windower is not the one Memoria was built for (Hook.dll 4.7.9.3). Memoria needs an update; it records nothing.");
             return;
         }
 
@@ -127,33 +130,36 @@ public:
         session_->start(std::nullopt);
     }
 
+    // Hook.dll calls FreeLibrary next. Deleting the plugin stops the session first, as Ashita's Release does.
     auto __stdcall Unload() -> void override
-    {
-        session_.reset();
-    }
-
-    auto __stdcall Release() -> void override
     {
         delete this;
     }
 
-    auto __stdcall GetInfo(PluginInfo* out) -> PluginInfo* override
+    auto __stdcall GetAuthor() -> const char* override
     {
-        std::memset(out, 0, sizeof(*out));
-        strcpy_s(out->author, "sruon");
-        strcpy_s(out->commands, "memoria");
-        return out;
+        return "sruon";
+    }
+
+    auto __stdcall GetCommands() -> const char* override
+    {
+        return COMMAND;
+    }
+
+    auto __stdcall IsCore() -> bool override
+    {
+        return false;
     }
 
     // The console thread is not known to be the game's, so commands wait for the next frame, as chat does.
-    auto __stdcall HandleCommand(const char* args, const char* keyword) -> void override
+    auto __stdcall HandleCommand(const char* args) -> void override
     {
         if (!session_)
         {
             return;
         }
         const std::scoped_lock lock(mutex_);
-        commands_.push_back(std::format("{} {}", keyword, args));
+        commands_.push_back(std::format("{} {}", COMMAND, args));
     }
 
     auto __stdcall HandleUnhandledCommand(const char* /*line*/) -> bool override
@@ -216,14 +222,6 @@ public:
         return false;
     }
 
-    auto __stdcall DeviceReset1() -> void override
-    {
-    }
-
-    auto __stdcall DeviceReset2() -> void override
-    {
-    }
-
     auto __stdcall Postrender() -> void override
     {
     }
@@ -233,19 +231,6 @@ public:
     }
 
     auto __stdcall OutgoingText(const char* /*original*/, char* /*modified*/, int /*source*/) -> void override
-    {
-    }
-
-    auto __stdcall unknown14(void* /*unknown*/) -> void override
-    {
-    }
-
-    auto __stdcall KeepOnUnloadAll() -> bool override
-    {
-        return false;
-    }
-
-    auto __stdcall unknown16() -> void override
     {
     }
 
