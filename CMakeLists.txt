@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.6.0 LANGUAGES C CXX)
+project(memoria VERSION 0.6.1 LANGUAGES C CXX)
 # A pre-release names its suffix here, such as rc.4; a release leaves it empty.
 set(MEMORIA_PRERELEASE "")
 if(MEMORIA_PRERELEASE)

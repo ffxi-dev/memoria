@@ -1,12 +1,19 @@
 # Third-party notices
 
-Memoria.dll includes code from the projects below. Each keeps its own licence, given in full.
+`Memoria.dll` contains code from these projects:
 
-The Ashita v4 SDK's headers are under the GNU Lesser General Public License, version 3 or later: https://www.gnu.org/licenses/lgpl-3.0.html
+| Project | Licence |
+|---|---|
+| [Zstandard](https://github.com/facebook/zstd) | BSD-3-Clause |
+| [JSON for Modern C++](https://github.com/nlohmann/json) | MIT |
+| [PicoSHA2](https://github.com/okdshin/PicoSHA2) | MIT |
+| [xicap](https://github.com/ffxi-dev/xicap) | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui), in the Ashita SDK | MIT |
+| [Ashita v4 SDK](https://www.ashitaxi.com/) headers | [LGPL-3.0-or-later](https://www.gnu.org/licenses/lgpl-3.0.html) |
+
+Their licence texts follow, except the LGPL's, which is at the link above.
 
 ## Zstandard
-
-https://github.com/facebook/zstd (BSD-3-Clause)
 
 ```
 BSD License
@@ -41,9 +48,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## JSON for Modern C++ (nlohmann/json)
-
-https://github.com/nlohmann/json (MIT)
+## JSON for Modern C++
 
 ```
 MIT License 
@@ -71,8 +76,6 @@ SOFTWARE.
 
 ## PicoSHA2
 
-https://github.com/okdshin/PicoSHA2 (MIT)
-
 ```
 MIT License
 
@@ -99,8 +102,6 @@ SOFTWARE.
 
 ## xicap
 
-https://github.com/ffxi-dev/xicap (MIT)
-
 ```
 MIT License
 
@@ -125,9 +126,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Dear ImGui, through the Ashita SDK's headers
-
-https://github.com/ocornut/imgui (MIT)
+## Dear ImGui
 
 ```
 The MIT License (MIT)
