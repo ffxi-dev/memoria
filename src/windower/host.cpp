@@ -116,20 +116,20 @@ public:
         const auto hook = moduleOf(host);
         if (!inHook(hook, host, { 3, 7 }))
         {
-            ::OutputDebugStringA("Memoria: not the Windower host Memoria was built for (interface 0x4070300); it records nothing.\n");
+            ::OutputDebugStringA("Memoria: unexpected Windower interface (built for 0x4070300). Not recording.\n");
             return;
         }
         console_ = host->GetConsole();
         ffxi_    = host->GetFFXI();
         if (!inHook(hook, console_, { 3 }))
         {
-            ::OutputDebugStringA("Memoria: Windower's console is not where Memoria expects; it records nothing.\n");
+            ::OutputDebugStringA("Memoria: Windower's console is not where expected. Not recording.\n");
             return;
         }
         console_->Write("Memoria: loaded.");
         if (!inHook(hook, ffxi_, { 0 }))
         {
-            console_->Write("Memoria: this Windower is not the one Memoria was built for (Hook.dll 4.7.9.3). Memoria needs an update; it records nothing.");
+            console_->Write("Memoria: built for Windower 4.7.9.3, not this version. Memoria is not recording. Update Memoria.");
             return;
         }
 

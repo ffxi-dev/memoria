@@ -47,13 +47,13 @@ auto Session::sayStatus() -> void
     }
     const auto chatText = [](const xicap::Chat chat)
     {
-        return chat == xicap::Chat::Keep ? paint(Color::Yellow, "chat saved") + " (set on Mogsafe)" : std::string("chat cut");
+        return chat == xicap::Chat::Keep ? paint(Color::Yellow, "chat saved") : std::string("chat not saved");
     };
     const auto next = chatChoice_.chat(linked());
     client += " · " + chatText(s.capture.empty() ? next : s.chat);
     if (!s.capture.empty() && next != s.chat)
     {
-        client += " (the next capture: " + chatText(next) + ")";
+        client += next == xicap::Chat::Keep ? ", saved from the next capture" : ", not saved from the next capture";
     }
     if (s.dropped > 0)
     {
@@ -159,7 +159,8 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     {
         if (!std::exchange(privacyShown_, true))
         {
-            say("The link page asks you to accept Mogsafe's privacy policy: " + paint(Color::Cyan, server_ + "/privacy"));
+            say("By linking you accept Mogsafe's privacy policy and terms: " + paint(Color::Cyan, server_ + "/privacy") + " · " +
+                paint(Color::Cyan, server_ + "/terms"));
         }
         say(paint(Color::Grey, "Asking Mogsafe for a link code..."));
         link();
@@ -234,7 +235,7 @@ auto Session::stopSession() -> void
     const auto sayLink = [&](const std::filesystem::path& capture, const uint64_t fromMs)
     {
         const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
-        say(id.empty() ? "Session on Mogsafe once this recording uploads; " + paint(Color::Cyan, "/memoria status") + " shows how far it got."
+        say(id.empty() ? "The session shows on Mogsafe once this recording uploads. " + paint(Color::Cyan, "/memoria status") + " shows its progress."
                        : "Session on Mogsafe: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
     };
     sayLink(first, from->fromMs);

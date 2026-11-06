@@ -70,7 +70,7 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
                 {
                     return false;
                 }
-                post("Mogsafe ended the last recording; continuing in a new one.");
+                post("Mogsafe ended the last recording. Memoria started a new one.");
                 return true;
             },
             .failed = [this](const std::string& why)

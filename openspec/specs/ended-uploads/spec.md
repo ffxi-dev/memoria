@@ -21,4 +21,4 @@ When Mogsafe ends the upload of the capture still recording, Memoria SHALL close
 
 #### Scenario: A network gap longer than Mogsafe waits
 - **WHEN** a client keeps playing through a 10-minute network gap, and Mogsafe ended its upload after 5
-- **THEN** Memoria says "Mogsafe ended the last recording; continuing in a new one.", the next packets go to a new capture that names the old one, and Mogsafe receives no byte of the old capture again
+- **THEN** Memoria says "Mogsafe ended the last recording. Memoria started a new one.", the next packets go to a new capture that names the old one, and Mogsafe receives no byte of the old capture again
