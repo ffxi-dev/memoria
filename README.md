@@ -1,12 +1,17 @@
 # Memoria
 
-Memoria is an [Ashita v4](https://ashitaxi.com) plugin for the retail Final Fantasy XI client. It records every packet of every session, search server traffic included, to an [xicap](https://github.com/ffxi-dev/xicap) capture. Linked to an account on [Mogsafe](https://mogsafe.sruon.dev), it uploads each capture as it records, and resumes after a crash or a lost connection.
+Memoria is a plugin for the retail Final Fantasy XI client. It runs in [Ashita v4](https://github.com/AshitaXI/Ashita-v4beta) and in [Windower 4](https://www.windower.net) 4.7.9.3. It records every packet of every session, search server traffic included, to an [xicap](https://github.com/ffxi-dev/xicap) capture. Linked to an account on [Mogsafe](https://mogsafe.sruon.dev), it uploads each capture as it records, and resumes after a crash or a lost connection.
 
 ## Install
 
-Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/releases), put it in `<Ashita>/plugins/`, and run `/load memoria` in game or add it to your Ashita boot script.
+Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/releases). The same file works in both:
+
+- Ashita: put it in `<Ashita>/plugins/`, and run `/load memoria` in game or add it to your boot script.
+- Windower: put it in `<Windower>/plugins/`, and run `load memoria` in the console or add it to `scripts/init.txt`. Windower checks the exact interface version, so a newer Windower needs a newer Memoria.
 
 ## Commands
+
+In Windower, type `//memoria` in chat or `memoria` in the console.
 
 | Command | What it does |
 | --- | --- |
@@ -18,17 +23,17 @@ Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/r
 | `/memoria note <text>` | Adds a note to the capture. |
 | `/memoria session start <file>` and `stop` | Marks a stretch of play, as captain's `/cap` does. Linked, `stop` prints its link on Mogsafe. Unlinked, Memoria writes it to `<file>`, which must not exist. |
 
-A capture runs from the first login until another character logs in or Memoria unloads. Chat text is zeroed in place, in captures and on the live page, unless the linked account turns on **Save chat** on Mogsafe's Memoria page. `/memoria status` shows which applies. Clients that share an Ashita folder share its link and pause, and one of them uploads for all.
+A capture runs from the first login until another character logs in or Memoria unloads. Chat text is zeroed in place, in captures and on the live page, unless the linked account turns on **Save chat** on Mogsafe's Memoria page. `/memoria status` shows which applies. Clients that share an Ashita or Windower folder share its link and pause, and one of them uploads for all.
 
 ## Files
 
-In `<Ashita>/captures/memoria/`:
+In `<Ashita>/captures/memoria/`, or `<Windower>/memoria/captures/`:
 
 - `*.xicap`: the captures. A `-rest.xicap` holds the part of a recording Mogsafe cut off, and uploads as a capture of its own.
 - `uploads.txt`: how far each capture's upload has got.
 - `state-<character id>.txt`: whether the character's last capture closed, so the next one can name a capture a crash left open.
 
-In `<Ashita>/config/memoria/`:
+In `<Ashita>/config/memoria/`, or `<Windower>/memoria/config/`:
 
 - `token`: the link to your Mogsafe account, readable only by your Windows user.
 - `paused`: there while uploads are paused.
