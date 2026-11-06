@@ -25,4 +25,4 @@ Under Windower, Memoria SHALL register the command `memoria`, so `memoria <comma
 
 #### Scenario: Status from the chat line
 - **WHEN** a Windower player types `//memoria status`
-- **THEN** Memoria prints the same three status lines as under Ashita, with `//memoria` in any command it names
+- **THEN** Memoria prints the same status lines as under Ashita, with `//memoria` in any command it names

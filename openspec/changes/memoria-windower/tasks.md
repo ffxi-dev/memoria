@@ -9,19 +9,14 @@ The numbers in brackets name the steps of the Windower plan each task serves.
 
 ## 2. Interface (plan 1.1, 1.2, 1.4)
 
-- [ ] 2.1 Trace `CreateInstance`, `GetInterfaceVersion`, Hook.dll's load path and version check, and the plugin and host vtables through LuaCore's events, with addresses, in `docs/windower-interface.md`; verify each address against the 2024-10-28 Hook.dll 4.4.2.0
-- [ ] 2.2 `src/windower/interface.h` from the trace, each slot noted with its evidence and confidence; verify the probe builds against it alone
+- [x] 2.1 Trace `CreateInstance`, `GetInterfaceVersion`, Hook.dll's load path and version check, and the plugin and host vtables through LuaCore's events, with addresses, in `docs/windower-interface.md`; verify each address against the 2024-10-28 Hook.dll 4.4.2.0
+- [x] 2.2 `src/windower/interface.h` from the trace, each slot noted with its evidence and confidence; verify the host builds against it
 
-## 3. Probe (plan 1.3)
+## 3. Windower host (plan 2.2)
 
-- [ ] 3.1 `MemoriaProbe.dll` reports `0x40004`, logs every call with its arguments and thread to `<Windower>/memoria-probe.log`, and prints once to the chat and console; verify CI builds it
-- [ ] 3.2 Run it on a live Windower client
-
-## 4. Windower host (plan 2.2)
-
-- [ ] 4.1 `CreateInstance` and `GetInterfaceVersion` in `Memoria.dll`; the host checks the version and shape, starts a `Session` with paths under `<Windower>/memoria/`, queues chat and commands for the frame, and hands packets to the session; verify CI builds it
-- [ ] 4.2 Loads in Windower, prints to the chat, records, and refuses an older interface number cleanly (test session on a live client)
+- [x] 3.1 `CreateInstance` and `GetInterfaceVersion` in `Memoria.dll`; the host checks the version and shape, starts a `Session` with paths under `<Windower>/memoria/`, queues chat and commands for the frame, and hands packets to the session; verify CI builds it
+- [ ] 3.2 Loads in Windower, prints to the chat, records, and unloads with the game still running (test session on a live client)
 
 ## Test session
 
-The steps live in `docs/windower-interface.md` on the `memoria-windower` branch (PR #5).
+The steps are in the description of the `windower` branch's draft PR. Checked so far: Memoria builds with MSVC, the core tests pass, and each of the host's 21 slots pops the same bytes as Windower's own `PluginBase`.
