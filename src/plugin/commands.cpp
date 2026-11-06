@@ -9,7 +9,6 @@
 #include <format>
 #include <ranges>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -25,20 +24,6 @@ auto recordingPage(const std::string& server, const std::string& id, const uint6
 }
 
 } // namespace
-
-auto Session::importLine() const -> std::string
-{
-    const auto p = importer_->progress();
-    if (p.index == 0)
-    {
-        return "Import: looking for captain captures";
-    }
-    if (p.size == 0)
-    {
-        return std::format("Import: {}/{} {}, preparing", p.index, p.count, p.character);
-    }
-    return std::format("Import: {}/{} {}, {}/{} sent{}", p.index, p.count, p.character, sizeText(p.sent), sizeText(p.size), p.error.empty() ? "" : ", retrying: " + p.error);
-}
 
 auto Session::sayStatus() -> void
 {
@@ -99,10 +84,6 @@ auto Session::sayStatus() -> void
     if (live_)
     {
         say("Live: " + live_->status());
-    }
-    if (importer_)
-    {
-        say(importLine());
     }
     sayUploads();
 }
@@ -175,10 +156,6 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     {
         stopSession();
     }
-    else if (sub == "import")
-    {
-        importCaptain();
-    }
     else if (sub == "link")
     {
         if (!std::exchange(privacyShown_, true))
@@ -207,7 +184,7 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     }
     else
     {
-        say("/memoria status | link | unlink | live [off] | upload on|off | import | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | live [off] | upload on|off | note <text> | session start <file.xicap> | session stop");
     }
 }
 
@@ -267,23 +244,6 @@ auto Session::stopSession() -> void
     {
         say("It went on in a new recording:");
         sayLink(current.capture, current.firstMs);
-    }
-}
-
-auto Session::importCaptain() -> void
-{
-    if (importer_)
-    {
-        say(importLine());
-    }
-    else if (!linked())
-    {
-        say(paint(Color::Yellow, "Not linked.") + " Run " + paint(Color::Cyan, "/memoria link") + " first.");
-    }
-    else
-    {
-        std::ignore = markImportReminded(host_.config);
-        startImport(true);
     }
 }
 

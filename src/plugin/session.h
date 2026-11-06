@@ -2,7 +2,6 @@
 
 #include "core/account/chat.h"
 #include "core/account/link.h"
-#include "core/captain/importer.h"
 #include "core/capture/clock.h"
 #include "core/capture/recorder.h"
 #include "core/install.h"
@@ -35,7 +34,6 @@ struct Host
 {
     std::filesystem::path                   config;   // the token and settings
     std::filesystem::path                   captures; // captures and upload state
-    std::filesystem::path                   captain;  // captain's addon folder, for /memoria import
     std::function<void(const std::string&)> say;      // one chat line, on the game thread
     std::function<void(const std::string&)> log;      // one line to the framework's log
 };
@@ -95,7 +93,6 @@ private:
     auto sayUploads() -> void;
     auto startSession(std::string_view path) -> void;
     auto stopSession() -> void;
-    auto importCaptain() -> void;
     auto goLive() -> void;
     auto unlinkInstall() -> void;
     auto setUploads(bool on) -> void;
@@ -107,9 +104,6 @@ private:
     auto linked() const -> std::optional<Linked>;     // read each time: clients sharing the install share its token
     auto greet() -> void;
     auto remind() -> void;
-    auto offerImport(const std::stop_token& stop) -> void;
-    auto startImport(bool asked) -> void;
-    auto importLine() const -> std::string;
     auto hello() -> std::string;
     auto stopLive() -> void;
     auto refreshChat() -> void; // asks Mogsafe whether the linked account saves chat, off the game thread
@@ -127,8 +121,6 @@ private:
     std::unique_ptr<Live>                  live_; // after recorder_, whose feed it reads
     std::vector<std::unique_ptr<Live>>     closing_;
     HANDLE                                 uploadMutex_{ nullptr };
-    HANDLE                                 importMutex_{ nullptr };
-    std::unique_ptr<captain::Importer>     importer_;
     std::atomic<bool>                      reminding_{ false };
     std::string                            startError_;
     std::string                            searchError_;

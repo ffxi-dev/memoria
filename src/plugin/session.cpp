@@ -78,10 +78,6 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
                 post(paint(Color::Red, "Cannot write the capture: " + why + ".") + " Nothing records until it can; Memoria tries again each minute.");
             },
         });
-        if (captain::Importer::pending(host_.captures) && linked())
-        {
-            startImport(false); // an import asked for and not finished goes on, here or in the client holding its mutex
-        }
     }
     catch (const std::exception& error)
     {
@@ -109,7 +105,6 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
 Session::~Session()
 {
     cancelLink();
-    importer_.reset();
     if (live_)
     {
         closing_.push_back(std::move(live_));
@@ -136,12 +131,9 @@ Session::~Session()
         uploader_->finish(closed, std::chrono::seconds(3));
     }
     uploader_.reset();
-    for (auto* const mutex : { uploadMutex_, importMutex_ })
+    if (uploadMutex_)
     {
-        if (mutex)
-        {
-            ::CloseHandle(mutex);
-        }
+        ::CloseHandle(uploadMutex_);
     }
 }
 
@@ -246,22 +238,11 @@ auto Session::frame() -> void
     {
         say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
         refreshChat();
-        if (!importer_ && captain::Importer::pending(host_.captures))
-        {
-            startImport(false);
-        }
         greet();
     }
-    // Both workers may report the same refusal: it is said once.
-    const bool importRefused{ importer_ && importer_->takeUnauthorized() };
-    const bool uploadRefused{ uploader_ && uploader_->takeUnauthorized() };
-    if (importRefused || uploadRefused)
+    if (uploader_ && uploader_->takeUnauthorized())
     {
         sayUnlinked(REFUSED);
-    }
-    if (importer_ && importer_->finished())
-    {
-        importer_.reset();
     }
     std::erase_if(closing_, [](const auto& l)
                   {
@@ -297,18 +278,17 @@ auto Session::post(std::string text) -> void
     inbox_.push_back(std::move(text));
 }
 
-// At a login or link. The reminders read and write files, so they run on the worker: a packet hook never waits on the disk.
+// At a login or link. The reminder reads and writes files, so it runs on the worker: a packet hook never waits on the disk.
 auto Session::greet() -> void
 {
     if (reminding_.exchange(true))
     {
         return;
     }
-    worker_.post([this](const std::stop_token& stop)
+    worker_.post([this](const std::stop_token&)
                  {
                      reminding_ = false;
                      remind();
-                     offerImport(stop);
                  });
 }
 
@@ -319,35 +299,6 @@ auto Session::remind() -> void
     {
         post(paint(Color::Yellow, "Your captures stay on this PC.") + " Run " + paint(Color::Cyan, "/memoria link") + " to share them on Mogsafe.");
     }
-}
-
-// Once per install, ever: while linked and captain captures wait.
-auto Session::offerImport(const std::stop_token& stop) -> void
-{
-    // Clients logging in together race to create the reminded file; only the winner speaks.
-    if (linked() && captain::claimImportReminder(host_.config, host_.captain / "captures", stop))
-    {
-        post("Run " + paint(Color::Cyan, "/memoria import") + " to upload existing Captain captures.");
-    }
-}
-
-// Clients sharing an install import through the one whose importer holds the named mutex.
-auto Session::startImport(const bool asked) -> void
-{
-    captain::ImportOptions options{
-        .captures = host_.captain / "captures",
-        .uploaded = host_.captain / "captures-uploaded",
-        .state    = host_.captures,
-        .server   = server_,
-        .config   = host_.config,
-        .mayRun   = turn(importMutex_, std::format("Local\\Memoria-import-{:x}", std::hash<std::wstring>{}((host_.captain / "captures").wstring()))),
-    };
-    options.post = [this](std::string text)
-    {
-        post(std::move(text));
-    };
-    importer_ = std::make_unique<captain::Importer>(std::move(options), std::make_unique<WinHttp>(UPLOAD_TIMEOUTS));
-    importer_->start(asked);
 }
 
 // Asks for a code, then polls on a thread of its own until the player approves it on the link page.

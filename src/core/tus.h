@@ -13,7 +13,7 @@
 namespace memoria
 {
 
-// What capture uploads and captain imports share: the install's token and pause files, and Mogsafe's tus requests.
+// Capture uploads' tus requests to Mogsafe, under the install's token and pause files.
 class Tus
 {
 public:

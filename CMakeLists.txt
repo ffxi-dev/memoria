@@ -18,7 +18,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 set(XICAP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# One static zstd, which captain imports use too.
+# xicap builds its pinned zstd into the DLL, whatever zstd the system has.
 set(XICAP_FETCH_ZSTD ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     xicap
@@ -46,10 +46,6 @@ FetchContent_MakeAvailable(json)
 add_library(memoria_core STATIC
     src/core/account/chat.cpp
     src/core/account/link.cpp
-    src/core/captain/captain.cpp
-    src/core/captain/compress.cpp
-    src/core/captain/importer.cpp
-    src/core/captain/capture_upload.cpp
     src/core/capture/clock.cpp
     src/core/capture/event_queue.cpp
     src/core/capture/packets.cpp
@@ -65,7 +61,7 @@ add_library(memoria_core STATIC
     src/core/worker.cpp
 )
 target_include_directories(memoria_core PUBLIC src ${picosha2_SOURCE_DIR})
-target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json libzstd_static)
+target_link_libraries(memoria_core PUBLIC xicap PRIVATE nlohmann_json::nlohmann_json)
 if(WIN32)
     target_link_libraries(memoria_core PRIVATE advapi32) # the token file's permissions
 endif()
@@ -131,7 +127,6 @@ if(MEMORIA_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     add_executable(memoria_core_tests
-        tests/captain_tests.cpp
         tests/chat_tests.cpp
         tests/fault_tests.cpp
         tests/install_tests.cpp
@@ -142,7 +137,7 @@ if(MEMORIA_BUILD_TESTS)
         tests/upload_tests.cpp
         tests/worker_tests.cpp
     )
-    target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json libzstd_static Catch2::Catch2WithMain)
+    target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
     if(WIN32)
         # ownerOnly reads the token file's permissions; the WinHTTP and text tests build the plugin's network and text code on its own.
         target_sources(memoria_core_tests PRIVATE tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)

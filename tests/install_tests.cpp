@@ -114,16 +114,6 @@ TEST_CASE("a token taken by mistake goes back without replacing one saved meanwh
     fs::remove_all(dir);
 }
 
-TEST_CASE("the import reminder goes to one caller, ever")
-{
-    const auto dir = tempDir();
-    CHECK_FALSE(importReminded(dir));
-    CHECK(markImportReminded(dir));
-    CHECK(importReminded(dir));
-    CHECK_FALSE(markImportReminded(dir));
-    fs::remove_all(dir);
-}
-
 TEST_CASE("upload.ini names another server only over HTTPS")
 {
     const auto dir = tempDir();
