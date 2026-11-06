@@ -59,6 +59,10 @@ The list is a vector of 0x64-byte entries at `PluginManager + 0xa14a8`: `HMODULE
 
 Unload: when the Direct3D device is released, `0x1005f2e0` calls `Unload` (`+0xc`, `0x1005f386`) on every plugin and then `FreeLibrary` on its module. "unload all" (`0x10070ba0`) first asks `IsCore` (`+0x10`) and keeps a plugin that answers true; a single "unload" of such a plugin prints " - Core plugins cannot be manually unloaded." (`0x1007064b`).
 
+## Hook.dll hides itself
+
+Hook.dll detours `GetModuleHandleA`, `GetModuleHandleW`, `LoadLibraryW`, `LoadLibraryExW`, `Module32First`, and `Module32Next` in kernel32 (installed from `0x10066064` on). The `GetModuleHandleW` detour (`0x100637f0`) answers null with `ERROR_MOD_NOT_FOUND` for `Hook.dll`, whoever asks, plugins included; the `GetModuleHandleA` one (`0x10063500`) does the same for callers outside Hook.dll. Other names pass through. `GetModuleHandleExW` is not detoured, so a plugin finds Hook.dll's image from an address inside it, such as the host's vtable.
+
 ## The plugin object
 
 LuaCore's `WindowerPlugin` vtable (`0x101a4c34`, 34 slots) starts with `IPlugin`'s 17. Each ends in `ret 4 * (arguments + 1)` with `this` read from the stack, so `__stdcall`, and most forward to a `__thiscall` virtual of `WindowerPlugin`'s own (slots 18 to 33), which `LuaCore` (`0x101a4918`) overrides. Slot 17 is the deleting destructor. LuaCore's local functor classes keep the mangled names of the overrides, which give their signatures, and the event names they raise give their meaning.
@@ -136,7 +140,7 @@ The console's command processor calls `0x10042120` with the line's first word an
 `src/windower/host.cpp`:
 
 - `GetInterfaceVersion` answers `0x4070300`; `GetAuthor` is `sruon`, `GetCommands` is `memoria`, `IsCore` is false.
-- Hook.dll has already matched the interface version, and the host has no `GetVersion`, so `Attach` checks the shape alone: the host's slots 3 and 7, the console's slot 3, and the game's slot 0 must point inside Hook.dll's image. Otherwise Memoria stays loaded and does nothing, saying why on the console if the console passed, or to the debugger if not.
+- Hook.dll has already matched the interface version, and the host has no `GetVersion`, so `Attach` checks the shape alone: the host's slots 3 and 7, the console's slot 3, and the game's slot 0 must point inside Hook.dll's image, found with `GetModuleHandleExW` from the host's vtable (see [Hook.dll hides itself](#hookdll-hides-itself)). Otherwise Memoria stays loaded and does nothing, saying why on the console if the console passed, or to the debugger if not. Once the console passes, it writes "Memoria: loaded."
 - Then it starts a `Session` with `<Windower>/memoria/config` and `<Windower>/memoria/captures`, found from the DLL's own path, and writes its log line to the console.
 - Chat lines and commands are queued and run on `Prerender`. Chat goes out with `AddToChat(text, 0x8d)`, the mode Hook.dll 4.4.2.0 listed binds with; a command named in a chat line reads `//memoria`. A command reaches the session as `memoria <rest of the line>`.
 - `IncomingChunk` and `OutgoingChunk` hand the session the copy as the packet, the chunk's packet as the modified one, and the two flags, with no chunk; the session then marks a chunk's first packet by a new sync counter. They never block.

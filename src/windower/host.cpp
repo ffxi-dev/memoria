@@ -39,15 +39,34 @@ auto windowerFolder() -> std::filesystem::path
     return std::filesystem::path{ path }.parent_path().parent_path();
 }
 
-// The host's shape: each slot Memoria calls must point into Hook.dll's image, or this is not the host it was built for.
-auto inHook(const void* object, const std::initializer_list<int> slots) -> bool
+// The module that holds an object's vtable. Hook.dll hides from GetModuleHandleW by name (its detour at 0x100637f0
+// answers ERROR_MOD_NOT_FOUND for "Hook.dll"), so it is found from the host's vtable instead.
+auto moduleOf(const void* object) -> HMODULE
 {
-    const auto* hook = reinterpret_cast<const uint8_t*>(::GetModuleHandleW(L"Hook.dll"));
+    HMODULE module{ nullptr };
+    if (object == nullptr)
+    {
+        return module;
+    }
+    try // /EHa: a bad read is an access violation
+    {
+        ::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, *static_cast<const LPCWSTR*>(object), &module);
+    }
+    catch (...)
+    {
+    }
+    return module;
+}
+
+// The host's shape: each slot Memoria calls must point into Hook.dll's image, or this is not the host it was built for.
+auto inHook(const HMODULE module, const void* object, const std::initializer_list<int> slots) -> bool
+{
+    const auto* hook = reinterpret_cast<const uint8_t*>(module);
     if (hook == nullptr || object == nullptr)
     {
         return false;
     }
-    try // /EHa: a bad read is an access violation
+    try
     {
         const auto* nt    = reinterpret_cast<const IMAGE_NT_HEADERS*>(hook + reinterpret_cast<const IMAGE_DOS_HEADER*>(hook)->e_lfanew);
         const auto  first = reinterpret_cast<uintptr_t>(hook);
@@ -94,19 +113,21 @@ public:
         // Hook.dll loaded Memoria only on an exact interface version. Memoria calls the host's slots 3 and 7, the
         // console's Write, and the game's AddToChat; until the console checks out, a mismatch can only go to the
         // debugger.
-        if (!inHook(host, { 3, 7 }))
+        const auto hook = moduleOf(host);
+        if (!inHook(hook, host, { 3, 7 }))
         {
             ::OutputDebugStringA("Memoria: not the Windower host Memoria was built for (interface 0x4070300); it records nothing.\n");
             return;
         }
         console_ = host->GetConsole();
         ffxi_    = host->GetFFXI();
-        if (!inHook(console_, { 3 }))
+        if (!inHook(hook, console_, { 3 }))
         {
             ::OutputDebugStringA("Memoria: Windower's console is not where Memoria expects; it records nothing.\n");
             return;
         }
-        if (!inHook(ffxi_, { 0 }))
+        console_->Write("Memoria: loaded.");
+        if (!inHook(hook, ffxi_, { 0 }))
         {
             console_->Write("Memoria: this Windower is not the one Memoria was built for (Hook.dll 4.7.9.3). Memoria needs an update; it records nothing.");
             return;
