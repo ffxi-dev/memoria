@@ -7,7 +7,7 @@ Memoria is a plugin for the retail Final Fantasy XI client. It runs in [Ashita v
 Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/releases). The same file works in both:
 
 - Ashita: put it in `<Ashita>/plugins/`, and run `/load memoria` in game or add it to your boot script.
-- Windower: put it in `<Windower>/plugins/`, and run `load memoria` in the console or add it to `scripts/init.txt`. Windower checks the exact interface version, so a newer Windower needs a newer Memoria.
+- Windower: put it in `<Windower>/plugins/`, and run `load memoria` in the console or add it to `scripts/init.txt`.
 
 ## Commands
 
