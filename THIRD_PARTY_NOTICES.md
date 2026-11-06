@@ -9,7 +9,7 @@
 | [PicoSHA2](https://github.com/okdshin/PicoSHA2) | MIT |
 | [xicap](https://github.com/ffxi-dev/xicap) | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui), in the Ashita SDK | MIT |
-| [Ashita v4 SDK](https://www.ashitaxi.com/) headers | [LGPL-3.0-or-later](https://www.gnu.org/licenses/lgpl-3.0.html) |
+| [Ashita v4 SDK](https://github.com/AshitaXI/Ashita-v4beta) headers | [LGPL-3.0-or-later](https://www.gnu.org/licenses/lgpl-3.0.html) |
 
 Their licence texts follow, except the LGPL's, which is at the link above.
 
