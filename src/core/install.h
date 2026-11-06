@@ -12,7 +12,7 @@ namespace memoria
 {
 
 // The install's config folder, which every client sharing the install reads: the link's token, the pause, the
-// reminders, and upload.ini.
+// daily reminder, and upload.ini.
 
 struct Linked
 {
@@ -50,14 +50,8 @@ auto paused(const std::filesystem::path& config) -> bool;
 // True while uploads are not paused and the install's token file still holds token.
 auto sharing(const std::filesystem::path& config, const std::string& token) -> bool;
 
-// True for one caller only, ever, per install: the first to mark the captain import reminder as given.
-auto markImportReminded(const std::filesystem::path& config) -> bool;
-
 // True at most once a day, across restarts: the first caller each day claims the daily unlinked reminder.
 auto claimDailyReminder(const std::filesystem::path& config) -> bool;
-
-// Whether the captain import reminder was given.
-auto importReminded(const std::filesystem::path& config) -> bool;
 
 // upload.ini's "server = https://..." line, which points Memoria at another Mogsafe.
 auto serverIn(const std::filesystem::path& config) -> std::optional<std::string>;

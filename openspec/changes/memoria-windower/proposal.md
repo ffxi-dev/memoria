@@ -6,7 +6,7 @@ This change makes Memoria a native Windower 4 plugin, from the same DLL: the int
 
 ## What Changes
 
-- The Ashita plugin splits into a `Session` that holds everything Memoria does (recording, uploads, linking, live, imports, commands, status, the FFXiMain hooks) and a thin Ashita host that turns Ashita's callbacks into `Session` calls and gives it paths, chat, and a log. Ashita players see no change.
+- The Ashita plugin splits into a `Session` that holds everything Memoria does (recording, uploads, linking, live, commands, status, the FFXiMain hooks) and a thin Ashita host that turns Ashita's callbacks into `Session` calls and gives it paths, chat, and a log. Ashita players see no change.
 - `src/windower/interface.h`: Windower 4's plugin interface (version `0x40004`), recovered from Hook.dll 4.4.2.0 and its own plugins, each slot noted with its evidence. `docs/windower-interface.md` holds the trace, with addresses.
 - A probe plugin, `MemoriaProbe.dll`, built from that header alone: it loads in Windower, logs every call and its arguments to a file, and prints to the chat and console.
 - A Windower host in `Memoria.dll`, behind the exports `CreateInstance` and `GetInterfaceVersion`, which checks the host's version and shape before it starts a `Session`.

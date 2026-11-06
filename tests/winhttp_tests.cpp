@@ -302,7 +302,7 @@ TEST_CASE("a live link stopped during a slow start answer ends within its timeou
     fs::remove_all(dir);
 }
 
-TEST_CASE("an uploader, an importer and the worker each join within their requests' timeout")
+TEST_CASE("an uploader and the worker each join within their requests' timeout")
 {
     Server     server(stall);
     const auto dir = tempDir();
@@ -316,21 +316,6 @@ TEST_CASE("an uploader, an importer and the worker each join within their reques
         REQUIRE(server.waitForRequest());
         const auto start = std::chrono::steady_clock::now();
         up.reset();
-        CHECK(since(start) < TIMED_OUT);
-    }
-    SECTION("the importer")
-    {
-        const auto folder = dir / "captures" / "s" / "Hoa";
-        fs::create_directories(folder / "PacketLogger");
-        std::ofstream(folder / "manifest.txt") << "StartTime = 2026-08-04 23:54:00\n";
-        std::ofstream(folder / "PacketLogger" / "full.log") << "log";
-        fs::last_write_time(folder / "PacketLogger" / "full.log", fs::file_time_type::clock::now() - std::chrono::minutes(20));
-        auto importer = std::make_unique<Importer>(ImportOptions{ .captures = dir / "captures", .uploaded = dir / "uploaded", .state = dir / "state", .server = server.url(), .config = dir / "config" },
-                                                   std::make_unique<plugin::WinHttp>(SECOND));
-        importer->start();
-        REQUIRE(server.waitForRequest());
-        const auto start = std::chrono::steady_clock::now();
-        importer.reset();
         CHECK(since(start) < TIMED_OUT);
     }
     SECTION("the worker")

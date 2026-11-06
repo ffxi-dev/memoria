@@ -45,7 +45,7 @@ struct HttpTimeouts
 
 inline constexpr size_t WRITE_SIZE = size_t{ 64 } * 1024;
 
-// Uploads and imports. A 64 KiB write takes about 4 s at 128 kbit/s, the slowest line a player records on, so 32 s
+// Uploads. A 64 KiB write takes about 4 s at 128 kbit/s, the slowest line a player records on, so 32 s
 // leaves room for a congested one; Mogsafe answers a close only once it has hashed and stored the whole capture.
 inline constexpr HttpTimeouts UPLOAD_TIMEOUTS{ .resolve = std::chrono::seconds(12), .connect = std::chrono::seconds(12), .send = std::chrono::seconds(32), .receive = std::chrono::seconds(60) };
 
