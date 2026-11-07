@@ -47,6 +47,7 @@ auto turn(HANDLE& mutex, const std::string& name) -> std::function<bool()>
 
 Session::Session(Host host)
 : host_(std::move(host))
+, caps_{ host_.caps, host_.captainStop }
 {
 }
 
@@ -57,6 +58,15 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
     try
     {
         startUploads();
+        calls_    = std::make_unique<cap::Calls>(cap::CallOptions{
+                                                     .server      = server_,
+                                                     .config      = host_.config,
+                                                     .recordingId = [this](const std::string& file)
+                                                     {
+                                                      return uploader_->recordingId(file);
+                                                     },
+                                                 },
+                                                 std::make_unique<WinHttp>(QUICK_TIMEOUTS));
         recorder_ = std::make_unique<capture::Recorder>(capture::RecorderOptions{
             .dir          = host_.captures,
             .captureAgent = CAPTURE_AGENT,
@@ -104,6 +114,7 @@ auto Session::start(const std::optional<LateLogin>& late) -> void
 Session::~Session()
 {
     cancelLink();
+    calls_.reset();
     if (live_)
     {
         closing_.push_back(std::move(live_));
@@ -148,6 +159,7 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
         capture::Login who{ .character = capture::packets::character(data, size), .serverKind = client::serverKind(), .clientVersion = client::lobby::version() };
         if (!loggedIn_ || who.character.characterId != loggedInAs_)
         {
+            endCap("another character logged in");
             enter(std::move(who));
             refreshChat(); // a change made on Mogsafe applies from the capture after this one
             greet();
@@ -162,6 +174,7 @@ auto Session::incoming(const uint16_t id, const uint32_t size, const uint8_t* da
     {
         loggedIn_ = false;
         recorder_->logout(clock_.nowMs());
+        endCap("you logged out");
     }
 }
 
@@ -243,7 +256,8 @@ auto Session::frame() -> void
     }
     if (arrived)
     {
-        say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + " Your captures upload from now on.");
+        const auto timeline = character_.name.empty() || character_.world.empty() ? std::string{} : std::format(" Your timeline: {}/timeline/{}/{}", server_, character_.world, character_.name);
+        say(paint(Color::Green, std::format("Linked to {}.", arrived->account)) + timeline);
         refreshChat();
         greet();
     }

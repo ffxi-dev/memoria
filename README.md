@@ -21,7 +21,7 @@ In Windower, type `//memoria` in chat or `memoria` in the console.
 | `/memoria upload off` and `on` | Pauses and resumes uploads. |
 | `/memoria live` | Streams the capture to a web page anyone with the link can watch, for up to 12 hours. `/memoria live off` ends it. |
 | `/memoria note <text>` | Adds a note to the capture. |
-| `/memoria session start <file>` and `stop` | Marks a stretch of play, as captain's `/cap` does. Linked, `stop` prints its link on Mogsafe. Unlinked, Memoria writes it to `<file>`, which must not exist. |
+| `/memoria cap start [<name>] [<folder>]` and `/memoria cap stop` | Marks a capture, as captain's `/cap` does, one at a time. With no name it is `cap_<UTC yyyymmdd-hhmm>`. Memoria copies it to `memoria.xicap` in `<folder>`, or else to its `caps` folder. Linked, chat gives the capture's Mogsafe link at start and at stop. A logout or another character ends it. |
 
 A capture runs from the first login until another character logs in or Memoria unloads. Chat text is zeroed in place, in captures and on the live page, unless the linked account turns on **Save chat** on Mogsafe's Memoria page. `/memoria status` shows which applies. Clients that share an Ashita or Windower folder share its link and pause, and one of them uploads for all.
 
@@ -32,6 +32,8 @@ In `<Ashita>/captures/memoria/`, or `<Windower>/memoria/captures/`:
 - `*.xicap`: the captures. A `-rest.xicap` holds the part of a recording Mogsafe cut off, and uploads as a capture of its own.
 - `uploads.txt`: how far each capture's upload has got.
 - `state-<character id>.txt`: whether the character's last capture closed, so the next one can name a capture a crash left open.
+
+In `<Ashita>/captures/memoria/caps/`, or `<Windower>/memoria/caps/`: each `/memoria cap` started with no folder, as `<name>_<character>_<UTC yyyymmdd-hhmm>.xicap`. Memoria never uploads these.
 
 In `<Ashita>/config/memoria/`, or `<Windower>/memoria/config/`:
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(memoria VERSION 0.6.1 LANGUAGES C CXX)
+project(memoria VERSION 0.7.0 LANGUAGES C CXX)
 # A pre-release names its suffix here, such as rc.4; a release leaves it empty.
 set(MEMORIA_PRERELEASE "")
 if(MEMORIA_PRERELEASE)
@@ -46,6 +46,9 @@ FetchContent_MakeAvailable(json)
 add_library(memoria_core STATIC
     src/core/account/chat.cpp
     src/core/account/link.cpp
+    src/core/cap/calls.cpp
+    src/core/cap/cap.cpp
+    src/core/cap/caps.cpp
     src/core/capture/clock.cpp
     src/core/capture/event_queue.cpp
     src/core/capture/packets.cpp
@@ -129,6 +132,7 @@ if(MEMORIA_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     add_executable(memoria_core_tests
+        tests/cap_tests.cpp
         tests/chat_tests.cpp
         tests/fault_tests.cpp
         tests/install_tests.cpp

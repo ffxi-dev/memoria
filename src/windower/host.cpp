@@ -137,6 +137,7 @@ public:
         session_          = std::make_unique<plugin::Session>(plugin::Host{
             .config   = folder / "config",
             .captures = folder / "captures",
+            .caps     = folder / "caps",
             .say      = [this](const std::string& text)
             {
                 const std::scoped_lock lock(mutex_);

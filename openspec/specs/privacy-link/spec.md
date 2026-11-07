@@ -1,7 +1,7 @@
 # privacy-link Specification
 
 ## Purpose
-Points a player who links from the game at the privacy policy Mogsafe asks them to accept.
+Tells a player who links from the game what uploads, and points them at the privacy policy Mogsafe asks them to accept.
 
 ## Requirements
 
@@ -15,3 +15,10 @@ The first `/memoria link` in a session SHALL print one chat line with the URL of
 #### Scenario: Second link
 - **WHEN** the same player runs `/memoria link` again in that session
 - **THEN** chat shows only the link code
+
+### Requirement: Each link says what uploads
+Every `/memoria link` SHALL first print "Memoria uploads everything you play on this install while linked, not only your /caps. Anyone can watch it, replay it and download it." Once linked, chat SHALL say "Linked to <account>. Your timeline: <server>/timeline/<world>/<character>", leaving out the timeline before the world is known.
+
+#### Scenario: Linking in game
+- **WHEN** a player on Asura as Kalnor runs `/memoria link` and completes it
+- **THEN** chat shows that sentence, then the link code, and later "Linked to <account>. Your timeline: <server>/timeline/Asura/Kalnor"

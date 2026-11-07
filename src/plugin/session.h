@@ -2,6 +2,8 @@
 
 #include "core/account/chat.h"
 #include "core/account/link.h"
+#include "core/cap/calls.h"
+#include "core/cap/caps.h"
 #include "core/capture/clock.h"
 #include "core/capture/recorder.h"
 #include "core/install.h"
@@ -31,10 +33,12 @@ inline constexpr auto CAPTURE_AGENT = "Memoria " MEMORIA_VERSION_TEXT;
 
 struct Host
 {
-    std::filesystem::path                   config;   // the token and settings
-    std::filesystem::path                   captures; // captures and upload state
-    std::function<void(const std::string&)> say;      // one chat line, on the game thread
-    std::function<void(const std::string&)> log;      // one line to the framework's log
+    std::filesystem::path                   config;      // the token and settings
+    std::filesystem::path                   captures;    // captures and upload state
+    std::filesystem::path                   caps;        // the local copies of /memoria cap, never uploaded
+    std::string                             captainStop; // stops a capture captain started; empty where captain cannot run
+    std::function<void(const std::string&)> say;         // one chat line, on the game thread
+    std::function<void(const std::string&)> log;         // one line to the framework's log
 };
 
 // The character already in game when Memoria loads, if the host can tell.
@@ -68,13 +72,6 @@ public:
     auto recordSearch(xicap::PacketDirection direction, const uint8_t* data, uint32_t size) -> void;
 
 private:
-    // A /memoria session while linked: a range of the recording on Mogsafe, with no file here.
-    struct VaultSession
-    {
-        uint64_t              fromMs{};
-        std::filesystem::path capture; // the recording it started in; empty before the first capture opened
-    };
-
     struct ChunkKey
     {
         uintptr_t               pointer;
@@ -90,8 +87,9 @@ private:
     auto post(std::string text) -> void; // like say, from any thread; the line prints on the next frame
     auto sayStatus() -> void;
     auto sayUploads() -> void;
-    auto startSession(std::string_view path) -> void;
-    auto stopSession() -> void;
+    auto capStart(std::string_view args) -> void;
+    auto capStop() -> void;
+    auto endCap(std::string_view why) -> void; // a capture never outlives its login
     auto goLive() -> void;
     auto unlinkInstall() -> void;
     auto setUploads(bool on) -> void;
@@ -117,6 +115,8 @@ private:
     capture::Clock                         clock_;
     std::unique_ptr<capture::Recorder>     recorder_;
     std::unique_ptr<upload::Uploader>      uploader_;
+    std::unique_ptr<cap::Calls>            calls_; // after uploader_, whose recording ids it reads
+    cap::Caps                              caps_;
     std::unique_ptr<Live>                  live_; // after recorder_, whose feed it reads
     std::vector<std::unique_ptr<Live>>     closing_;
     HANDLE                                 uploadMutex_{ nullptr };
@@ -127,7 +127,6 @@ private:
     xicap::Character                       character_;
     bool                                   loggedIn_{ false };
     bool                                   privacyShown_{ false }; // the first /memoria link of a session shows the policy's URL
-    std::optional<VaultSession>            sessionInVault_;
     uint32_t                               loggedInAs_{ 0 };
     std::array<std::optional<ChunkKey>, 2> lastChunk_; // the last chunk seen in each direction
     account::ChatChoice                    chatChoice_;

@@ -54,9 +54,11 @@ auto Plugin::Initialize(IAshitaCore* core, ILogManager* logger, const uint32_t i
     UNREFERENCED_PARAMETER(id);
     const std::filesystem::path install{ core->GetInstallPath() };
     session_ = std::make_unique<Session>(Host{
-        .config   = install / "config" / "memoria",
-        .captures = install / "captures" / "memoria",
-        .say      = [core](const std::string& text)
+        .config      = install / "config" / "memoria",
+        .captures    = install / "captures" / "memoria",
+        .caps        = install / "captures" / "memoria" / "caps",
+        .captainStop = "/cap stop",
+        .say         = [core](const std::string& text)
         {
             core->GetChatManager()->Writef(1, false, "\x1E\x51[\x1E\x06Memoria\x1E\x51]\x1E\x01 %s", text.c_str());
         },

@@ -14,15 +14,6 @@
 
 namespace memoria::plugin
 {
-namespace
-{
-
-auto recordingPage(const std::string& server, const std::string& id, const uint64_t fromMs, const uint64_t toMs) -> std::string
-{
-    return std::format("{}/captures/{}?from={}&to={}", server, id, fromMs, toMs);
-}
-
-} // namespace
 
 auto Session::sayStatus() -> void
 {
@@ -60,13 +51,13 @@ auto Session::sayStatus() -> void
         client += " · " + paint(Color::Yellow, std::format("{} packets dropped", countText(s.dropped)));
     }
     say(client);
-    if (!s.session.empty())
+    if (const auto& running = caps_.running())
     {
-        say("Session: " + s.session.filename().string());
+        say(std::format("Capture {} for {}", running->name, cap::lengthText(clock_.nowMs() - running->startMs)) + (s.session.empty() ? "" : ", to " + s.session.filename().string()));
     }
     if (!s.sessionError.empty())
     {
-        say(paint(Color::Red, "Session stopped: " + s.sessionError));
+        say(paint(Color::Red, "Capture not saved on this PC: " + s.sessionError));
     }
     if (!searchError_.empty())
     {
@@ -147,16 +138,17 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
         recorder_->note(clock_.nowMs(), utf8FromShiftJis(args | std::views::drop(2) | std::views::join_with(' ') | std::ranges::to<std::string>()));
         say("Noted.");
     }
-    else if (sub == "session" && arg == "start")
+    else if (sub == "cap" && arg == "start")
     {
-        startSession(restAfter(line, "start"));
+        capStart(restAfter(line, "start"));
     }
-    else if (sub == "session" && arg == "stop")
+    else if (sub == "cap" && arg == "stop")
     {
-        stopSession();
+        capStop();
     }
     else if (sub == "link")
     {
+        say("Memoria uploads everything you play on this install while linked, not only your /caps. Anyone can watch it, replay it and download it.");
         if (!std::exchange(privacyShown_, true))
         {
             say("By linking you accept Mogsafe's privacy policy and terms: " + paint(Color::Cyan, server_ + "/privacy") + " · " +
@@ -184,65 +176,70 @@ auto Session::command(const std::vector<std::string>& args, const std::string_vi
     }
     else
     {
-        say("/memoria status | link | unlink | live [off] | upload on|off | note <text> | session start <file.xicap> | session stop");
+        say("/memoria status | link | unlink | live [off] | upload on|off | note <text> | cap start [<name>] [<folder>] | cap stop");
     }
 }
 
-// Linked, the session is a range of the recording on Mogsafe; unlinked, it goes to its own file.
-auto Session::startSession(const std::string_view path) -> void
+auto Session::capStart(const std::string_view args) -> void
 {
-    if (path.empty())
+    if (!loggedIn_)
     {
-        say("/memoria session start <file.xicap>");
+        say("A capture starts once you are in game.");
         return;
     }
-    if (linked())
+    const auto started = caps_.start(*recorder_, utf8FromShiftJis(args), clock_.nowMs(), character_.name);
+    if (!started)
     {
-        sessionInVault_ = VaultSession{ .fromMs = clock_.nowMs(), .capture = recorder_->status().capture };
-        say("Session recorded on Mogsafe, as part of this recording.");
+        say(paint(Color::Yellow, started.error()));
         return;
     }
-    try
+    if (!linked())
     {
-        const auto utf8 = utf8FromShiftJis(std::string(path)); // the chat line is Shift-JIS
-        recorder_->sessionStart(clock_.nowMs(), std::filesystem::path(std::u8string(utf8.begin(), utf8.end())));
-    }
-    catch (const std::exception& error)
-    {
-        say(paint(Color::Red, std::format("No session: {}", error.what())));
+        say(std::format("Capture {} started.", started->name));
         return;
     }
-    say(std::format("Session to {}.", path));
+    calls_->started(*started, character_.characterId);
+    say(paused(host_.config) ? std::format("{} will appear on Mogsafe once uploads resume: ", started->name) + paint(Color::Cyan, "/memoria upload on")
+                             : "Live at " + cap::page(server_, *started));
 }
 
-auto Session::stopSession() -> void
+// Unlinked mid-capture, the stop still goes to Calls, which drops it, so the next capture's calls are not held up.
+auto Session::capStop() -> void
 {
-    const auto from = std::exchange(sessionInVault_, std::nullopt);
-    if (!from)
-    {
-        if (recorder_->status().session.empty())
-        {
-            say("No session is open.");
-            return;
-        }
-        recorder_->sessionStop(clock_.nowMs());
-        say("Session closed.");
-        return;
-    }
     const auto now     = clock_.nowMs();
-    const auto current = recorder_->status();
-    const auto first   = from->capture.empty() ? current.capture : from->capture;
-    const auto sayLink = [&](const std::filesystem::path& capture, const uint64_t fromMs)
+    const auto s       = recorder_->status();
+    const auto stopped = caps_.stop(*recorder_, now);
+    if (!stopped)
     {
-        const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
-        say(id.empty() ? "The session shows on Mogsafe once this recording uploads. " + paint(Color::Cyan, "/memoria status") + " shows its progress."
-                       : "Session on Mogsafe: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
-    };
-    sayLink(first, from->fromMs);
-    if (!current.capture.empty() && current.capture != first)
+        say("No capture is running.");
+        return;
+    }
+    calls_->stopped(*stopped, now);
+    const auto length = cap::lengthText(now - stopped->startMs);
+    if (!linked())
     {
-        say("It went on in a new recording:");
-        sayLink(current.capture, current.firstMs);
+        say(s.session.empty() ? std::format("Capture {} ({}) stopped.", stopped->name, length) : std::format("Capture {} ({}) saved to {}", stopped->name, length, s.session.string()));
+    }
+    else if (paused(host_.config))
+    {
+        say(std::format("{} ({}) will appear on Mogsafe once uploads resume.", stopped->name, length));
+    }
+    else
+    {
+        say(std::format("{} ({}) ready on Mogsafe in about a minute: {}", stopped->name, length, cap::page(server_, *stopped)));
+    }
+    if (s.session.empty() && !s.sessionError.empty())
+    {
+        say(paint(Color::Red, "Not saved on this PC: " + s.sessionError));
+    }
+}
+
+auto Session::endCap(const std::string_view why) -> void
+{
+    if (const auto ended = caps_.end(*recorder_, clock_.nowMs()))
+    {
+        calls_->ended(*ended);
+        say(paint(Color::Yellow, std::format("Capture {} ended: {}.", ended->name, why)));
     }
 }
 
