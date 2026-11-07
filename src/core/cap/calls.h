@@ -57,10 +57,10 @@ private:
         int                     tries{};
     };
 
-    auto run(const std::stop_token& stop) -> void;
-    auto send(const Pending& call) -> Outcome;
-    auto find(const Cap& cap) -> Pending*; // under mutex_
-    auto ready() const -> bool;            // under mutex_
+    auto               run(const std::stop_token& stop) -> void;
+    auto               send(const Pending& call) -> Outcome;
+    auto               find(const Cap& cap) -> Pending*; // under mutex_
+    [[nodiscard]] auto ready() const -> bool;            // under mutex_
 
     CallOptions                 options_;
     std::unique_ptr<Http>       http_;
