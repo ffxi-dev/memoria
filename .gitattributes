@@ -1,0 +1,5 @@
+# Line endings: LF in every checkout, whatever the machine's core.autocrlf. Windows scripts keep CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sln text eol=crlf
