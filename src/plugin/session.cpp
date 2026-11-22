@@ -251,6 +251,13 @@ auto Session::frame() -> void
     {
         sayUnlinked(REFUSED);
     }
+    if (uploader_)
+    {
+        for (const auto& u : uploader_->takeTooLarge())
+        {
+            say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)));
+        }
+    }
     std::erase_if(closing_, [](const auto& l)
                   {
                       return l->finished();
@@ -389,7 +396,7 @@ auto Session::linked() const -> std::optional<Linked>
 auto Session::sayUnlinked(const std::string& why) -> void
 {
     stopLive();
-    say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
+    say(paint(Color::Yellow, why + ".") + " Your captures remain local until you run " + paint(Color::Cyan, "/memoria link") + ".");
 }
 
 auto Session::hello() -> std::string

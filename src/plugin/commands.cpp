@@ -99,7 +99,11 @@ auto Session::sayUploads() -> void
     const auto files                               = uploader_->status();
     const auto [behind, kept, cut, foreign, error] = upload::totals(files);
     const auto account                             = paint(Color::Grey, " · linked to " + link->account);
-    if (!error.empty())
+    if (error == upload::FULL_ERROR)
+    {
+        say("Uploads: " + paint(Color::Yellow, error) + account);
+    }
+    else if (!error.empty())
     {
         say("Uploads: " + paint(Color::Red, "retrying, " + error) + account);
     }
@@ -125,7 +129,7 @@ auto Session::sayUploads() -> void
     }
     for (const auto& u : files | std::views::filter(&upload::UploadStatus::refused))
     {
-        say(paint(Color::Red, std::format("Mogsafe refused {}: {}", u.name, u.error)));
+        say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)));
     }
 }
 
@@ -199,7 +203,7 @@ auto Session::startSession(const std::string_view path) -> void
     if (linked())
     {
         sessionInVault_ = VaultSession{ .fromMs = clock_.nowMs(), .capture = recorder_->status().capture };
-        say("Session recorded on Mogsafe, as part of this recording.");
+        say("Session recorded on Mogsafe.");
         return;
     }
     try
@@ -235,13 +239,13 @@ auto Session::stopSession() -> void
     const auto sayLink = [&](const std::filesystem::path& capture, const uint64_t fromMs)
     {
         const auto id = capture.empty() ? std::string{} : uploader_->recordingId(capture.filename().string());
-        say(id.empty() ? "The session shows on Mogsafe once this recording uploads. " + paint(Color::Cyan, "/memoria status") + " shows its progress."
+        say(id.empty() ? "Session will be available shortly on Mogsafe. " + paint(Color::Cyan, "/memoria status") + " to check progress."
                        : "Session on Mogsafe: " + paint(Color::Cyan, recordingPage(server_, id, fromMs, now)));
     };
     sayLink(first, from->fromMs);
     if (!current.capture.empty() && current.capture != first)
     {
-        say("It went on in a new recording:");
+        say("The session continued in a new recording:");
         sayLink(current.capture, current.firstMs);
     }
 }

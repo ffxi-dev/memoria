@@ -21,6 +21,12 @@
 namespace memoria::upload
 {
 
+// How long uploads wait after Mogsafe answers 507. Its disk fills only when the owner has to act, and a try each half hour
+// costs nothing and resumes on its own.
+inline constexpr auto FULL_WAIT = std::chrono::minutes(30);
+// A 507's error: Mogsafe's disk is nearly full, which players are not told.
+inline constexpr auto FULL_ERROR = "will try again later";
+
 struct UploadOptions
 {
     std::filesystem::path     dir;
@@ -76,6 +82,7 @@ public:
     [[nodiscard]] auto status() const -> std::vector<UploadStatus>;               // every capture in the folder, whichever client sends it
     [[nodiscard]] auto saveError() const -> std::string;                          // empty after a good save
     [[nodiscard]] auto takeUnauthorized() -> bool;                                // true once per 401 that deleted the token
+    [[nodiscard]] auto takeTooLarge() -> std::vector<UploadStatus>;               // captures a 413 stopped since the last call, with Mogsafe's reason
     [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed
     [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
@@ -97,12 +104,14 @@ private:
     std::unique_ptr<Http> http_;
     Tus                   tus_; // upload thread only, but for takeUnauthorized()
 
-    mutable std::mutex mutex_;
-    UploadFiles        files_;
-    std::string        saveError_;
-    bool               dirty_{}; // upload thread only: memory holds what the state file lacks
-    bool               last_{};  // upload thread only: finish() is sending the last bytes
-    std::atomic<bool>  loaded_{ false };
+    mutable std::mutex        mutex_;
+    UploadFiles               files_;
+    std::string               saveError_;
+    bool                      dirty_{};  // upload thread only: memory holds what the state file lacks
+    bool                      last_{};   // upload thread only: finish() is sending the last bytes
+    bool                      full_{};   // upload thread only: this pass met a 507
+    std::vector<UploadStatus> tooLarge_; // under mutex_
+    std::atomic<bool>         loaded_{ false };
 
     std::thread              thread_;
     std::mutex               wakeMutex_;

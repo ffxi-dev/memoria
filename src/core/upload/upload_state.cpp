@@ -26,13 +26,15 @@ auto stageText(const Stage stage) -> std::string_view
             return "cut_off";
         case Stage::Rescued:
             return "rescued";
+        case Stage::TooLarge:
+            return "too_large";
     }
     return "open";
 }
 
 auto parseStage(const std::string_view state) -> Stage
 {
-    for (const auto stage : { Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued })
+    for (const auto stage : { Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued, Stage::TooLarge })
     {
         if (state == stageText(stage))
         {
