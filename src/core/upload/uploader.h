@@ -81,7 +81,6 @@ public:
     [[nodiscard]] auto saveError() const -> std::string;                          // empty after a good save
     [[nodiscard]] auto takeUnauthorized() -> bool;                                // true once per 401 that deleted the token
     [[nodiscard]] auto takeTooLarge() -> std::vector<UploadStatus>;               // captures a 413 stopped since the last call, with Mogsafe's reason
-    [[nodiscard]] auto takeFull() -> bool;                                        // true once each time Mogsafe starts answering 507
     [[nodiscard]] auto ended(const std::string& name) const -> bool;              // Mogsafe ended this file's upload before it closed
     [[nodiscard]] auto recordingId(const std::string& name) const -> std::string; // Mogsafe's id for this file, the end of its upload's URL; empty before it has one
 
@@ -110,7 +109,6 @@ private:
     bool                      last_{};   // upload thread only: finish() is sending the last bytes
     bool                      full_{};   // upload thread only: this pass met a 507
     std::vector<UploadStatus> tooLarge_; // under mutex_
-    std::atomic<bool>         fullNews_{ false };
     std::atomic<bool>         loaded_{ false };
 
     std::thread              thread_;

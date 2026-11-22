@@ -34,10 +34,8 @@ auto oneLine(std::string text) -> std::string
     return last == std::string::npos ? std::string{} : text.substr(0, last + 1);
 }
 
-auto fullError() -> std::string
-{
-    return std::format("Mogsafe is short of disk space; next try in {} minutes", FULL_WAIT.count());
-}
+// A 507: Mogsafe's disk is nearly full, which players are not told.
+constexpr auto FULL = "Failed to upload, will try again later";
 
 } // namespace
 
@@ -169,7 +167,7 @@ auto Uploader::uploadAll() -> std::optional<std::string>
 {
     uploading_ = true; // tests call this directly
     load();
-    const bool                 wasFull = std::exchange(full_, false);
+    full_ = false;
     std::optional<std::string> first;
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
@@ -200,10 +198,6 @@ auto Uploader::uploadAll() -> std::optional<std::string>
         }
         const std::scoped_lock lock(mutex_);
         files_[name] = f;
-    }
-    if (full_ && !wasFull)
-    {
-        fullNews_ = true;
     }
     if (const auto error = save())
     {
@@ -247,7 +241,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         if (res->status == 507)
         {
             full_ = true;
-            return fullError();
+            return FULL;
         }
         if (res->status != 201)
         {
@@ -353,7 +347,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
     if (sent->answer && sent->answer->status == 507)
     {
         full_ = true;
-        return fullError();
+        return FULL;
     }
     if (sent->answer)
     {
@@ -461,11 +455,6 @@ auto Uploader::takeTooLarge() -> std::vector<UploadStatus>
 {
     const std::scoped_lock lock(mutex_);
     return std::exchange(tooLarge_, {});
-}
-
-auto Uploader::takeFull() -> bool
-{
-    return fullNews_.exchange(false);
 }
 
 auto Uploader::file(const std::string& name) const -> UploadFile

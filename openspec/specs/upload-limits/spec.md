@@ -13,8 +13,8 @@ When Mogsafe answers an append with `413`, Memoria SHALL stop sending that captu
 - **THEN** Memoria says "Mogsafe refused <name>: a live recording may hold at most 2.0 GiB. Memoria stopped sending it; it stays on this PC.", sends no more of it, and counts none of it as left to send
 
 ### Requirement: A full Mogsafe disk waits half an hour
-When Mogsafe answers a create or an append with `507`, Memoria SHALL end the pass, send nothing for 30 minutes, then try again, and keep every file. It SHALL say so once in chat until a pass gets through, and `/memoria status` SHALL show it as the uploads' error.
+When Mogsafe answers a create or an append with `507`, Memoria SHALL end the pass, send nothing for 30 minutes, then try again, and keep every file. It SHALL print no chat line, and `/memoria status` SHALL show it as the uploads' error without naming Mogsafe's disk.
 
 #### Scenario: Mogsafe runs short of disk
 - **WHEN** Mogsafe answers `507`
-- **THEN** Memoria says "Mogsafe is short of disk space. Uploads try again every 30 minutes; your captures stay on this PC.", `/memoria status` shows "retrying, Mogsafe is short of disk space; next try in 30 minutes", and uploads resume on the first try after Mogsafe has room
+- **THEN** Memoria says nothing in chat, `/memoria status` shows "retrying, Failed to upload, will try again later", and uploads resume on the first try after Mogsafe has room

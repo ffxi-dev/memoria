@@ -257,10 +257,6 @@ auto Session::frame() -> void
         {
             say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)) + " Memoria stopped sending it; it stays on this PC.");
         }
-        if (uploader_->takeFull())
-        {
-            say(paint(Color::Yellow, "Mogsafe is short of disk space.") + std::format(" Uploads try again every {} minutes; your captures stay on this PC.", upload::FULL_WAIT.count()));
-        }
     }
     std::erase_if(closing_, [](const auto& l)
                   {
@@ -400,7 +396,7 @@ auto Session::linked() const -> std::optional<Linked>
 auto Session::sayUnlinked(const std::string& why) -> void
 {
     stopLive();
-    say(paint(Color::Yellow, why + ".") + " Your captures stay on this PC until you run " + paint(Color::Cyan, "/memoria link") + ".");
+    say(paint(Color::Yellow, why + ".") + " Your captures remain local until you run " + paint(Color::Cyan, "/memoria link") + ".");
 }
 
 auto Session::hello() -> std::string
