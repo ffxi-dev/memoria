@@ -34,6 +34,11 @@ auto oneLine(std::string text) -> std::string
     return last == std::string::npos ? std::string{} : text.substr(0, last + 1);
 }
 
+auto fullError() -> std::string
+{
+    return std::format("Mogsafe is short of disk space; next try in {} minutes", FULL_WAIT.count());
+}
+
 } // namespace
 
 Uploader::Uploader(UploadOptions options, std::unique_ptr<Http> http)
@@ -77,7 +82,14 @@ auto Uploader::run() -> void
         {
             failed = true;
         }
-        wait = failed ? std::min(wait * 2, options_.every * MAX_WAIT_PASSES) : options_.every;
+        if (full_)
+        {
+            wait = FULL_WAIT;
+        }
+        else
+        {
+            wait = failed ? std::min(wait * 2, options_.every * MAX_WAIT_PASSES) : options_.every;
+        }
 
         std::unique_lock lock(wakeMutex_);
         if (wake_.wait_for(lock, wait, [this]
@@ -157,11 +169,12 @@ auto Uploader::uploadAll() -> std::optional<std::string>
 {
     uploading_ = true; // tests call this directly
     load();
+    const bool                 wasFull = std::exchange(full_, false);
     std::optional<std::string> first;
     std::error_code            ec;
     for (const auto& entry : std::filesystem::directory_iterator(options_.dir, ec))
     {
-        if (stop_.stop_requested() || finishing_ || !tus_.allowed())
+        if (stop_.stop_requested() || finishing_ || full_ || !tus_.allowed()) // a full disk is Mogsafe's, so every file would meet it
         {
             break;
         }
@@ -187,6 +200,10 @@ auto Uploader::uploadAll() -> std::optional<std::string>
         }
         const std::scoped_lock lock(mutex_);
         files_[name] = f;
+    }
+    if (full_ && !wasFull)
+    {
+        fullNews_ = true;
     }
     if (const auto error = save())
     {
@@ -226,6 +243,11 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         if (!res)
         {
             return res.error();
+        }
+        if (res->status == 507)
+        {
+            full_ = true;
+            return fullError();
         }
         if (res->status != 201)
         {
@@ -315,6 +337,23 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
     {
         applyEnded(f, *sent->answer);
         return std::nullopt;
+    }
+    if (sent->answer && sent->answer->status == 413) // past a size limit, which no retry passes: keep the file, stop sending it
+    {
+        f.stage  = Stage::TooLarge;
+        f.reason = oneLine(sent->answer->body.substr(0, sent->answer->body.find(';'))); // Mogsafe's reason, without what it asks of the client
+        if (f.reason.empty())
+        {
+            f.reason = "past Mogsafe's size limit";
+        }
+        const std::scoped_lock lock(mutex_);
+        tooLarge_.push_back({ .name = path.filename().string(), .error = f.reason });
+        return std::nullopt;
+    }
+    if (sent->answer && sent->answer->status == 507)
+    {
+        full_ = true;
+        return fullError();
     }
     if (sent->answer)
     {
@@ -418,6 +457,17 @@ auto Uploader::takeUnauthorized() -> bool
     return tus_.takeUnauthorized();
 }
 
+auto Uploader::takeTooLarge() -> std::vector<UploadStatus>
+{
+    const std::scoped_lock lock(mutex_);
+    return std::exchange(tooLarge_, {});
+}
+
+auto Uploader::takeFull() -> bool
+{
+    return fullNews_.exchange(false);
+}
+
 auto Uploader::file(const std::string& name) const -> UploadFile
 {
     auto files = snapshot().first;
@@ -427,7 +477,7 @@ auto Uploader::file(const std::string& name) const -> UploadFile
 auto Uploader::ended(const std::string& name) const -> bool
 {
     const auto stage = file(name).stage;
-    return stage != Stage::Open && stage != Stage::Closed;
+    return stage != Stage::Open && stage != Stage::Closed && stage != Stage::TooLarge;
 }
 
 auto Uploader::recordingId(const std::string& name) const -> std::string
@@ -449,7 +499,7 @@ auto Uploader::status() const -> std::vector<UploadStatus>
         }
         const auto& f    = files[entry.path().filename().string()];
         const auto  size = fromDisk || f.size == 0 ? entry.file_size(ec) : f.size;
-        const bool  refused{ f.stage != Stage::Closed && f.refusedAt == size && !f.reason.empty() };
+        const bool  refused{ f.stage == Stage::TooLarge || (f.stage != Stage::Closed && f.refusedAt == size && !f.reason.empty()) };
         const bool  sending{ f.stage == Stage::Open || f.stage == Stage::CutOff };
         out.push_back({ .name = entry.path().filename().string(), .sent = sending ? f.sent : size, .size = size, .refused = refused, .cutOff = f.stage == Stage::CutOff, .foreign = !f.deniedFor.empty(), .error = refused ? f.reason : f.error });
     }

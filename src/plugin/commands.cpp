@@ -125,7 +125,7 @@ auto Session::sayUploads() -> void
     }
     for (const auto& u : files | std::views::filter(&upload::UploadStatus::refused))
     {
-        say(paint(Color::Red, std::format("Mogsafe refused {}: {}", u.name, u.error)));
+        say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)) + " It stays on this PC.");
     }
 }
 

@@ -789,7 +789,7 @@ TEST_CASE("each upload stage survives the state file")
 {
     const auto  dir = tempDir();
     UploadFiles files;
-    for (const auto stage : { Stage::Open, Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued })
+    for (const auto stage : { Stage::Open, Stage::Closed, Stage::Ended, Stage::CutOff, Stage::Rescued, Stage::TooLarge })
     {
         files[std::format("{}.xicap", std::to_underlying(stage))] = { .url = "https://mogsafe.test/v1/uploads/1", .stage = stage, .refusedAt = 7, .sent = 5, .reason = "too old" };
     }
@@ -823,4 +823,71 @@ TEST_CASE("upload totals count what is left to send, what stays on this PC, and 
     CHECK(t.cut == 1);
     CHECK(t.foreign == 1);
     CHECK(t.error == "create: 503");
+}
+
+TEST_CASE("a capture past Mogsafe's size limit stops for good, stays on this PC, and is said once")
+{
+    const auto  dir  = tempDir();
+    const auto  file = dir / "a.xicap";
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+    append(file, std::string(500, 'x'));
+    CHECK(!up->uploadAll());
+    append(file, std::string(100, 'x'));
+    server.forced["PATCH"] = { 413 };
+    CHECK(!up->uploadAll()); // not an error to retry
+    auto stopped = up->takeTooLarge();
+    REQUIRE(stopped.size() == 1);
+    CHECK(stopped[0].name == "a.xicap");
+    CHECK(stopped[0].error == "forced");
+    CHECK(up->takeTooLarge().empty());
+    CHECK(!up->ended("a.xicap")); // the recorder goes on in the same file
+    REQUIRE(up->status()[0].refused);
+    CHECK(up->status()[0].error == "forced");
+    CHECK(totals(up->status()).behind == 0);
+
+    append(file, std::string(100, 'x'));
+    const auto requests = server.requests;
+    CHECK(!up->uploadAll());
+    up.reset();
+    auto again = uploader(dir, server);
+    CHECK(!again->uploadAll());
+    CHECK(server.requests == requests);
+    CHECK(again->takeTooLarge().empty());
+    CHECK(again->status()[0].refused);
+    CHECK(server.uploads.begin()->second.data.size() == 500);
+    CHECK(fs::file_size(file) == 700);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a full Mogsafe disk stops the pass, shows in status, and is said once until a pass gets through")
+{
+    const auto  dir = tempDir();
+    FakeMogsafe server;
+    auto        up = uploader(dir, server);
+    append(dir / "a.xicap", std::string(500, 'x'));
+    append(dir / "b.xicap", std::string(500, 'x'));
+
+    server.forced["POST"] = { 507 };
+    const auto error      = up->uploadAll();
+    REQUIRE(error);
+    CHECK(error->find("short of disk space") != std::string::npos);
+    CHECK(server.requests == 1); // b is not tried
+    CHECK(up->takeFull());
+    CHECK(!up->takeFull());
+    CHECK(totals(up->status()).error.find("short of disk space") != std::string::npos);
+
+    CHECK(!up->uploadAll()); // space again
+    CHECK(server.creates == 2);
+    append(dir / "a.xicap", std::string(100, 'x'));
+    server.forced["PATCH"] = { 507, 507 };
+    CHECK(up->uploadAll());
+    CHECK(up->takeFull());
+    append(dir / "a.xicap", std::string(100, 'x'));
+    CHECK(up->uploadAll());
+    CHECK(!up->takeFull()); // still full: said already
+    CHECK(!up->status()[0].refused);
+    CHECK(!up->uploadAll());
+    CHECK(server.uploads.begin()->second.data == readAll(dir / "a.xicap"));
+    fs::remove_all(dir);
 }

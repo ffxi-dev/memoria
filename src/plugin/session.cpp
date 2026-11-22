@@ -251,6 +251,17 @@ auto Session::frame() -> void
     {
         sayUnlinked(REFUSED);
     }
+    if (uploader_)
+    {
+        for (const auto& u : uploader_->takeTooLarge())
+        {
+            say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)) + " Memoria stopped sending it; it stays on this PC.");
+        }
+        if (uploader_->takeFull())
+        {
+            say(paint(Color::Yellow, "Mogsafe is short of disk space.") + std::format(" Uploads try again every {} minutes; your captures stay on this PC.", upload::FULL_WAIT.count()));
+        }
+    }
     std::erase_if(closing_, [](const auto& l)
                   {
                       return l->finished();
