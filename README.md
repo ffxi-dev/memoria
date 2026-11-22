@@ -9,6 +9,8 @@ Download `Memoria.dll` from the [releases](https://github.com/ffxi-dev/memoria/r
 - Ashita: put it in `<Ashita>/plugins/`, and run `/load memoria` in game or add it to your boot script.
 - Windower: put it in `<Windower>/plugins/`, and run `load memoria` in the console or add it to `scripts/init.txt`.
 
+To check that a `Memoria.dll` was built by this repository's release workflow: `gh attestation verify Memoria.dll --repo ffxi-dev/memoria`.
+
 ## Commands
 
 In Windower, type `//memoria` in chat or `memoria` in the console.

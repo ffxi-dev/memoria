@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -27,6 +29,9 @@ jobs:
           base="${version%%-*}"
           suffix="${version#"$base"}"
           grep -q "project(memoria VERSION ${base} " CMakeLists.txt && grep -q "set(MEMORIA_PRERELEASE \"${suffix#-}\")" CMakeLists.txt || { echo "tag $GITHUB_REF_NAME does not match CMakeLists.txt" >&2; exit 1; }
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: out/Memoria.dll
       - id: sum
         run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v3
