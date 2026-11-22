@@ -255,7 +255,7 @@ auto Session::frame() -> void
     {
         for (const auto& u : uploader_->takeTooLarge())
         {
-            say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)) + " Memoria stopped sending it; it stays on this PC.");
+            say(paint(Color::Red, std::format("Mogsafe refused {}: {}.", u.name, u.error)));
         }
     }
     std::erase_if(closing_, [](const auto& l)

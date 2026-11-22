@@ -24,6 +24,8 @@ namespace memoria::upload
 // How long uploads wait after Mogsafe answers 507. Its disk fills only when the owner has to act, and a try each half hour
 // costs nothing and resumes on its own.
 inline constexpr auto FULL_WAIT = std::chrono::minutes(30);
+// A 507's error: Mogsafe's disk is nearly full, which players are not told.
+inline constexpr auto FULL_ERROR = "will try again later";
 
 struct UploadOptions
 {

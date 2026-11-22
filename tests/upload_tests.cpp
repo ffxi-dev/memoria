@@ -871,9 +871,9 @@ TEST_CASE("a full Mogsafe disk stops the pass, shows in status without saying wh
     server.forced["POST"] = { 507 };
     const auto error      = up->uploadAll();
     REQUIRE(error);
-    CHECK(error->ends_with("Failed to upload, will try again later"));
+    CHECK(error->ends_with(FULL_ERROR));
     CHECK(server.requests == 1); // b is not tried
-    CHECK(totals(up->status()).error == "Failed to upload, will try again later");
+    CHECK(totals(up->status()).error == FULL_ERROR);
 
     CHECK(!up->uploadAll()); // space again
     CHECK(server.creates == 2);

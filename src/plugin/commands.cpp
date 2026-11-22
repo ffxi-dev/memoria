@@ -99,7 +99,11 @@ auto Session::sayUploads() -> void
     const auto files                               = uploader_->status();
     const auto [behind, kept, cut, foreign, error] = upload::totals(files);
     const auto account                             = paint(Color::Grey, " · linked to " + link->account);
-    if (!error.empty())
+    if (error == upload::FULL_ERROR)
+    {
+        say("Uploads: " + paint(Color::Yellow, error) + account);
+    }
+    else if (!error.empty())
     {
         say("Uploads: " + paint(Color::Red, "retrying, " + error) + account);
     }

@@ -34,9 +34,6 @@ auto oneLine(std::string text) -> std::string
     return last == std::string::npos ? std::string{} : text.substr(0, last + 1);
 }
 
-// A 507: Mogsafe's disk is nearly full, which players are not told.
-constexpr auto FULL = "Failed to upload, will try again later";
-
 } // namespace
 
 Uploader::Uploader(UploadOptions options, std::unique_ptr<Http> http)
@@ -241,7 +238,7 @@ auto Uploader::step(const std::filesystem::path& path, UploadFile& f, const std:
         if (res->status == 507)
         {
             full_ = true;
-            return FULL;
+            return FULL_ERROR;
         }
         if (res->status != 201)
         {
@@ -347,7 +344,7 @@ auto Uploader::send(const std::filesystem::path& path, UploadFile& f, const uint
     if (sent->answer && sent->answer->status == 507)
     {
         full_ = true;
-        return FULL;
+        return FULL_ERROR;
     }
     if (sent->answer)
     {
