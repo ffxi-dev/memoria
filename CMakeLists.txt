@@ -141,8 +141,8 @@ if(MEMORIA_BUILD_TESTS)
     )
     target_link_libraries(memoria_core_tests PRIVATE memoria_core nlohmann_json::nlohmann_json Catch2::Catch2WithMain)
     if(WIN32)
-        # advapi32 for ownerOnly; the WinHTTP and text tests compile the plugin's network and text code.
-        target_sources(memoria_core_tests PRIVATE tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
+        # advapi32 for ownerOnly; the WinHTTP, Mogsafe, and text tests compile the plugin's network and text code.
+        target_sources(memoria_core_tests PRIVATE tests/mogsafe_tests.cpp tests/text_tests.cpp tests/winhttp_tests.cpp src/plugin/live.cpp src/plugin/text.cpp src/plugin/winhttp.cpp)
         target_link_libraries(memoria_core_tests PRIVATE advapi32 bcrypt winhttp ws2_32 shell32 ole32)
         target_compile_definitions(memoria_core_tests PRIVATE MEMORIA_VERSION_TEXT="test")
     endif()
