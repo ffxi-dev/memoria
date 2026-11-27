@@ -34,10 +34,24 @@ jobs:
           subject-path: out/Memoria.dll
       - id: sum
         run: echo "sha256=$(sha256sum out/Memoria.dll | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      # What the release is, for people and for other bricks' checks: the DLL's hash, the xicap release it writes
+      # with, the Mogsafe API it uploads to, and the commit the ci job tested (vault cross-repo-contracts, task 4.1).
+      - id: manifest
+        env:
+          SHA256: ${{ steps.sum.outputs.sha256 }}
+        run: |
+          xicap=$(sed -nE 's|.*xicap/archive/refs/tags/v([0-9.]+)\.tar\.gz.*|\1|p' CMakeLists.txt)
+          jq -n --arg v "${GITHUB_REF_NAME#v}" --arg xicap "$xicap" --arg commit "$GITHUB_SHA" --arg sum "$SHA256" \
+            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{
+              memoria: $v, commit: $commit, tested: $run, dll_sha256: $sum, xicap: $xicap,
+              uploads: "Mogsafe /v1/uploads: tus 1.0.0 with a deferred length, then POST <upload>/close with the SHA-256"
+            }' > out/manifest.json
+          echo "xicap=$xicap" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v3
         with:
           files: |
             out/Memoria.dll
+            out/manifest.json
             THIRD_PARTY_NOTICES.md
-          body: SHA-256 ${{ steps.sum.outputs.sha256 }}
+          body: SHA-256 ${{ steps.sum.outputs.sha256 }}. Writes with xicap ${{ steps.manifest.outputs.xicap }}; manifest.json says what this release is and which run tested it.
           prerelease: ${{ contains(github.ref_name, '-') }}
